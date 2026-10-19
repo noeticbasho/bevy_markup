@@ -471,10 +471,15 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
   all-dirty workload turns the pairing off (retried every 16th build;
   restyle passes preserve the strike counters — their reuse rate says
   nothing about content-pairing utility). Every tag pair that matches
-  (tag, attributes, child count) is paired even when its subtree changed —
-  the inherited-style gate reads the changed container's cached spec;
+  (tag, attributes) is paired even when its subtree changed — the
+  inherited-style gate reads the changed container's cached spec;
   `clean` alone gates reuse (bug_0150: pairing only clean nodes made
-  every child of a changed container re-collect). Per sibling list, an element whose `id` is unique among the old *and* new
+  every child of a changed container re-collect). Sibling lists align
+  by position when their counts match, else by their common head and
+  tail (`align_siblings`, identical source from each end) and the middle
+  by position (ADR 0033, bug_0168); a container whose count changed is
+  paired but not clean, and an `li` moved to another ordinal leaves the
+  clean set (its marker number changed). Per sibling list, an element whose `id` is unique among the old *and* new
   siblings is matched by it, the rest by position among themselves (a
   duplicated `id` keys nothing — keying it looped: the second copy was
   respawned on every restyle its `PseudoState` triggered). A match with the
@@ -943,13 +948,13 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
   heights, and `WindowModel::clear`, set `remeasure` (every keyed entity
   is measured once, bug_0163/bug_0166). The cached skip refreshes a
   reused root's `WindowKey` with its `DomNode` (bug_0169). `CursorFrame`
-  isn't `Clone`: its cells are shared state (bug_0165). Opaque marks
-  follow the node both ways (`Changed<Node>` re-measures, a flip is
-  news, bug_0171); `positioned` marks only grow. Known costs, in
-  `HtmlWindowed`'s docs: one inserted row builds the rest of its list
-  for a frame (bug_0168, open: siblings align by position), and rows
-  above the band that change height shift the view for one frame past
-  the margin (bug_0170; also row flips inside containers and a width
+  isn't `Clone`: its cells are shared state (bug_0165). `positioned`
+  marks only grow. An unmeasured element (a new one) advances the
+  cursor by its measured siblings' mean height (`WindowCtx::estimate`,
+  ADR 0033); a frame with no measured child, or a `positioned` child,
+  still invalidates. Known cost, in `HtmlWindowed`'s docs: rows above
+  the band that change height (or an insertion whose height differs
+  from the estimate) shift the view for one frame past the margin (bug_0170; also row flips inside containers and a width
   change's first frame). Walked-through elements (`html`, `body`) stay in
   the walk — no root unwrap (bug_0172: it lost `body`'s style for every
   UI); `column_height` advances the cursor by their children, itemless

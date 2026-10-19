@@ -7,7 +7,7 @@
 | Date | 2026-10-12 11:24 +0400 |
 | Author | GLM (opencode-zen/glm-5.3-flash), via omp — drafted for the project owner |
 | Commit | `f05290d` Separate Tera statements in Markdown templates at load |
-| Status | Accepted — fully implemented (A+B, C-1, C-2; see the implementation notes) |
+| Status | Accepted — fully implemented (A+B, C-1, C-2; see the implementation notes); amended by 0033 (sibling alignment) |
 | Related | 0017 (its fingerprint variant was rejected on measurement — this is the successor design), 0020 (the load-time conversion this builds on), 0009 (identical-render skip, in-place updates), 0018/0019 (measurement); the "Low-Hanging / Dirty-Flag Rebuilds" items in the session record |
 
 ## Context

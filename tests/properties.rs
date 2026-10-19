@@ -151,6 +151,92 @@ fn content_update_matches_a_fresh_build(
     prop_assert_eq!(actual, expected);
 }
 
+/// Fragments for [`one_insertion_or_removal_matches_a_fresh_build`]:
+/// repeated rows (the head/tail alignment must not pair a moved row with
+/// its twin wrongly), list items (an `ol`'s markers count positions),
+/// rows with ids and a nested list.
+const ROWS: &[&str] = &[
+    "<p>row</p>",
+    "<p>row</p>",
+    r#"<p class="hot">hot</p>"#,
+    r#"<p id="k">keyed</p>"#,
+    "<li>item</li>",
+    "<li>item two</li>",
+    r#"<div class="box"><p>boxed</p></div>"#,
+];
+
+/// bug_0168's alignment: document B is document A with one fragment
+/// inserted or removed — at the top level, inside a `section` or inside
+/// an `ol` — and the updated world equals a fresh build of B, under a
+/// sheet whose matches depend on siblings and positions (`+`, `~`,
+/// `:first-child`, `:nth-child`) or a plain one, and with `ol` numbering.
+#[proptest(cases = 64)]
+fn one_insertion_or_removal_matches_a_fresh_build(
+    #[strategy(proptest::collection::vec(0..ROWS.len(), 1..8))] rows: Vec<usize>,
+    #[strategy(0usize..8)] at: usize,
+    #[strategy(0..ROWS.len())] inserted: usize,
+    #[strategy(0usize..3)] wrapper: usize,
+    remove: bool,
+    positional: bool,
+) {
+    let mut changed = rows.clone();
+    let at = at % (rows.len() + usize::from(!remove));
+    if remove {
+        changed.remove(at.min(rows.len() - 1));
+    } else {
+        changed.insert(at, inserted);
+    }
+    let doc = |picks: &[usize]| {
+        let body: String = picks.iter().map(|&i| ROWS[i]).collect();
+        match wrapper {
+            0 => format!("<p>first</p>{body}<p>last</p>"),
+            1 => format!("<p>first</p><section>{body}</section><p>last</p>"),
+            _ => format!("<p>first</p><ol>{body}</ol><p>last</p>"),
+        }
+    };
+    let page = "{{ doc | safe }}";
+    // A positional sheet un-cleans every child of a changed list anyway;
+    // a plain one leaves only the `ol` numbering to catch a moved `li`.
+    let css = if positional {
+        "html { color: #ffffff } .hot + p { color: #ff0000 } .hot ~ li { color: #00ff00 } \
+         p:first-child { font-weight: bold } li:nth-child(2) { color: #0000ff } \
+         .box { padding: 4px; background-color: #102030 }"
+    } else {
+        "html { color: #ffffff } .hot { color: #ff0000 } .box { padding: 4px; background-color: #102030 }"
+    };
+    let mut updated = TestUi::new("prop-align", &[("page.html", page), ("style.css", css)])
+        .stylesheet("style.css")
+        .spawn(
+            "page.html",
+            TemplateContext::new().with("doc", &doc(&rows)),
+            Node::default(),
+        );
+    updated.settle();
+    let root = updated.root();
+    updated
+        .world_mut()
+        .get_mut::<TemplateContext>(root)
+        .unwrap()
+        .insert("doc", &doc(&changed));
+    let mut fresh = TestUi::new(
+        "prop-align-fresh",
+        &[("page.html", page), ("style.css", css)],
+    )
+    .stylesheet("style.css")
+    .spawn(
+        "page.html",
+        TemplateContext::new().with("doc", &doc(&changed)),
+        Node::default(),
+    );
+    let expected = fresh.settle().dump();
+    let actual = if doc(&rows) == doc(&changed) {
+        updated.settle_quiet().dump()
+    } else {
+        updated.settle().dump()
+    };
+    prop_assert_eq!(actual, expected);
+}
+
 /// `padding: T R` builds the same world as the four longhands.
 #[proptest(cases = 24)]
 fn padding_shorthand_equals_longhands(#[strategy(0u8..40)] t: u8, #[strategy(0u8..40)] r: u8) {

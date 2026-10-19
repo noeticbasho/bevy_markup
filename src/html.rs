@@ -141,12 +141,13 @@ pub struct HtmlDebugOutline;
 /// row: give `html` `flex-direction: column`) windows nothing.
 ///
 /// Content changes cost more than scrolling. An element whose content
-/// changed builds for one frame to be measured. Adding or removing an
-/// element builds the rest of its container (the root's, for a top-level
-/// row) for one frame. A change that grows or shrinks the rows above the
-/// viewport by more than the margin in one step leaves part of the
-/// viewport unbuilt for that frame (so does the first frame after the
-/// root's width changes); the next frame corrects it.
+/// changed, or a new one, builds for one frame to be measured; the rows
+/// after a new element are placed by its siblings' average height until
+/// then. A change that grows or shrinks the rows above the viewport by
+/// more than the margin in one step (or an added element much taller or
+/// shorter than its siblings) leaves part of the viewport unbuilt for
+/// that frame, as does the first frame after the root's width changes;
+/// the next frame corrects it.
 #[derive(Component, Clone, Copy, Debug, Reflect)]
 #[reflect(Component, Default)]
 pub struct HtmlWindowed {

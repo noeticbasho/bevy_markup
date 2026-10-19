@@ -37,7 +37,7 @@ as `[INFERENCE]`.
 | [0018](./0018-benchmarks-with-criterion.md) | Benchmarking with Criterion | Accepted |
 | [0019](./0019-benchmarks-with-divan.md) | Benchmarking with Divan (the second harness; allocation counts) | Accepted |
 | [0020](./0020-convert-markdown-at-template-load.md) | Convert Markdown at template load, not per render | Accepted |
-| [0021](./0021-per-element-dirty-tracking.md) | Per-element dirty tracking: dependency maps at load, slot-local updates per frame | Accepted (fully implemented) |
+| [0021](./0021-per-element-dirty-tracking.md) | Per-element dirty tracking: dependency maps at load, slot-local updates per frame | Accepted (fully implemented); amended by 0033 |
 | [0022](./0022-text-inputs-without-maxlength-or-placeholder.md) | Text inputs carry no `maxlength` or `placeholder` | Superseded in part (its `maxlength` half) by [0023](./0023-maxlength-maps-to-max-characters.md) |
 | [0023](./0023-maxlength-maps-to-max-characters.md) | `maxlength` maps to the widget's `max_characters` | Accepted |
 | [0024](./0024-tera-block-indentation-is-not-markdown.md) | Indentation inside Tera blocks is not Markdown | Accepted |
@@ -48,6 +48,7 @@ as `[INFERENCE]`.
 | [0029](./0029-restyle-reuse.md) | Restyle reuse: dependency-tracked re-cascade instead of full restyles | Accepted |
 | [0030](./0030-compounds-match-whole-in-every-position.md) | Compounds match whole in every position | Accepted |
 | [0031](./0031-windowed-build-spec-level-culling.md) | Windowed build: spec-level viewport culling with height-preserving spacers | Accepted; amended by 0032 |
-| [0032](./0032-windowed-build-revised.md) | Windowed build, revised: one unit system, nested culling, scroll reuse and slack | Accepted |
+| [0032](./0032-windowed-build-revised.md) | Windowed build, revised: one unit system, nested culling, scroll reuse and slack | Accepted; amended by 0033 |
+| [0033](./0033-sibling-alignment-and-height-estimates.md) | Sibling alignment and height estimates for content changes | Accepted |
 
 Add new records to this index in the same commit that adds the file.

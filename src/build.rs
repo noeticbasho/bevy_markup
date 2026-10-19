@@ -4716,6 +4716,33 @@ impl WindowCtx<'_> {
         }
     }
 
+    /// ADR 0033: the outer height an unmeasured child is assumed to have —
+    /// the mean of its measured siblings' (`None` when none is measured: the
+    /// first build, or a cleared model). A new element's height exists only
+    /// after its first layout; invalidating the cursor at it built every
+    /// row after an insertion (bug_0168). The estimate places the rows
+    /// after it for that one frame; the measurement corrects it.
+    fn estimate(&self, children: &[tl::NodeHandle]) -> Option<f32> {
+        let (sum, count) = children
+            .iter()
+            .filter(|child| !self.model.positioned.contains(*child))
+            .filter_map(|child| self.model.heights.get(child))
+            .fold((0.0, 0usize), |(sum, count), &(_, outer)| {
+                (sum + outer, count + 1)
+            });
+        (count > 0).then(|| sum / count as f32)
+    }
+
+    /// The cursor step an unmeasured child is estimated at, if it may be:
+    /// never for one the measurement marked untrackable (out of flow or an
+    /// `auto` margin — it takes no space, or none the cursor knows).
+    fn estimate_for(&self, child: tl::NodeHandle, estimate: Option<f32>, gap: f32) -> Option<f32> {
+        if self.model.positioned.contains(&child) {
+            return None;
+        }
+        estimate.map(|outer| outer + gap)
+    }
+
     /// A new cursor frame for a container's children, when the container
     /// is one the vertical cursor can track.
     fn frame_for(&self, parent_frame: usize, top: f32, gap: f32, opaque: bool) -> Option<usize> {
@@ -4932,18 +4959,29 @@ fn pair_trees_into(
     clean: &mut HashSet<tl::NodeHandle>,
     reads: SelectorReads,
 ) {
-    for (old_child, fresh_child) in old.children().iter().zip(fresh.children().iter()) {
+    let mut shifted = Vec::new();
+    let pairs = align_siblings(
+        old.parser(),
+        old.children(),
+        fresh.parser(),
+        fresh.children(),
+        &mut shifted,
+    );
+    for (old_child, fresh_child) in pairs {
         pair_node(
             old.parser(),
-            *old_child,
+            old_child,
             fresh.parser(),
-            *fresh_child,
+            fresh_child,
             pairing,
             reverse,
             clean,
             0,
             reads,
         );
+    }
+    for handle in shifted {
+        clean.remove(&handle);
     }
     let change = sibling_change(
         old.parser(),
@@ -5097,6 +5135,8 @@ fn pair_node(
     }
     let mut all = true;
     let mut parents: Vec<Parent> = Vec::new();
+    // `li`s an alignment moved: their marker numbers changed.
+    let mut shifted: Vec<tl::NodeHandle> = Vec::new();
     let mut stack = vec![Task::Pair {
         old,
         fresh,
@@ -5157,14 +5197,25 @@ fn pair_node(
                     }
                     let (old_children, fresh_children) = (old_tag.children(), fresh_tag.children());
                     let (old_children, fresh_children) = (old_children.top(), fresh_children.top());
-                    if old_children.len() != fresh_children.len() || depth + 1 >= MAX_DOM_DEPTH {
+                    if depth + 1 >= MAX_DOM_DEPTH {
                         break 'pair false;
                     }
+                    // A changed child count still pairs the tag and its
+                    // aligned children (bug_0168): unpaired, the whole
+                    // subtree lost its reuse and its window heights.
+                    let same_count = old_children.len() == fresh_children.len();
+                    let pairs = align_siblings(
+                        old_parser,
+                        old_children.as_slice(),
+                        fresh_parser,
+                        fresh_children.as_slice(),
+                        &mut shifted,
+                    );
                     let index = parents.len();
                     parents.push(Parent {
                         old,
                         fresh,
-                        all: true,
+                        all: same_count,
                         siblings: sibling_change(
                             old_parser,
                             old_children.as_slice(),
@@ -5178,10 +5229,10 @@ fn pair_node(
                         parent: index,
                         grandparent: parent,
                     });
-                    for (old_child, fresh_child) in old_children.iter().zip(fresh_children.iter()) {
+                    for (old_child, fresh_child) in pairs {
                         stack.push(Task::Pair {
-                            old: *old_child,
-                            fresh: *fresh_child,
+                            old: old_child,
+                            fresh: fresh_child,
                             depth: depth + 1,
                             parent: Some(index),
                         });
@@ -5231,7 +5282,96 @@ fn pair_node(
             }
         }
     }
+    for handle in shifted {
+        clean.remove(&handle);
+    }
     all
+}
+
+/// Which old child pairs with which fresh one. Equal counts pair by
+/// position. A changed count (an insertion or removal: bug_0168) pairs the
+/// common head and the common tail — children whose source is identical,
+/// scanned from each end — and the rest of the middle by position, so one
+/// inserted row no longer pairs every row after it with its neighbour
+/// (each unclean, re-collected, and in a windowed UI built). Pairing never
+/// claims cleanness: `pair_node` decides that per pair. An `li` moved to
+/// another index changed its marker number, so it goes into `shifted`
+/// (removed from the clean set once the pairing completes).
+fn align_siblings(
+    old_parser: &tl::Parser,
+    old: &[tl::NodeHandle],
+    fresh_parser: &tl::Parser,
+    fresh: &[tl::NodeHandle],
+    shifted: &mut Vec<tl::NodeHandle>,
+) -> Vec<(tl::NodeHandle, tl::NodeHandle)> {
+    if old.len() == fresh.len() {
+        return old.iter().copied().zip(fresh.iter().copied()).collect();
+    }
+    let same = |old: tl::NodeHandle, fresh: tl::NodeHandle| {
+        same_source(old_parser, old, fresh_parser, fresh)
+    };
+    let shorter = old.len().min(fresh.len());
+    let head = (0..shorter).take_while(|&i| same(old[i], fresh[i])).count();
+    let tail = (0..shorter - head)
+        .take_while(|&i| same(old[old.len() - 1 - i], fresh[fresh.len() - 1 - i]))
+        .count();
+    let mut pairs = Vec::with_capacity(shorter);
+    pairs.extend((0..head).map(|i| (old[i], fresh[i])));
+    let (old_middle, fresh_middle) = (
+        &old[head..old.len() - tail],
+        &fresh[head..fresh.len() - tail],
+    );
+    pairs.extend(old_middle.iter().copied().zip(fresh_middle.iter().copied()));
+    let tail_pairs = (0..tail).map(|i| (old[old.len() - tail + i], fresh[fresh.len() - tail + i]));
+    pairs.extend(tail_pairs);
+    // Index-dependent content: an `li`'s marker counts the `li`s before it.
+    let ordinals =
+        |parser: &tl::Parser, list: &[tl::NodeHandle]| -> HashMap<tl::NodeHandle, usize> {
+            let mut count = 0;
+            list.iter()
+                .filter(|child| is_li(parser, **child))
+                .map(|child| {
+                    count += 1;
+                    (*child, count)
+                })
+                .collect()
+        };
+    let (old_ordinals, fresh_ordinals) = (ordinals(old_parser, old), ordinals(fresh_parser, fresh));
+    for &(old_child, fresh_child) in &pairs {
+        if old_ordinals
+            .get(&old_child)
+            .is_some_and(|ordinal| fresh_ordinals.get(&fresh_child) != Some(ordinal))
+        {
+            shifted.push(old_child);
+        }
+    }
+    pairs
+}
+
+fn is_li(parser: &tl::Parser, handle: tl::NodeHandle) -> bool {
+    matches!(handle.get(parser), Some(tl::Node::Tag(tag)) if tag.name().as_utf8_str().eq_ignore_ascii_case("li"))
+}
+
+/// The two nodes' source text is identical (a tag's covers its whole
+/// subtree): their content can't differ.
+fn same_source(
+    old_parser: &tl::Parser,
+    old: tl::NodeHandle,
+    fresh_parser: &tl::Parser,
+    fresh: tl::NodeHandle,
+) -> bool {
+    match (old.get(old_parser), fresh.get(fresh_parser)) {
+        (Some(tl::Node::Tag(old)), Some(tl::Node::Tag(fresh))) => {
+            old.raw().as_bytes() == fresh.raw().as_bytes()
+        }
+        (Some(tl::Node::Raw(old)), Some(tl::Node::Raw(fresh))) => {
+            old.as_bytes() == fresh.as_bytes()
+        }
+        (Some(tl::Node::Comment(old)), Some(tl::Node::Comment(fresh))) => {
+            old.as_bytes() == fresh.as_bytes()
+        }
+        _ => false,
+    }
 }
 
 /// Same tag name (case-insensitive) and the same attributes by name and
@@ -5500,6 +5640,7 @@ fn collect_items(
     // The roots advance the document cursor like any container's
     // children (an unknown height leaves the rest invalid).
     let mut cursor = 0.0;
+    let root_estimate = ctx.window.as_ref().and_then(|win| win.estimate(&roots));
     for handle in &roots {
         // Raw roots (a whitespace-only page's text, say) collect too —
         // with no position (they aren't elements to match).
@@ -5512,6 +5653,7 @@ fn collect_items(
                 .and_then(|frame| win.frames.borrow().get(frame).map(|frame| frame.gap))
                 .unwrap_or(0.0);
             column_height(&ctx, win, *handle, gap, 0)
+                .or_else(|| win.estimate_for(*handle, root_estimate, gap))
         });
         collect_node(
             &ctx,
@@ -5527,8 +5669,8 @@ fn collect_items(
         );
         match advance {
             Some(step) => cursor += step,
-            // No measured height (a new element, or one the cursor can't
-            // place) invalidates the cursor.
+            // No height and no estimate (no measured sibling, or an
+            // element the cursor can't place) invalidates the cursor.
             None => {
                 if let Some(frame) = root_frame {
                     ctx.window.as_ref().unwrap().frames.borrow()[frame]
@@ -6345,9 +6487,14 @@ fn collect_node(
                             // top; a walk-through's children continue its
                             // parent's column from its own top.
                             let mut cursor = if container { frame.y.get() } else { *own_y };
-                            for (child, _) in &indexed {
+                            let children: Vec<tl::NodeHandle> =
+                                indexed.iter().map(|(child, _)| *child).collect();
+                            let estimate = win.estimate(&children);
+                            for child in &children {
                                 ys.push(cursor);
-                                match column_height(&ctx, win, *child, frame.gap, depth + 1) {
+                                match column_height(&ctx, win, *child, frame.gap, depth + 1)
+                                    .or_else(|| win.estimate_for(*child, estimate, frame.gap))
+                                {
                                     Some(step) => cursor += step,
                                     None => frame.valid.set(false),
                                 }

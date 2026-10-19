@@ -412,26 +412,28 @@ fn rows(range: std::ops::RangeInclusive<usize>, text: impl Fn(usize) -> String) 
         .collect()
 }
 
-/// bug_0165: a child without a measured height must stop its frame's
-/// cull — the cursor worked on a copy of the frame, so it didn't. A row
-/// swapped for a same-height `<div>` keeps the container paired and its
-/// height true (no bug_0170 lag: this test is strict in every frame), but
-/// the `<div>` is unpaired and unmeasured: the rows after it must build
-/// that frame, or the one at the band's top edge culls 40 px too high.
+/// bug_0165: a child the cursor can't place must stop its frame's cull —
+/// the cursor worked on a copy of the frame, so the stop was lost. Under
+/// ADR 0033 a *new* element is estimated from its siblings; a child with an
+/// `auto` margin is never estimated (the measurement can't resolve it, so
+/// it has no height and is marked untrackable): the rows after it build,
+/// or they culled by a cursor short of its height — in every frame, not
+/// just the first (this test is strict in all of them).
 #[test]
 fn an_unmeasured_child_stops_its_frame_culling() {
     let page = format!(
-        "<section class=\"sec\">{}{{% if f %}}<p id=\"swap\" class=\"h1\">p</p>{{% else %}}<div id=\"swap\" class=\"h1\">div</div>{{% endif %}}{}</section>",
+        "<section class=\"sec\">{}<p id=\"auto\" class=\"h2 auto\">auto margin</p>{}</section>",
         rows(1..=10, |i| format!("row {i}")),
         rows(11..=200, |i| format!("row {i}"))
     );
-    let css = format!("html {{ flex-direction: column }}\n{CSS}");
-    for offset in [500.0, 510.0, 520.0, 530.0] {
+    let css = format!("html {{ flex-direction: column }}\n{CSS}\n.auto {{ margin-top: auto }}");
+    for offset in [500.0, 520.0, 540.0] {
         let mut pair = Pair::new("bug0165", &page, &css, 0.0);
         pair.lag_exempt = false;
+        // The untrackable child stops the cull: everything after it builds.
+        pair.tight = false;
         pair.scroll(offset);
-        pair.flag(false);
-        pair.scroll(offset);
+        pair.scroll(offset + 7.0);
     }
 }
 
@@ -490,56 +492,51 @@ fn a_windowed_ui_keeps_its_heights_through_low_reuse_builds() {
     }
 }
 
-/// bug_0168 (open): one row inserted or removed above the band's end
-/// materializes the whole document for a frame. The pairing zips the
-/// root's children by position (every row after the change pairs with
-/// its neighbour: unclean, so the cull refuses it) and doesn't pair a
+/// bug_0168: one row inserted or removed above the band's end
+/// materialized the whole document for a frame. The pairing zipped the
+/// root's children by position (every row after the change paired with
+/// its neighbour: unclean, so the cull refused it) and didn't pair a
 /// nested container whose child count changed (its subtree's heights
-/// drop). Measured: 1000 rows, 20 built — 1000 the frame after.
+/// dropped). Measured: 1000 rows, 20 built — 1000 the frame after. The
+/// sibling alignment (common head and tail) keeps it to the band, and the
+/// result matches the unwindowed twin in every frame.
 #[test]
-#[ignore = "bug_0168: open — the skeleton aligns sibling lists by position only"]
 fn one_inserted_row_builds_only_the_band() {
-    let rows = rows(1..=1000, |i| format!("row {i}"));
-    let shapes = [
-        (
-            "top-root",
-            format!("{{% if f %}}<p id=\"x\">x</p>{{% endif %}}{rows}"),
-        ),
-        (
-            "top-nested",
-            format!(
-                "<section class=\"sec\">{{% if f %}}<p id=\"x\">x</p>{{% endif %}}{rows}</section>"
-            ),
-        ),
-        (
-            "end-nested",
-            format!(
-                "<section class=\"sec\">{rows}{{% if f %}}<p id=\"x\">x</p>{{% endif %}}</section>"
-            ),
-        ),
-    ];
-    for (name, page) in shapes {
-        let css = format!("html {{ flex-direction: column }}\n{CSS}");
-        let mut ui = spawn(
-            &format!("bug0164-{name}"),
-            &page,
-            &css,
-            Some(HtmlWindowed {
-                margin_viewports: 0.5,
-            }),
-        );
-        scroll(&mut ui, 8000.0);
-        let before = rects(&mut ui).len();
-        let root = ui.root();
-        ui.world_mut()
-            .get_mut::<TemplateContext>(root)
-            .unwrap()
-            .insert("f", &false);
-        let peaks = built_per_frame(&mut ui, 6);
-        assert!(
-            peaks.iter().all(|&built| built <= before * 3),
-            "{name}: {before} built before, {peaks:?} after"
-        );
+    let at = |position: usize, condition: &str| -> String {
+        let row = format!("{{% if {condition} %}}<p id=\"x\">x</p>{{% endif %}}");
+        format!(
+            "{}{row}{}",
+            rows(1..=position, |i| format!("row {i}")),
+            rows(position + 1..=1000, |i| format!("row {i}"))
+        )
+    };
+    for (place, position) in [("top", 0), ("middle", 300), ("end", 1000)] {
+        for (change, condition) in [("removed", "f"), ("inserted", "not f")] {
+            for nested in [false, true] {
+                let body = at(position, condition);
+                let page = if nested {
+                    format!("<section class=\"sec\">{body}</section>")
+                } else {
+                    body
+                };
+                let name = format!(
+                    "bug0168-{place}-{change}-{}",
+                    if nested { "nested" } else { "root" }
+                );
+                let css = format!("html {{ flex-direction: column }}\n{CSS}");
+                let mut pair = Pair::new(&name, &page, &css, 0.5);
+                pair.scroll(8000.0);
+                let before = rects(&mut pair.windowed).len();
+                pair.flag(false);
+                let peaks = built_per_frame(&mut pair.windowed, 6);
+                assert!(
+                    peaks.iter().all(|&built| built <= before * 3),
+                    "{name}: {before} built before, {peaks:?} after"
+                );
+                // Both in step again: placement and coverage per frame.
+                pair.scroll(8000.0);
+            }
+        }
     }
 }
 

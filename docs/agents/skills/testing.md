@@ -286,8 +286,6 @@ The mutation run over the windowing diff (review_0006's follow-up) is
 `scripts/mutants.sh` with `--cargo-arg=--test=windowing_model` in place
 of `stateful` and `--in-diff` of `git diff 902d81c -- src/build.rs`, at
 `PROPTEST_CASES=16` (~30 min, 4 jobs).
-`one_inserted_row_builds_only_the_band` is `#[ignore]`d until bug_0168 is
-fixed.
 
 ### Unit tests and the rebuild state machine
 

@@ -145,6 +145,11 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   (bug_0173, bug_0174, bug_0176): a root that changed width kept the old
   heights, a top-level element's `%` vertical margins counted as zero, and
   the stand-ins for culled rows drifted by pixel rounding.
+- **Adding or removing a row in a windowed list built the whole list for
+  a frame** (bug_0168): a 1000-row list built all 1000 rows the frame
+  after one row changed. Now only the visible band builds. Non-windowed
+  UIs also reuse more of an updated list: the rows after an insertion
+  keep their cached build instead of being rebuilt.
 - **Windowed UIs culled reversed containers and row roots as columns**
   (bug_0177): children of a `column-reverse`/`row-reverse` container, or
   of a root laid out as a row, went missing or sat wrong. A root that

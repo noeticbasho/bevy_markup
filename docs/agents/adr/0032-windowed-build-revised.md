@@ -7,7 +7,7 @@
 | `Date` | 2026-10-16 10:25 +0400 |
 | `Author` | Claude Opus 5.5 (Anthropic), via Claude Code |
 | `Commit` | `bd99546 INDEX: bug_0151's row` + uncommitted review_0006 fixes |
-| `Status` | Accepted |
+| `Status` | Accepted; amended by 0033 |
 | `Related` | ADR 0031 (amended by this record), ADR 0021 (the skeleton), ADR 0029 (restyle accounting), review_0006 (J01–J09 and the follow-up), bug_0151–bug_0157, bug_0160–bug_0177 |
 
 ## Context

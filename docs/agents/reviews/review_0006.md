@@ -247,7 +247,7 @@ row flips, then per-frame checks each found new defects:
 | bug_0165 | row flips | the nested cursor borrows its frame (`CursorFrame` not `Clone`) |
 | bug_0166 | row flips | a remap that drops heights sets `remeasure` |
 | bug_0167 | tracing bug_0166 | a windowed UI always pairs (the adaptive gate skips it) |
-| bug_0168 | measuring bug_0166 | open: one inserted row builds the rest of its list for a frame (sibling alignment) |
+| bug_0168 | measuring bug_0166 | fixed 2026-10-19 (ADR 0033): siblings align by common head and tail; a new element's height is estimated from its siblings |
 | bug_0169 | per-frame checks | the cached skip refreshes the `WindowKey` with the `DomNode` |
 | bug_0170 | per-frame checks | open (known limit): rows above the band that change height shift the view for one frame |
 | bug_0171 | the bug_0169 audit | opaque marks kept in step both ways, a flip is news, `Changed<Node>` re-measures |

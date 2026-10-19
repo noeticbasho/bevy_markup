@@ -197,7 +197,7 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0165](bug_0165.md) | An unmeasured child didn't stop its container's cursor | `src/build.rs` | high | fixed (uncommitted) | the windowing property (review_0006 follow-up) |
 | [bug_0166](bug_0166.md) | Heights a content change dropped were never measured again | `src/build.rs` | medium | fixed (uncommitted) | the windowing property (review_0006 follow-up) |
 | [bug_0167](bug_0167.md) | Low reuse turned off the pairing that carries a windowed UI's heights | `src/build.rs` | medium | fixed (uncommitted) | the windowing property (review_0006 follow-up) |
-| [bug_0168](bug_0168.md) | One inserted or removed row materializes a windowed document for a frame | `src/build.rs` | medium | open | the windowing property (review_0006 follow-up) |
+| [bug_0168](bug_0168.md) | One inserted or removed row materializes a windowed document for a frame | `src/build.rs` | medium | fixed (uncommitted; ADR 0033) | the windowing property (review_0006 follow-up) |
 | [bug_0169](bug_0169.md) | A subtree reused whole after a handle shift kept its old window key | `src/build.rs` | high | fixed (uncommitted) | the windowing property (review_0006 follow-up) |
 | [bug_0170](bug_0170.md) | Content that changes height above the band shifts the visible rows for one frame | `src/build.rs` | low | open | the windowing property (review_0006 follow-up) |
 | [bug_0171](bug_0171.md) | A container that stopped being a grid or row never culled its children again | `src/build.rs` | low | fixed (uncommitted) | the windowing property (review_0006 follow-up) |
