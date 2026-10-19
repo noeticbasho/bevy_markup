@@ -220,6 +220,7 @@
 //!   get a report on exit; `hotpath-alloc` adds per-function allocations.
 //!   Without the features the instrumentation compiles to nothing.
 
+use bevy::asset::UnapprovedPathMode;
 use bevy::prelude::*;
 use bevy::ui::UiSystems;
 
@@ -298,15 +299,24 @@ pub enum HtmlUiSystems {
 
 impl Plugin for BevyMarkupPlugin {
     fn build(&self, app: &mut App) {
+        // The loaders read includes and Fluent resources themselves
+        // (`read_asset_bytes`, which skips Bevy's unapproved-path check):
+        // they enforce the app's mode (bug_0087). `AssetPlugin` is added
+        // before any plugin that registers loaders; without it, Bevy's
+        // default (`Forbid`).
+        let allow_unapproved = app
+            .get_added_plugins::<AssetPlugin>()
+            .first()
+            .is_some_and(|assets| matches!(assets.unapproved_path_mode, UnapprovedPathMode::Allow));
         app.init_asset::<template::HtmlTemplate>()
-            .init_asset_loader::<template::HtmlTemplateLoader>()
-            .init_asset_loader::<template::MarkdownTemplateLoader>()
+            .register_asset_loader(template::HtmlTemplateLoader { allow_unapproved })
+            .register_asset_loader(template::MarkdownTemplateLoader { allow_unapproved })
             .init_asset::<style::Stylesheet>()
             .init_asset_loader::<style::StylesheetLoader>()
             .init_asset::<nine_slice::NineSlice>()
             .init_asset_loader::<nine_slice::NineSliceLoader>()
             .init_asset::<l10n::LocaleBundle>()
-            .init_asset_loader::<l10n::LocaleBundleLoader>()
+            .register_asset_loader(l10n::LocaleBundleLoader { allow_unapproved })
             .init_resource::<style::DefaultStylesheet>()
             .init_resource::<l10n::ActiveLocale>()
             // CSS `rem` resolves against the root font-size: the build syncs

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bevy::asset::uuid::Uuid;
-use bevy::asset::{AssetMetaCheck, UntypedHandle};
+use bevy::asset::{AssetMetaCheck, UnapprovedPathMode, UntypedHandle};
 use bevy::camera::{ComputedCameraValues, RenderTarget, RenderTargetInfo};
 use bevy::ecs::schedule::ScheduleBuildSettings;
 use bevy::image::{CompressedImageFormats, ImageLoader};
@@ -97,7 +97,18 @@ pub struct TestUi {
 impl TestUi {
     /// A headless app whose asset root holds `files` plus `frame.png`.
     pub fn new(name: &str, files: &[(&str, &str)]) -> Self {
-        Self::build(name, files, None)
+        Self::build(name, files, None, UnapprovedPathMode::default())
+    }
+
+    /// Like [`new`](Self::new) with `AssetPlugin::unapproved_path_mode` set
+    /// (files may name paths outside the asset root: `../x.html`).
+    #[allow(dead_code)] // not every test binary exercises every helper
+    pub fn with_unapproved_path_mode(
+        name: &str,
+        files: &[(&str, &str)],
+        mode: UnapprovedPathMode,
+    ) -> Self {
+        Self::build(name, files, None, mode)
     }
 
     /// Like [`new`](Self::new), plus Bevy UI layout and text measurement
@@ -108,7 +119,7 @@ impl TestUi {
     /// suites can register them as families without breaking measurement.
     #[allow(dead_code)] // not every test binary exercises every helper
     pub fn with_layout(name: &str, files: &[(&str, &str)], viewport: UVec2) -> Self {
-        Self::build(name, files, Some(viewport))
+        Self::build(name, files, Some(viewport), UnapprovedPathMode::default())
     }
 
     /// Like [`with_layout`](Self::with_layout), plus a primary window and a
@@ -148,7 +159,12 @@ impl TestUi {
         ui
     }
 
-    fn build(name: &str, files: &[(&str, &str)], viewport: Option<UVec2>) -> Self {
+    fn build(
+        name: &str,
+        files: &[(&str, &str)],
+        viewport: Option<UVec2>,
+        unapproved_path_mode: UnapprovedPathMode,
+    ) -> Self {
         static RUN: AtomicUsize = AtomicUsize::new(0);
         let dir = std::env::temp_dir().join(format!(
             "bevy_markup-test-{name}-{}-{}",
@@ -170,6 +186,7 @@ impl TestUi {
             AssetPlugin {
                 file_path: dir.to_string_lossy().into_owned(),
                 meta_check: AssetMetaCheck::Never,
+                unapproved_path_mode,
                 ..default()
             },
             ImagePlugin::default(),

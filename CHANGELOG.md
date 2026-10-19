@@ -145,6 +145,11 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   (bug_0173, bug_0174, bug_0176): a root that changed width kept the old
   heights, a top-level element's `%` vertical margins counted as zero, and
   the stand-ins for culled rows drifted by pixel rounding.
+- **`AssetPlugin::unapproved_path_mode = Allow` now reaches includes and
+  Fluent resources** (bug_0087): `{% include %}` and a bundle's
+  `resources` refused paths outside the asset root whatever the app
+  chose. `Deny` still refuses them, like `Forbid` (they can't request
+  Bevy's `override_unapproved`).
 - **Adding or removing a row in a windowed list built the whole list for
   a frame** (bug_0168): a 1000-row list built all 1000 rows the frame
   after one row changed. Now only the visible band builds. Non-windowed

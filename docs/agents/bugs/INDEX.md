@@ -54,7 +54,7 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0022](bug_0022.md) | In a windowed app, `autofocus` never took focus (Bevy focuses the window at startup; repair left it there) | `src/focus.rs` (`repair_focus`) | high | fixed (`35125b6`) | smoke run of the `menu` example |
 | [bug_0023](bug_0023.md) | Wiring on `HtmlUiBuilt` stacked up once updates kept elements (quickstart clicks added 1, 2, 3 coins; demo documents duplicated) | examples + `HtmlUiBuilt` docs | high | fixed (`c8ab00f`) | user report |
 | [bug_0024](bug_0024.md) | Right and middle clicks fired `data-on-click` (no button check) | `src/signals.rs` | medium | fixed (`4cef523`) | code reading (signal sources design) |
-| [bug_0025](bug_0025.md) | `ui_state_machine_matches_model` fails ~1 in 10 runs (signals mismatch) | `tests/stateful.rs` / `src/signals.rs` | low | **open** | repeated full-suite runs |
+| [bug_0025](bug_0025.md) | `ui_state_machine_matches_model` fails ~1 in 10 runs (signals mismatch) | `tests/stateful.rs` / `src/signals.rs` | low | fixed (`0dd2b58`: a test-model gap; closed 2026-10-19) | repeated full-suite runs |
 | [bug_0026](bug_0026.md) | Editing an included template never updates its users (loader dependencies don't invalidate) | `src/template.rs` (`HtmlTemplateLoader`) | — | **not a bug** (withdrawn: the file watcher does reload users; only a manual `AssetServer::reload` of the dependency doesn't) | the template-dependency vector |
 | [bug_0027](bug_0027.md) | `HtmlWorldAnchor` never shows without an `IsDefaultUiCamera` marker | `src/anchor.rs` | high | fixed (`61c0b94`) | `world` example smoke run |
 | [bug_0028](bug_0028.md) | The demo's panels never scroll: the layout grows to the tallest content instead (`flex-shrink: 0` default vs the browser scroll idiom) | demo themes (`examples/assets/ui/themes/*.css`) | medium | fixed (uncommitted at filing) | user report |
@@ -116,7 +116,7 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0084](bug_0084.md) | A Junk message in an FTL resource skipped the whole Markdown cache | `src/l10n.rs` (`markdown_cache`) | low | fixed (`73ae77f`) | follow-up review (F31) |
 | [bug_0085](bug_0085.md) | A grid name on a merged repeat boundary registered twice | `src/cascade.rs` (`GridNames`) | low | fixed (`8512b7a`); the dedupe was quadratic (G28) | follow-up review (F39) |
 | [bug_0086](bug_0086.md) | The per-value Markdown path double-escaped string args | `src/l10n.rs` | low | fixed (`15b4255`); that fix injected markup (bug_0088) | follow-up review (F40) |
-| [bug_0087](bug_0087.md) | The unapproved-path check ignores `unapproved_path_mode`; open, documented (the 'no API' premise is false) | `src/template.rs`, `src/l10n.rs` | low | open — documented deviation | follow-up review (F32) |
+| [bug_0087](bug_0087.md) | The unapproved-path check ignores `unapproved_path_mode` | `src/template.rs`, `src/l10n.rs` | low | fixed (uncommitted; the mode is honored) | follow-up review (F32) |
 | [bug_0088](bug_0088.md) | Fluent string args injected raw HTML on the Markdown per-value path | `src/l10n.rs` | high | fixed (`754f910`) | review_0003 (G01) |
 | [bug_0089](bug_0089.md) | CI failed: -D warnings errors; two regression tests silently disabled | tests/, `src/` | high | fixed (`aa12dd6`) | review_0003 (G02) |
 | [bug_0090](bug_0090.md) | --features fuzzing didn't compile | `src/fuzz.rs` | high | fixed (`ef16397`) | review_0003 (G03) |
@@ -199,7 +199,7 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0167](bug_0167.md) | Low reuse turned off the pairing that carries a windowed UI's heights | `src/build.rs` | medium | fixed (uncommitted) | the windowing property (review_0006 follow-up) |
 | [bug_0168](bug_0168.md) | One inserted or removed row materializes a windowed document for a frame | `src/build.rs` | medium | fixed (uncommitted; ADR 0033) | the windowing property (review_0006 follow-up) |
 | [bug_0169](bug_0169.md) | A subtree reused whole after a handle shift kept its old window key | `src/build.rs` | high | fixed (uncommitted) | the windowing property (review_0006 follow-up) |
-| [bug_0170](bug_0170.md) | Content that changes height above the band shifts the visible rows for one frame | `src/build.rs` | low | open | the windowing property (review_0006 follow-up) |
+| [bug_0170](bug_0170.md) | Content that changes height above the band shifts the visible rows for one frame | `src/build.rs` | low | won't fix (known limit, 2026-10-19) | the windowing property (review_0006 follow-up) |
 | [bug_0171](bug_0171.md) | A container that stopped being a grid or row never culled its children again | `src/build.rs` | low | fixed (uncommitted) | the windowing property (review_0006 follow-up) |
 | [bug_0172](bug_0172.md) | A document's `<body>` lost its style and its place in selectors | `src/build.rs` | high | fixed (uncommitted) | the windowing mutation run (review_0006 follow-up) |
 | [bug_0173](bug_0173.md) | A windowed root that changed width kept its old heights | `src/build.rs` | high | fixed (uncommitted) | the windowing mutation run (review_0006 follow-up) |
@@ -398,7 +398,7 @@ settle (rebuild observed) and the resulting dump to match a reference model.
   unique window keys; tightness once settled). Failing seeds are kept in
   `tests/windowing_model.proptest-regressions` and minimized by hand
   (a page-file delta debugger) into the named regression tests.
-- **Reports:** bug_0160–bug_0171 (bug_0168 and bug_0170 open); bug_0172–bug_0177 from the mutation runs over the windowing diff (`902d81c..`, 323 then 330 mutants), whose survivors each got a test or a documented reason.
+- **Reports:** bug_0160–bug_0171 (bug_0168 fixed by ADR 0033; bug_0170 kept as a known limit); bug_0172–bug_0177 from the mutation runs over the windowing diff (`902d81c..`, 323 then 330 mutants), whose survivors each got a test or a documented reason.
 - **Discovery and fix agent:** Claude Code session, `claude-opus-5-5`.
   Every fix was ablated against the suite (the property at 128 cases plus
   the regressions); each fails it. `Changed<WindowKey>` in the

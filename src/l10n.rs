@@ -158,7 +158,11 @@ struct LocaleBundleDescriptor {
 }
 
 #[derive(Default, TypePath)]
-pub(crate) struct LocaleBundleLoader;
+pub(crate) struct LocaleBundleLoader {
+    /// The app's `AssetPlugin::unapproved_path_mode` is `Allow`
+    /// (bug_0087).
+    pub(crate) allow_unapproved: bool,
+}
 
 impl AssetLoader for LocaleBundleLoader {
     type Asset = LocaleBundle;
@@ -190,11 +194,10 @@ impl AssetLoader for LocaleBundleLoader {
                 return Err(format!("resource names a remote source: {name}").into());
             }
             // `read_asset_bytes` skips Bevy's own unapproved-path check:
-            // enforce it (the mode is Bevy's DEFAULT, `Forbid`;
-            // `LoadContext` exposes no read of
-            // `AssetPlugin::unapproved_path_mode`, so an `Allow` app keeps
-            // its resources inside the asset root).
-            if path.is_unapproved() {
+            // enforce the app's `AssetPlugin::unapproved_path_mode`
+            // (bug_0087; `Deny` refuses like `Forbid` — a resource can't
+            // ask for `override_unapproved`).
+            if path.is_unapproved() && !self.allow_unapproved {
                 return Err(format!("resource escapes the asset root: {name}").into());
             }
             // Reading through the load context makes each `.ftl` a

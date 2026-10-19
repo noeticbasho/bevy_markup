@@ -435,6 +435,7 @@ fn tera_span_end(source: &str, closer: [u8; 2]) -> Option<usize> {
 pub(crate) fn resolve_references(
     path: &AssetPath<'static>,
     source: &str,
+    allow_unapproved: bool,
 ) -> Result<(String, Vec<AssetPath<'static>>), BevyError> {
     let mut out = String::with_capacity(source.len());
     let mut references = Vec::new();
@@ -570,13 +571,11 @@ pub(crate) fn resolve_references(
             return Err(format!("template include names a remote source: {literal}").into());
         }
         // `read_asset_bytes` skips Bevy's own unapproved-path check
-        // (`../..` out of the asset root would load): enforce it here.
-        // The mode is Bevy's DEFAULT (`Forbid`) and is not consulted:
-        // `LoadContext` exposes no read of
-        // `AssetPlugin::unapproved_path_mode`, so an app that opts into
-        // `Allow` keeps its includes inside the asset root (they can
-        // still name any file under it).
-        if resolved.is_unapproved() {
+        // (`../..` out of the asset root would load): enforce the app's
+        // `AssetPlugin::unapproved_path_mode` here (bug_0087). `Deny` and
+        // `Forbid` refuse alike — an include can't ask for Bevy's
+        // `override_unapproved`; only `Allow` reads outside the root.
+        if resolved.is_unapproved() && !allow_unapproved {
             return Err(format!("template include escapes the asset root: {literal}").into());
         }
         // The resolved path replaces the literal; everything else in the
@@ -594,8 +593,12 @@ pub(crate) fn resolve_references(
     Ok((out, references))
 }
 
+/// `allow_unapproved`: the app's `AssetPlugin::unapproved_path_mode` is
+/// `Allow` (read by `BevyMarkupPlugin::build`; bug_0087).
 #[derive(Default, TypePath)]
-pub(crate) struct HtmlTemplateLoader;
+pub(crate) struct HtmlTemplateLoader {
+    pub(crate) allow_unapproved: bool,
+}
 
 impl AssetLoader for HtmlTemplateLoader {
     type Asset = HtmlTemplate;
@@ -605,10 +608,10 @@ impl AssetLoader for HtmlTemplateLoader {
     async fn load(
         &self,
         reader: &mut dyn Reader,
-        settings: &(),
+        _settings: &(),
         load_context: &mut LoadContext<'_>,
     ) -> Result<HtmlTemplate, BevyError> {
-        load_template(reader, settings, load_context).await
+        load_template(reader, self.allow_unapproved, load_context).await
     }
 
     fn extensions(&self) -> &[&str] {
@@ -621,7 +624,9 @@ impl AssetLoader for HtmlTemplateLoader {
 /// load ([`md::to_html_template`](crate::md::to_html_template)), so
 /// [`HtmlTemplate::render`] is Tera-only.
 #[derive(Default, TypePath)]
-pub(crate) struct MarkdownTemplateLoader;
+pub(crate) struct MarkdownTemplateLoader {
+    pub(crate) allow_unapproved: bool,
+}
 
 impl AssetLoader for MarkdownTemplateLoader {
     type Asset = HtmlTemplate;
@@ -631,10 +636,10 @@ impl AssetLoader for MarkdownTemplateLoader {
     async fn load(
         &self,
         reader: &mut dyn Reader,
-        settings: &(),
+        _settings: &(),
         load_context: &mut LoadContext<'_>,
     ) -> Result<HtmlTemplate, BevyError> {
-        load_template(reader, settings, load_context).await
+        load_template(reader, self.allow_unapproved, load_context).await
     }
 
     fn extensions(&self) -> &[&str] {
@@ -652,7 +657,7 @@ impl AssetLoader for MarkdownTemplateLoader {
 #[hotpath::measure]
 async fn load_template(
     reader: &mut dyn Reader,
-    _settings: &(),
+    allow_unapproved: bool,
     load_context: &mut LoadContext<'_>,
 ) -> Result<HtmlTemplate, BevyError> {
     let mut bytes = Vec::new();
@@ -668,7 +673,7 @@ async fn load_template(
         if !seen.insert(path.to_string()) {
             continue;
         }
-        let (source, references) = resolve_references(&path, &source)?;
+        let (source, references) = resolve_references(&path, &source, allow_unapproved)?;
         // ADR 0020: a `.md` template's Markdown converts once, at load —
         // Tera syntax survives verbatim (`to_html_template`), so the
         // per-frame path is Tera-only. Per file: an `.html` partial
@@ -701,10 +706,17 @@ fn remote_includes_are_refused() {
     let path = AssetPath::from("page.html");
     for remote in ["https://evil.example/x.html", "HTTP://evil.example/x.html"] {
         let source = format!(r#"{{% include "{remote}" %}}"#);
-        assert!(resolve_references(&path, &source).is_err(), "{remote}");
+        assert!(
+            resolve_references(&path, &source, false).is_err(),
+            "{remote}"
+        );
     }
-    let (_, references) =
-        resolve_references(&path, r#"{% include "embedded://crate/part.html" %}"#).unwrap();
+    let (_, references) = resolve_references(
+        &path,
+        r#"{% include "embedded://crate/part.html" %}"#,
+        false,
+    )
+    .unwrap();
     assert_eq!(references[0].to_string(), "embedded://crate/part.html");
 }
 
@@ -733,7 +745,7 @@ fn attribute_json_accepts_tera_escapes() {
 fn scanner_code_is_commonmark_code() {
     let path = AssetPath::from("page.md");
     let resolve = |source: &str| {
-        resolve_references(&path, source)
+        resolve_references(&path, source, false)
             .map(|(_, refs)| refs.iter().map(|r| r.to_string()).collect::<Vec<_>>())
             .unwrap()
     };
@@ -819,7 +831,7 @@ fn attribute_json_with_a_backslash_before_non_ascii_is_an_error() {
 fn scanner_protects_code_like_pulldown() {
     let path = AssetPath::from("page.md");
     let resolve = |source: &str| {
-        resolve_references(&path, source)
+        resolve_references(&path, source, false)
             .map(|(_, refs)| refs.iter().map(|r| r.to_string()).collect::<Vec<_>>())
     };
     // Protected content: the include inside is not a reference.
@@ -898,7 +910,7 @@ mod tests {
                 .min()
                 .unwrap()
         };
-        let resolve = |text: &str| drop(resolve_references(&path, text));
+        let resolve = |text: &str| drop(resolve_references(&path, text, false));
         let separate = |text: &str| drop(md::separate_statements(text));
         // Deeply nested, indented blocks: the dedent re-reads each body per
         // level (review_0004 H11), bounded by its depth cap.
@@ -962,7 +974,7 @@ mod tests {
         let path = AssetPath::parse("ui/pages/main.html").clone_owned();
         let source = r#"{% extends "base.html" %}{%- include '../lib/ui.html' -%}
 {% include "/shared/foot.html" %}{% if include %}{{ "include" }}{% endif %}{% block x %}{% endblock %}"#;
-        let (out, references) = resolve_references(&path, source).unwrap();
+        let (out, references) = resolve_references(&path, source, false).unwrap();
         assert_eq!(
             references
                 .iter()
@@ -977,7 +989,7 @@ mod tests {
         );
         let embedded = AssetPath::parse("embedded://app/ui/main.html").clone_owned();
         let (_, references) =
-            resolve_references(&embedded, r#"{% include "part.html" %}"#).unwrap();
+            resolve_references(&embedded, r#"{% include "part.html" %}"#, false).unwrap();
         assert_eq!(references[0].to_string(), "embedded://app/ui/part.html");
     }
 
@@ -990,22 +1002,31 @@ mod tests {
     fn scanner_edge_cases_keep_later_references() {
         let markdown = AssetPath::parse("main.md").clone_owned();
         let (_, references) =
-            resolve_references(&markdown, "It`s here\n{% include \"a.md\" %}\n").unwrap();
+            resolve_references(&markdown, "It`s here\n{% include \"a.md\" %}\n", false).unwrap();
         assert_eq!(references.len(), 1);
 
-        let (_, references) =
-            resolve_references(&markdown, "```rust\nx\n```\n{% include \"a.md\" %}\n").unwrap();
+        let (_, references) = resolve_references(
+            &markdown,
+            "```rust\nx\n```\n{% include \"a.md\" %}\n",
+            false,
+        )
+        .unwrap();
         assert_eq!(references.len(), 1);
 
         let html = AssetPath::parse("main.html").clone_owned();
-        let (out, references) =
-            resolve_references(&html, "{% set x = \"{#\" %}\n{% include \"a.html\" %}\n").unwrap();
+        let (out, references) = resolve_references(
+            &html,
+            "{% set x = \"{#\" %}\n{% include \"a.html\" %}\n",
+            false,
+        )
+        .unwrap();
         assert_eq!(references.len(), 1);
         assert!(out.contains("x = \"{#\""), "the tag is verbatim: {out}");
 
         let (out, references) = resolve_references(
             &html,
             "{% include \"a.html\" %}{{ \"{#\" }}{% include \"b.html\" %}\n",
+            false,
         )
         .unwrap();
         assert_eq!(references.len(), 2, "{references:?}");
@@ -1198,12 +1219,24 @@ div class=\"a\"
             "```html\n{% include \"gone.html\" %}\n```",
             r#"`{% include "gone.html" %}`"#,
         ] {
-            let (out, references) = resolve_references(&markdown, source).unwrap();
+            let (out, references) = resolve_references(&markdown, source, false).unwrap();
             assert!(references.is_empty(), "{source:?}: {references:?}");
             assert_eq!(out, source, "{source:?}: rewritten");
         }
         let html = AssetPath::parse("page.html").clone_owned();
-        let (_, references) = resolve_references(&html, r#"`{% include "part.html" %}`"#).unwrap();
+        let (_, references) =
+            resolve_references(&html, r#"`{% include "part.html" %}`"#, false).unwrap();
         assert_eq!(references.len(), 1, "{references:?}");
     }
+}
+/// bug_0087: an include escaping the asset root is refused unless the
+/// app's `AssetPlugin::unapproved_path_mode` is `Allow`.
+#[test]
+fn includes_outside_the_root_follow_the_unapproved_mode() {
+    let path = AssetPath::from("pages/page.html");
+    let source = r#"{% include "../../outside.html" %}"#;
+    assert!(resolve_references(&path, source, false).is_err());
+    let (out, references) = resolve_references(&path, source, true).unwrap();
+    assert_eq!(references.len(), 1, "{references:?}");
+    assert!(references[0].is_unapproved(), "{out}");
 }

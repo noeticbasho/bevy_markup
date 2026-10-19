@@ -235,6 +235,61 @@ fn turning_localization_off_restores_own_content() {
         .assert_dump("\nhtml-ui\n  p\n    \"Own title\" default 20px #ffffff\n");
 }
 
+/// bug_0087: the loaders read includes and Fluent resources themselves
+/// (`read_asset_bytes` skips Bevy's unapproved-path check), so they must
+/// honor `AssetPlugin::unapproved_path_mode`: only `Allow` reads outside the
+/// asset root; `Deny` refuses like `Forbid` (an include or a resource can't
+/// ask for `override_unapproved`). They enforced `Forbid` whatever the app
+/// chose.
+#[test]
+fn includes_and_fluent_resources_honor_the_unapproved_path_mode() {
+    use bevy::asset::{LoadState, UnapprovedPathMode};
+    let id = std::process::id();
+    let (outside_html, outside_ftl) = (
+        format!("bm-unapproved-{id}.html"),
+        format!("bm-unapproved-{id}.ftl"),
+    );
+    let page = format!(r#"<p data-l10n-id="title">own</p>{{% include "../{outside_html}" %}}"#);
+    let manifest = format!(r#"(locale: "en-US", resources: ["../../../{outside_ftl}"])"#);
+    for (mode, name, allowed) in [
+        (UnapprovedPathMode::Allow, "Allow", true),
+        (UnapprovedPathMode::Deny, "Deny", false),
+        (UnapprovedPathMode::Forbid, "Forbid", false),
+    ] {
+        let mut ui = TestUi::with_unapproved_path_mode(
+            "unapproved",
+            &[
+                ("page.html", page.as_str()),
+                (&format!("../{outside_html}"), "<p>outside</p>"),
+                ("locales/en-US/main.ftl.ron", manifest.as_str()),
+                (&format!("../{outside_ftl}"), "title = translated"),
+            ],
+            mode,
+        );
+        let template: Handle<HtmlTemplate> = ui.load("page.html");
+        let bundle: Handle<LocaleBundle> = ui.load("locales/en-US/main.ftl.ron");
+        ui.update(60);
+        let server = ui.world_mut().resource::<AssetServer>();
+        let (template_state, bundle_state) =
+            (server.load_state(&template), server.load_state(&bundle));
+        assert_eq!(
+            matches!(template_state, LoadState::Loaded),
+            allowed,
+            "{name}: the include outside the root: {template_state:?}"
+        );
+        assert_eq!(
+            matches!(bundle_state, LoadState::Loaded),
+            allowed,
+            "{name}: the resource outside the root: {bundle_state:?}"
+        );
+        assert_eq!(
+            matches!(template_state, LoadState::Failed(_)),
+            !allowed,
+            "{name}: refused, not pending"
+        );
+    }
+}
+
 /// Fluent: `data-l10n-id` replaces content; args (numbers for plurals,
 /// strings HTML-escaped); markup in translations is parsed and styled; a
 /// missing message falls back to the element's own content.
