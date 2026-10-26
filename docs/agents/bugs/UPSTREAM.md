@@ -26,7 +26,7 @@ the issue may already be fixed or reported.
 | U10 | lightningcss | Bare `grid-auto-flow: dense` fails to parse | the declaration is dropped (CSS means `row dense`) | none (documented; write `row dense`) | unreported |
 | U11 | tl | A value-less attribute eats the next attribute's first character ([bug_0019](bug_0019.md)) | `autofocus data-on-click` lost the click hook and focusability | switched to `astral-tl` 0.8.0 (astral-sh's maintained fork, fixed there) | fixed in astral-tl; y21/tl 0.7.8 affected |
 | U12 | bevy_picking / bevy_ui | Text-section hits resolve `Pickable` on the span entity, not the text node ([bug_0020](bug_0020.md)) | `pointer-events: none` on a text-bearing element leaked clicks | `Pickable::IGNORE` on the spans too (`src/build.rs`) | unreported |
-| U13 | pulldown-cmark | The offset iterator panics on a list item holding only a link reference definition before a whitespace-only line ([bug_0178](bug_0178.md)) | panic from any `.md` template | minimum version raised to 0.13.5 (`Cargo.toml`) | fixed upstream (0.13.5, #1021); hardening of the `unwrap()` unreported |
+| U13 | pulldown-cmark | The offset iterator panics on a list item holding only a link reference definition before a whitespace-only line ([bug_0178](bug_0178.md)) | panic from any `.md` template | minimum version raised to 0.13.5 (`Cargo.toml`) | fixed upstream (0.13.5, #1021); a residual un-hardened `unwrap()` in `OffsetIter` is latent only (not reachable in 0.13.5 per ~18M fuzz execs + instrumented replay), left unreported |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -272,16 +272,37 @@ CI clippy command and workspace tests pass on both.
   another input reaching the same `unwrap()` (tasklists + strikethrough),
   also fixed for its input.
 - **Local workaround:** none needed; `Cargo.toml` requires
-  `pulldown-cmark` ≥ 0.13.5 and all five lockfiles are on 0.13.5.
-- **Still open upstream (unreported):** on `main` (2026-10-23) both
-  iterators share `next_event_range`, whose `Some(cur_ix)` arm still does
-  `self.tree.push(); self.tree.cur().unwrap()` for a tight paragraph, so
-  any other way of producing an empty tight paragraph would panic again.
-  **PR sketch:** if the pushed paragraph has no child (`cur()` is `None`),
-  pop back, step to its next sibling and recurse, as the `None` arm right
-  above already does for tight paragraphs, instead of unwrapping; add the
-  inputs above and #1084's as tests. Check upstream's issues and fuzz
-  corpus first; it may be reported or covered by now.
+  `pulldown-cmark` ≥ 0.13.5 and all five lockfiles are on 0.13.5. The panic
+  is genuinely fixed in 0.13.5 (bug_0178 resolved): the parse change means
+  the empty tight paragraph is no longer produced, so neither iterator
+  panics on the inputs above.
+- **Residual asymmetry (latent, not reachable; no report warranted):** in
+  0.13.5 the two iterators diverge where they skip a tight paragraph.
+  `Parser::next` (plain, `src/parse.rs:2431`) was hardened — it binds
+  `tree.cur()` to `maybe_cur_ix` and guards it with `if let Some(..)`, so an
+  empty tight paragraph emits nothing. `OffsetIter::next`
+  (`src/parse.rs:2267`, the path bevy_markup's `code_ranges` uses) still
+  does `self.tree.push(); self.tree.cur().unwrap()`. So the unwrap survives,
+  but the parser no longer reaches it: the hardening is defense-in-depth for
+  a state the parse fixes removed. It would become a live panic again only
+  if a future parse change reintroduced an empty tight paragraph, and then
+  only through the offset iterator.
+- **Why "not reachable" and not just "not found":** three searches on
+  0.13.5, all against `Parser::new_ext(data, Options::all()).into_offset_iter()`
+  (2026-10-26):
+  - **Coverage-guided fuzzing** (cargo-fuzz / libFuzzer), seeded with the
+    0.13.4 trigger and the near-miss cases (`issue_1095` `"- [n]:Z\r\n\t\t"`
+    and `issue_1084`): two runs, ~6.6M and ~11.7M executions (~18.3M total),
+    ~6240 edges covered, no panic.
+  - **Instrumented replay:** a vendored 0.13.5 with that exact
+    `.cur().unwrap()` replaced by a probe logging when `cur()` is `None`;
+    the 40,933-input fuzz corpus replayed through it reached the
+    empty-tight-paragraph branch **0 times**.
+  - Hand-built refdef / tight-list / trailing-whitespace combinations and a
+    token-soup random search: nothing.
+  If a future upstream change reopens this, the fix is to make
+  `OffsetIter::next` match the plain iterator's `if let Some(..)` guard;
+  left unreported because it is not reachable today.
 
 ## Not upstream bugs (recorded so they aren't re-filed)
 
