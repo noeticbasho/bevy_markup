@@ -1397,6 +1397,26 @@ mod tests {
         assert!(html.contains("hello {{ name }}"), "{html}");
         assert!(html.contains("<p class=\"markdown\">"), "{html}");
     }
+
+    /// bug_0178 (UPSTREAM.md U13): pulldown-cmark 0.13.4's offset iterator
+    /// (`code_ranges`, `dedent_blocks`) panicked on a list item holding
+    /// only a link reference definition followed by a whitespace-only line
+    /// (`\u{0B}`); fixed upstream in 0.13.5 (pulldown-cmark#1021). A `.md`
+    /// template is user content: its conversion must never panic.
+    #[test]
+    fn a_refdef_only_list_item_before_a_blank_line_does_not_panic() {
+        for source in [
+            "- [a]: b\n\u{0B}",
+            "+\t[<]:\u{FFFD}\n\u{0B}",
+            "* [a]: b\n\u{0C}",
+        ] {
+            let html = to_html_template(source);
+            assert!(
+                !html.contains("[a]: b"),
+                "the definition is not text: {html}"
+            );
+        }
+    }
 }
 
 /// Tera in a template (ADR 0020): a paragraph of only statements

@@ -80,7 +80,8 @@ lightningcss = { version = "1.0.0-alpha.72", features = ["into_owned"] }
 # Markdown as a source syntax (ADR 0014): `.md` templates and Markdown in
 # Fluent values convert to the HTML the pipeline already parses. `html`
 # renders to HTML; no CLI parser (`getopts`).
-pulldown-cmark = { version = "0.13.3", default-features = false, features = [
+# ≥ 0.13.5: 0.13.4 panics in its offset iterator (bug_0178, UPSTREAM.md U13).
+pulldown-cmark = { version = "0.13.5", default-features = false, features = [
     "html",
 ] }
 # The FTL AST (ADR 0020 Decision 3): the per-message Markdown patterns

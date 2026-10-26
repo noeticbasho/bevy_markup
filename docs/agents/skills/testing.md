@@ -11,6 +11,7 @@ reasons behind each piece; this file is the how-to.
 | What | Command | Time |
 |---|---|---|
 | Everything that must pass | `cargo test` | ~20–30 s |
+| Everything, per-test timing (optional) | `cargo nextest run --workspace`, then `cargo test --doc` (nextest skips doc tests); `.config/nextest.toml` writes a JUnit report to `target/nextest/default/junit.xml`, which `../analytics` records | ~40 s |
 | Library unit tests only | `cargo test --lib` | ~1 s |
 | Fuzz-harness unit tests | `cargo test --lib --features fuzzing` | ~1 s |
 | One test file | `cargo test --test html_ui` | seconds |

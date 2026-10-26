@@ -207,6 +207,7 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0175](bug_0175.md) | A windowed whole document (`<html><head>…<body>`) never culled | `src/build.rs` | medium | fixed (uncommitted) | the windowing mutation run (review_0006 follow-up) |
 | [bug_0176](bug_0176.md) | Spacers drifted by the layout's per-node rounding | `src/build.rs` | low | fixed (uncommitted) | the windowing mutation run (review_0006 follow-up) |
 | [bug_0177](bug_0177.md) | Reversed containers and non-column roots were culled as columns | `src/build.rs` | high | fixed (uncommitted) | the windowing mutation rerun (review_0006 follow-up) |
+| [bug_0178](bug_0178.md) | pulldown-cmark's offset iterator panicked on a definition-only list item before a blank line | upstream `pulldown-cmark` 0.13.4 (UPSTREAM.md U13) | high | fixed (uncommitted): `pulldown-cmark` ≥ 0.13.5, fixed upstream (#1021) | honggfuzz `html` target |
 
 ## Discovery session metadata: bug_0001–0005
 
@@ -408,3 +409,16 @@ settle (rebuild observed) and the resulting dump to match a reference model.
 - **Commit at discovery:** `2678c8f` (all fixes uncommitted at filing).
 - **Machine/toolchain:** Arch Linux (kernel 7.2.8), rustc 1.98.1, Bevy
   0.20.0.
+
+## Discovery session metadata: bug_0178 (2026-10-26)
+
+- **Method:** a 25 s honggfuzz campaign on the `html` target
+  (`scripts/fuzz-honggfuzz.sh html 25`), run while `../analytics`
+  (`analytics record fuzz`) was being taught honggfuzz's output; the crash
+  file was replayed and minimized with cargo-fuzz (`cargo fuzz tmin`), then
+  reproduced against pulldown-cmark alone and bisected on its 0.13 branch.
+- **Discovery and fix agent:** Claude Code session, `claude-opus-5-5`.
+  Both regression tests failed on 0.13.4 and pass on 0.13.5.
+- **Commit at discovery:** `875bec7` (fix uncommitted at filing).
+- **Machine/toolchain:** Arch Linux (kernel 7.2.11), AMD Ryzen 7 9800X3D,
+  rustc 1.98.1, nightly for the fuzz drivers.

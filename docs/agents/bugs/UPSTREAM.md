@@ -26,6 +26,7 @@ the issue may already be fixed or reported.
 | U10 | lightningcss | Bare `grid-auto-flow: dense` fails to parse | the declaration is dropped (CSS means `row dense`) | none (documented; write `row dense`) | unreported |
 | U11 | tl | A value-less attribute eats the next attribute's first character ([bug_0019](bug_0019.md)) | `autofocus data-on-click` lost the click hook and focusability | switched to `astral-tl` 0.8.0 (astral-sh's maintained fork, fixed there) | fixed in astral-tl; y21/tl 0.7.8 affected |
 | U12 | bevy_picking / bevy_ui | Text-section hits resolve `Pickable` on the span entity, not the text node ([bug_0020](bug_0020.md)) | `pointer-events: none` on a text-bearing element leaked clicks | `Pickable::IGNORE` on the spans too (`src/build.rs`) | unreported |
+| U13 | pulldown-cmark | The offset iterator panics on a list item holding only a link reference definition before a whitespace-only line ([bug_0178](bug_0178.md)) | panic from any `.md` template | minimum version raised to 0.13.5 (`Cargo.toml`) | fixed upstream (0.13.5, #1021); hardening of the `unwrap()` unreported |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -243,6 +244,44 @@ CI clippy command and workspace tests pass on both.
   the target entity, or should the backend report the text node as the
   target? Either fixes text under `pointer-events: none`; the second also
   changes which entity `Pointer<Over>` observers see.
+
+## U13 — pulldown-cmark: the offset iterator panics on a definition-only list item before a blank line
+
+- **Project:** [pulldown-cmark/pulldown-cmark](https://github.com/pulldown-cmark/pulldown-cmark).
+  Affected: 0.13.4 (bevy_markup's lock until bug_0178) and the 0.13 branch
+  before `078feb520e`; fixed in **0.13.5** (checked 2026-10-26; upstream
+  `main` at `61d95cedd7`, 2026-10-23, does not panic either).
+- **Problem:** `Parser::into_offset_iter()` panics with
+  `called Option::unwrap() on a None value` at `src/parse.rs:2199`
+  (0.13.4) when a list item contains only a link reference definition and
+  the next line holds only whitespace such as a vertical tab or form feed.
+  The tight paragraph left behind has no children, and the code that skips
+  tight paragraphs (`tree.push(); tree.cur().unwrap()`) assumes one. The
+  plain iterator (`Parser::next`) does not panic on these inputs.
+- **Reproduction:**
+  `Parser::new_ext("- [a]: b\n\u{0B}", Options::empty()).into_offset_iter().count()`
+  panics on 0.13.4. bevy_markup reaches it from `.md` templates
+  (`md::dedent_blocks` → `code_ranges`); found by the honggfuzz `html`
+  target (bug_0178).
+- **Upstream fix:** PR [#1021](https://github.com/pulldown-cmark/pulldown-cmark/pull/1021)
+  ("Correctly parse all-spaces line between refdef and paragraph", for
+  issue [#997](https://github.com/pulldown-cmark/pulldown-cmark/issues/997)),
+  cherry-picked into the 0.13 branch as `078feb520e` and released in 0.13.5.
+  Bisected: `96201943db` (just before) panics, `078feb520e` does not. Issue
+  [#1084](https://github.com/pulldown-cmark/pulldown-cmark/issues/1084) is
+  another input reaching the same `unwrap()` (tasklists + strikethrough),
+  also fixed for its input.
+- **Local workaround:** none needed; `Cargo.toml` requires
+  `pulldown-cmark` ≥ 0.13.5 and all five lockfiles are on 0.13.5.
+- **Still open upstream (unreported):** on `main` (2026-10-23) both
+  iterators share `next_event_range`, whose `Some(cur_ix)` arm still does
+  `self.tree.push(); self.tree.cur().unwrap()` for a tight paragraph, so
+  any other way of producing an empty tight paragraph would panic again.
+  **PR sketch:** if the pushed paragraph has no child (`cur()` is `None`),
+  pop back, step to its next sibling and recurse, as the `None` arm right
+  above already does for tight paragraphs, instead of unwrapping; add the
+  inputs above and #1084's as tests. Check upstream's issues and fuzz
+  corpus first; it may be reported or covered by now.
 
 ## Not upstream bugs (recorded so they aren't re-filed)
 

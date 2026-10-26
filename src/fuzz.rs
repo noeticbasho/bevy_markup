@@ -406,4 +406,15 @@ mod tests {
             }
         }
     }
+
+    /// bug_0178: the html target's crash (honggfuzz, 2026-10-26), minimized
+    /// with `cargo fuzz tmin` to these 9 bytes (also a seed in
+    /// fuzz/seeds/html). The `.md` path's conversion panicked inside
+    /// pulldown-cmark 0.13.4 (UPSTREAM.md U13); this must never panic.
+    #[test]
+    fn a_refdef_list_item_crash_from_honggfuzz_does_not_panic() {
+        let bytes = b"+\t[<]:\xda\n\x0b";
+        let text = String::from_utf8_lossy(bytes);
+        let _ = render_html(&text, "{}");
+    }
 }

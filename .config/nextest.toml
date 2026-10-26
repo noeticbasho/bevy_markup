@@ -1,0 +1,13 @@
+# cargo-nextest (https://nexte.st): an alternative test runner to
+# `cargo test` with per-test timing. `cargo nextest run --workspace` also
+# writes a JUnit report (target/nextest/<profile>/junit.xml), which
+# ../analytics (`analytics record tests`) ingests: per-test outcome and
+# duration. Doc tests are not run by nextest: `cargo test --doc`.
+# CI still runs `cargo test`.
+
+[profile.default.junit]
+path = "junit.xml"
+# Output of failing tests stays in the report for debugging; analytics
+# does not ingest it.
+store-failure-output = true
+store-success-output = false
