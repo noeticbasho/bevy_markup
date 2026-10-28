@@ -36,3 +36,7 @@
 {"ts": "2026-10-28T22:24:50Z", "op": "ingest", "consumer": "sdlc-complete", "page": ".aiwg/testing/test-strategy.md", "sources": 8}
 {"ts": "2026-10-28T22:24:50Z", "op": "ingest", "consumer": "sdlc-complete", "page": ".aiwg/testing/defect-register.md", "sources": 9}
 {"ts": "2026-10-28T22:24:50Z", "op": "ingest", "consumer": "sdlc-complete", "page": ".aiwg/architecture/README.md", "sources": 7}
+{"ts": "2026-10-28T23:01:06Z", "op": "ingest", "consumer": "sdlc-complete", "page": ".aiwg/risks/risk-list.md", "sources": 10}
+{"ts": "2026-10-28T23:01:06Z", "op": "ingest", "consumer": "sdlc-complete", "page": ".aiwg/testing/test-strategy.md", "sources": 8}
+{"ts": "2026-10-28T23:01:06Z", "op": "ingest", "consumer": "sdlc-complete", "page": ".aiwg/intake/solution-profile.md", "sources": 10}
+{"ts": "2026-10-28T23:01:06Z", "op": "ingest", "consumer": "sdlc-complete", "page": ".aiwg/intake/project-intake.md", "sources": 18}

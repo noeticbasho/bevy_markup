@@ -77,7 +77,7 @@ One developer with AI coding agents (Claude Code, omp with other models); ADRs, 
 
 ## Known Issues and Technical Debt
 
-- The nightly workflow failed every night 2026-10-14 to 2026-10-28; its causes were fixed on 2026-10-28 (bug_0179, bug_0180, the oracle script). No nightly has run since: the next one confirms it (R-001).
+- The nightly workflow failed every night 2026-10-14 to 2026-10-28; its causes were fixed on 2026-10-28 (bug_0179, bug_0180, the oracle script). The first nightly after the fixes was green in all nine jobs (run 40780067152, dispatched on `7792cea` 2026-10-29).
 - `flex-shrink` defaults to 0, not CSS's 1: copied browser CSS misbehaves silently (bug_0028; open design question).
 - `CHANGELOG.md` has a large `[Unreleased]` section since 0.7.0, now with breaking changes (argument attributes need `| json`; `Focusable` and `HtmlAnchor` gained fields; anchors flip by default); prototype_19 is still on 0.4.0.
 - Known limits per area (layout, selectors, inline boxes, text, fonts): @AGENTS.md "Limits and next steps".

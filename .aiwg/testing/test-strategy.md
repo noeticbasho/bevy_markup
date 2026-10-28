@@ -33,7 +33,7 @@ The library's promise is that HTML/CSS/Fluent behave as an author expects and th
 
 `ci.yml` on every push and PR: warning-free checks and docs, `cargo test` (all of the push-time levels above), the Fluent oracle regeneration check. `nightly.yml`: golden images, browser oracle vs current Chrome, fuzzing, coverage, benchmarks — failures are reports to triage, not merge blockers. `cache.yml` builds shared caches once. Schedule order is shuffled in every test run.
 
-Status on 2026-10-29: CI green at `0262408` (the run on `7792cea` in progress); bug_0181 fixed a timing test that failed on a slower runner. The nightly was red 2026-10-14 to 2026-10-28; its causes are fixed and the first run after them is pending (risk R-001). A timing-based scaling test can pass narrowly on a fast machine and fail on CI: bug_0181 added a deterministic step-count test beside it.
+Status on 2026-10-29: CI green at `7792cea`; bug_0181 fixed a timing test that failed on a slower runner. The nightly was red 2026-10-14 to 2026-10-28; after the fixes it is green in all nine jobs (run 40780067152, dispatched on `7792cea` 2026-10-29; risk R-001). A timing-based scaling test can pass narrowly on a fast machine and fail on CI: bug_0181 added a deterministic step-count test beside it.
 
 ## Defect Management
 

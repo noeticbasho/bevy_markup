@@ -1,18 +1,18 @@
 metadata:
   schema_version: "1.0.0"
-  created_at: "2026-10-28T22:24:50Z"
+  created_at: "2026-10-28T23:01:06Z"
   description: "Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)"
 entity:
   id: "urn:aiwg:artifact:.aiwg/risks/risk-list.md"
   type: "document"
-  created_at: "2026-10-28T22:24:50Z"
-  checksum: "sha256:552e0dd01923af661412bffed17fca94383df28ad6ea6426af792e221d70a03d"
-  size_bytes: 5561
+  created_at: "2026-10-28T23:01:06Z"
+  checksum: "sha256:24b10ba8ae3057502f8fa2cd8eb5ead368c9d2f8df487a1ea85c0ae104aae023"
+  size_bytes: 5591
 activity:
   id: "urn:aiwg:activity:derivation:risk-list:1"
   type: "derivation"
-  started_at: "2026-10-28T22:24:50Z"
-  ended_at: "2026-10-28T22:24:50Z"
+  started_at: "2026-10-28T23:01:06Z"
+  ended_at: "2026-10-28T23:01:06Z"
   description: "Derived from the repository records cited in the page"
 agent:
   id: "urn:aiwg:agent:claude-opus-5-5"
@@ -23,7 +23,7 @@ relationships:
   wasGeneratedBy:
     entity: "urn:aiwg:artifact:.aiwg/risks/risk-list.md"
     activity: "urn:aiwg:activity:derivation:risk-list:1"
-    time: "2026-10-28T22:24:50Z"
+    time: "2026-10-28T23:01:06Z"
   used:
     - activity: "urn:aiwg:activity:derivation:risk-list:1"
       entity: "urn:aiwg:artifact:AGENTS.md"

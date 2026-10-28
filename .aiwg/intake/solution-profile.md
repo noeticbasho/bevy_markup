@@ -15,11 +15,11 @@
 | Reliability | High | 179 of 181 filed bugs fixed with regression tests (the other two: one won't-fix, one withdrawn); pure update state machine; schedule-order shuffling in every test run |
 | Testing & quality | Very high | oracles, golden images, property/model tests, fuzzing, mutants, coverage (88–98 % by layer) |
 | Process rigor | High | 37 ADRs (0034 and 0036 accepted after measured trials; 0035 and 0037 rejected on measured evidence), bug reports, six review sessions, changelog convention, CI on every push |
-| Operations | Medium | nightly fixed 2026-10-28, first run after the fixes pending; releases lag `main` (large `[Unreleased]`, now with breaking changes) |
+| Operations | Medium | nightly green again since 2026-10-29 (red 2026-10-14 to 2026-10-28); releases lag `main` (large `[Unreleased]`, now with breaking changes) |
 
 ## Recommended Profile Adjustments
 
-- Confirm the next nightly is green, and triage a red one within days; treat it as a reason to file bugs, not noise (R-001).
+- Keep the nightly green: triage a red one within days and treat it as a reason to file bugs, not noise (R-001).
 - Release the `[Unreleased]` work (a minor bump: it breaks templates without `| json`) and move prototype_19 off 0.4.0 (R-004).
 
 ## Improvement Roadmap
