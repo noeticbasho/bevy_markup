@@ -50,5 +50,6 @@ as `[INFERENCE]`.
 | [0031](./0031-windowed-build-spec-level-culling.md) | Windowed build: spec-level viewport culling with height-preserving spacers | Accepted; amended by 0032 |
 | [0032](./0032-windowed-build-revised.md) | Windowed build, revised: one unit system, nested culling, scroll reuse and slack | Accepted; amended by 0033 |
 | [0033](./0033-sibling-alignment-and-height-estimates.md) | Sibling alignment and height estimates for content changes | Accepted |
+| [0034](./0034-match-selectors-with-parcel-selectors.md) | Match selectors with lightningcss's selector engine (parcel_selectors) | Proposed |
 
 Add new records to this index in the same commit that adds the file.
