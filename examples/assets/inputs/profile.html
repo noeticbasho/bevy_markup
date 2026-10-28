@@ -10,7 +10,7 @@
   <input type="text" id="title" value="{{ title }}">
 </div>
 
-<p class="preview" data-l10n-id="profile-preview" data-l10n-args='{{ preview_args }}'>Typing: {{ live_name }} — {{ live_title }}</p>
+<p class="preview" data-l10n-id="profile-preview" data-l10n-args='{{ {"name": live_name, "title": live_title} | json }}'>Typing: {{ live_name }} — {{ live_title }}</p>
 
 <div class="actions">
   <p id="reset-name" class="action" data-on-click="reset-name" data-l10n-id="profile-reset-name">Reset name</p>

@@ -10,10 +10,11 @@
 //! message's formatted value as its content, replacing its children; its own
 //! content is the fallback when the message is missing or no [`ActiveLocale`]
 //! is set. `data-l10n-args` is a JSON object of Fluent variables (numbers stay
-//! numbers, so plural selectors work). Build it with Tera, which prints a
-//! map as JSON with its strings escaped — a map literal,
-//! `data-l10n-args='{{ {"name": player, "coins": coins} }}'`, or a whole
-//! map from one variable, `data-l10n-args='{{ args }}'`. Don't splice a
+//! numbers, so plural selectors work). Build it with the `json` filter the
+//! crate registers on its Tera environment, which prints a value as JSON
+//! with its strings escaped — a map literal,
+//! `data-l10n-args='{{ {"name": player, "coins": coins} | json }}'`, or a whole
+//! map from one variable, `data-l10n-args='{{ args | json }}'`. Don't splice a
 //! value into hand-written JSON (`'{"name": "{{ player }}"}'`): a value
 //! holding `"` then adds arguments of its own.
 //!

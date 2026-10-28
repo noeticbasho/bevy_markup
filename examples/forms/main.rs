@@ -97,16 +97,11 @@ fn handle_signals(
     };
     for signal in signals.read() {
         match signal.trigger {
-            // `Submit` carries the named inputs' values as a JSON object.
-            // The receipt's `data-l10n-args` gets the whole map
-            // serialized: typed text spliced into hand-written JSON would
-            // break the JSON on a `"` or `\`.
+            // `Submit` carries the named inputs' values as a JSON object;
+            // the receipt prints it as its `data-l10n-args` (`| json`).
             SignalTrigger::Submit if signal.name == "signup" => {
                 for mut context in &mut contexts {
                     context.insert("submitted", &signal.payload);
-                    let args =
-                        serde_json::to_string(&signal.payload).unwrap_or_else(|_| "{}".to_owned());
-                    context.insert("submitted_args", &args);
                 }
             }
             SignalTrigger::Click if signal.name == "edit-again" => {

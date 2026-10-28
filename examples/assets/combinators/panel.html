@@ -3,7 +3,7 @@
 
 {% for group in groups %}
 <div class="group{% if group.selected %} selected{% endif %}" tabindex="0" data-on-click="select-{{ loop.index0 }}">
-  <h2 data-l10n-id="sel-group" data-l10n-args='{{ {"label": group.label} }}'>Group {{ group.label }}</h2>
+  <h2 data-l10n-id="sel-group" data-l10n-args='{{ {"label": group.label} | json }}'>Group {{ group.label }}</h2>
   <p class="direct" data-l10n-id="sel-direct">A direct paragraph.</p>
   <div class="nested">
     <p class="deep" data-l10n-id="sel-nested">A nested paragraph, one level down.</p>
@@ -11,4 +11,4 @@
 </div>
 {% endfor %}
 
-<p class="note" data-l10n-id="sel-note" data-l10n-args='{{ {"selected": selected_label} }}'>Selected: {{ selected_label }}</p>
+<p class="note" data-l10n-id="sel-note" data-l10n-args='{{ {"selected": selected_label} | json }}'>Selected: {{ selected_label }}</p>

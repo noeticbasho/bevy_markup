@@ -7,12 +7,12 @@
   <div class="cell{% if picks[0] %} picked{% endif %}" id="portrait" tabindex="0" data-on-click="pick-portrait">
     <h2 data-l10n-id="board-portrait">Portrait</h2>
     <img class="cat" src="../shared/cat.png">
-    <p class="who" data-l10n-id="board-who" data-l10n-args='{{ {"name": player} }}'>{{ player }}</p>
+    <p class="who" data-l10n-id="board-who" data-l10n-args='{{ {"name": player} | json }}'>{{ player }}</p>
   </div>
   <div class="cell{% if picks[1] %} picked{% endif %}" id="stats" tabindex="0" data-on-click="pick-stats">
     <h2 data-l10n-id="board-stats">Stats</h2>
-    <p class="stat" data-l10n-id="board-health" data-l10n-args='{{ {"hp": hp, "max": max_hp} }}'>{{ hp }} of {{ max_hp }} health</p>
-    <p class="stat" data-l10n-id="board-coins" data-l10n-args='{{ {"coins": coins} }}'>{{ coins }} coins</p>
+    <p class="stat" data-l10n-id="board-health" data-l10n-args='{{ {"hp": hp, "max": max_hp} | json }}'>{{ hp }} of {{ max_hp }} health</p>
+    <p class="stat" data-l10n-id="board-coins" data-l10n-args='{{ {"coins": coins} | json }}'>{{ coins }} coins</p>
   </div>
   <div class="cell{% if picks[2] %} picked{% endif %}" id="gear" tabindex="0" data-on-click="pick-gear">
     <h2 data-l10n-id="board-gear">Gear</h2>

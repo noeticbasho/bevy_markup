@@ -43,7 +43,7 @@ fn fake_frame() -> Image {
 /// its parse must not panic either.
 pub fn render_html(source: &str, context_json: &str) -> Result<String, String> {
     let name = "fuzz/template.html";
-    let mut tera = tera::Tera::new();
+    let mut tera = crate::template::new_tera();
     tera.add_raw_template(name, source)
         .map_err(|err| err.to_string())?;
     let value: serde_json::Value =
@@ -60,7 +60,7 @@ pub fn render_html(source: &str, context_json: &str) -> Result<String, String> {
     // The `.md` path: the load-time Markdown conversion (`to_html_template`,
     // ADR 0020) runs on the same bytes, then the converted template renders.
     let md_source = crate::md::to_html_template(source);
-    let mut tera = tera::Tera::new();
+    let mut tera = crate::template::new_tera();
     tera.add_raw_template(md_name, &md_source)
         .map_err(|err| err.to_string())?;
     let template = HtmlTemplate {

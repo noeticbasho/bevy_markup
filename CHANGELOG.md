@@ -118,6 +118,12 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   Previously `auto` scrolled always.
 
 ### Changed
+- **Breaking:** argument attributes (`data-l10n-args`, `data-with`,
+  `data-tooltip-args`) are printed with the new `json` Tera filter:
+  `data-l10n-args='{{ {"name": player} | json }}'`. They are parsed as
+  plain JSON; the rewrite of Tera's Rust-style escapes (`\u{200d}`) is
+  gone, so a value printed without `| json` fails to parse once a string
+  holds such a character (and the element shows its fallback).
 - **Interaction restyles are scoped (ADR 0029):** a `:hover`/`:active`/
   `:focus` change pairs against the cached build like a content change:
   the flipped elements and their ancestors re-collect, and their

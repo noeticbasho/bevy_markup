@@ -3,8 +3,8 @@
    content inside each element is the fallback for a missing translation. #}
 <section class="l10n">
   <h1 data-l10n-id="inventory-title">Inventory</h1>
-  <p data-l10n-id="greeting" data-l10n-args='{{ {"name": player | title} }}'></p>
-  <p data-l10n-id="hp-status" data-l10n-args='{{ {"hp": hp, "max": max_hp} }}'></p>
+  <p data-l10n-id="greeting" data-l10n-args='{{ {"name": player | title} | json }}'></p>
+  <p data-l10n-id="hp-status" data-l10n-args='{{ {"hp": hp, "max": max_hp} | json }}'></p>
   <h2 data-l10n-id="styled-heading">A <i>styled</i> <b>heading</b> <em><strong>here</strong></em></h2>
   <p data-l10n-id="styles-demo">Plain, <b>bold</b>, <strong>strong</strong>, <i>italic</i>, <em>em</em>, and <b><i>both</i></b>.</p>
   <p data-l10n-id="shortcut-hint">Press <kbd>Ctrl</kbd>+<kbd>S</kbd> to call <code>save_game()</code>, or <b><code>bold code</code></b>.</p>
@@ -16,11 +16,11 @@ fn main() {
 </pre>
   <ul>
     {% for item in items %}
-    <li data-l10n-id="item-count" data-l10n-args='{{ {"count": item.count, "item": item.name} }}'></li>
+    <li data-l10n-id="item-count" data-l10n-args='{{ {"count": item.count, "item": item.name} | json }}'></li>
     {% endfor %}
   </ul>
   <h2 data-l10n-id="field-notes-title">Field notes</h2>
-  <p data-l10n-id="field-notes-torches" data-l10n-args='{{ {"name": player | title} }}'>The torches sputter
+  <p data-l10n-id="field-notes-torches" data-l10n-args='{{ {"name": player | title} | json }}'>The torches sputter
     in the damp air of the lower galleries. {{ player | title }} counts what is left and decides that
     <i>three</i> will have to be enough for the descent, though the map suggests otherwise.</p>
   <p data-l10n-id="field-notes-rope">A length of rope, frayed at one end, is all that remains of the last
@@ -29,7 +29,7 @@ fn main() {
   <p data-l10n-id="field-notes-key">The key is gone. Somewhere between the cistern and the collapsed stair it
     slipped free, and with it any hope of opening the vault the <em>easy</em> way. There is always the hard
     way.</p>
-  <p data-l10n-id="field-notes-health" data-l10n-args='{{ {"hp": hp, "max": max_hp} }}'>Health holds at
+  <p data-l10n-id="field-notes-health" data-l10n-args='{{ {"hp": hp, "max": max_hp} | json }}'>Health holds at
     {{ hp }} of {{ max_hp }}. Not great, not terrible. The next rest point is marked on the map with a small
     <code>★</code>, two levels down and an unknown distance east.</p>
   {# A long expedition log, so this panel overflows (and shows its
@@ -41,7 +41,7 @@ fn main() {
   {% set events = ["march", "rest", "found", "storm", "map", "camp"] %}
   <ul class="log">
   {% for day in range(start=1, end=61) %}
-    <li class="log-entry" data-l10n-id="log-entry" data-l10n-args='{{ {"day": day, "place": places[day % 4], "event": events[(day * 5) % 6], "count": day % 4 + 1} }}'>Day {{ day }}</li>
+    <li class="log-entry" data-l10n-id="log-entry" data-l10n-args='{{ {"day": day, "place": places[day % 4], "event": events[(day * 5) % 6], "count": day % 4 + 1} | json }}'>Day {{ day }}</li>
   {% endfor %}
   </ul>
 </section>

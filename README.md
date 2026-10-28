@@ -26,9 +26,9 @@ systems on your side.
 ```html
 <!-- examples/assets/quickstart/hello.html -->
 <h1 data-l10n-id="hello-title">Hello, HTML!</h1>
-<p data-l10n-id="hello-greeting" data-l10n-args='{{ {"name": player} }}'>Welcome, {{ player }}.</p>
+<p data-l10n-id="hello-greeting" data-l10n-args='{{ {"name": player} | json }}'>Welcome, {{ player }}.</p>
 <div class="wallet">
-  <p data-l10n-id="hello-coins" data-l10n-args='{{ {"coins": coins} }}'>You have {{ coins }} coins.</p>
+  <p data-l10n-id="hello-coins" data-l10n-args='{{ {"coins": coins} | json }}'>You have {{ coins }} coins.</p>
   <div class="actions">
     <p id="add-coin" class="action" autofocus data-on-click="add-coin" data-l10n-id="hello-add-coin">+ Add a coin</p>
     <p id="language" class="action" data-on-click="switch-language" data-l10n-id="hello-language">Language</p>

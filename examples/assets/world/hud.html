@@ -1,5 +1,5 @@
 <html class="hud">
-<p data-l10n-id="world-on-screen" data-l10n-args='{{ {"count": on_screen, "total": total} }}'>Plates on screen: {{ on_screen }} of {{ total }}</p>
+<p data-l10n-id="world-on-screen" data-l10n-args='{{ {"count": on_screen, "total": total} | json }}'>Plates on screen: {{ on_screen }} of {{ total }}</p>
 <div class="hud-buttons">
   <p class="button" id="hit" autofocus data-on-click="hit" data-l10n-id="world-hit">Hit nearest</p>
   <p class="button" id="respawn" data-on-click="respawn" data-l10n-id="world-respawn">Everyone back</p>

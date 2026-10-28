@@ -263,8 +263,8 @@ const DOC_FLAT_MD: &str = "# Report {{ tick }}
 {% endfor %}
 ";
 
-const LOCALIZED_HTML: &str = "{% for row in rows %}<p data-l10n-id=\"tb-w-line\" data-l10n-args='{{ {\"n\": row.value, \"who\": row.name} }}'>x</p>
-<p data-l10n-id=\"tb-w-count\" data-l10n-args='{{ {\"n\": row.value} }}'>x</p>
+const LOCALIZED_HTML: &str = "{% for row in rows %}<p data-l10n-id=\"tb-w-line\" data-l10n-args='{{ {\"n\": row.value, \"who\": row.name} | json }}'>x</p>
+<p data-l10n-id=\"tb-w-count\" data-l10n-args='{{ {\"n\": row.value} | json }}'>x</p>
 {% endfor %}";
 
 const CARD_HTML: &str =
@@ -628,8 +628,8 @@ pub fn plan(scenario: &str, dir: &Dir, prefix: &str) -> Plan {
             )
         }
         "hostile-args" => {
-            let html = "{% for p in payloads %}<p data-l10n-id=\"tb-w-hostile\" data-l10n-args='{{ {\"n\": 2, \"who\": p} }}'>x</p>
-<p data-l10n-id=\"tb-w-hostile-cached\" data-l10n-args='{{ {\"who\": p} }}'>x</p>
+            let html = "{% for p in payloads %}<p data-l10n-id=\"tb-w-hostile\" data-l10n-args='{{ {\"n\": 2, \"who\": p} | json }}'>x</p>
+<p data-l10n-id=\"tb-w-hostile-cached\" data-l10n-args='{{ {\"who\": p} | json }}'>x</p>
 {% endfor %}";
             let paths = write(
                 dir,
@@ -656,7 +656,7 @@ pub fn plan(scenario: &str, dir: &Dir, prefix: &str) -> Plan {
             )
         }
         "args-injection" => {
-            let html = "<p id=\"literal\" data-l10n-id=\"tb-w-greet\" data-l10n-args='{{ {\"name\": name} }}'>x</p>
+            let html = "<p id=\"literal\" data-l10n-id=\"tb-w-greet\" data-l10n-args='{{ {\"name\": name} | json }}'>x</p>
 <p id=\"splice\" data-l10n-id=\"tb-w-greet\" data-l10n-args='{\"name\": \"{{ name }}\"}'>x</p>";
             let paths = write(
                 dir,

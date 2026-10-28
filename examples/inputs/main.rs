@@ -69,10 +69,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>, mut fonts: ResM
             // What the preview paragraph shows; kept in step with the
             // fields' live text by `read_fields_into_preview`.
             .with("live_name", "Ada")
-            .with("live_title", "Cartographer")
-            // The preview's `data-l10n-args`, serialized (kept in step by
-            // `read_fields_into_preview`).
-            .with("preview_args", r#"{"name":"Ada","title":"Cartographer"}"#),
+            .with("live_title", "Cartographer"),
         Node {
             width: Val::Px(560.0),
             margin: UiRect::all(Val::Auto),
@@ -115,20 +112,6 @@ fn read_fields_into_preview(
             .iter()
             .any(|(key, value)| context.get(key).and_then(|v| v.as_str()) != Some(value.as_str()));
         if changed {
-            // The receipt's `data-l10n-args` is the whole map serialized
-            // by the app: typed text spliced into the template's
-            // hand-written JSON broke it on a quote or backslash (the
-            // forms receipt's fix, applied here too).
-            let args = serde_json::to_string(
-                &live
-                    .iter()
-                    .map(|(key, value)| {
-                        ((*key).to_owned(), serde_json::Value::from(value.as_str()))
-                    })
-                    .collect::<serde_json::Map<String, serde_json::Value>>(),
-            )
-            .unwrap_or_default();
-            context.insert("preview_args", &args);
             for (key, value) in live.iter() {
                 context.insert(*key, value);
             }

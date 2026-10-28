@@ -6,11 +6,11 @@
 <html class="plate{% if hidden %} hidden{% endif %}" style="opacity: {{ alpha }}; z-index: {{ z }}">
 <div class="card {{ faction }}">
 <div class="head">
-  <p class="level {{ faction }}" data-l10n-id="world-level" data-l10n-args='{{ {"level": level} }}'>Lv {{ level }}</p>
+  <p class="level {{ faction }}" data-l10n-id="world-level" data-l10n-args='{{ {"level": level} | json }}'>Lv {{ level }}</p>
   <p class="name {{ faction }}">{{ name }}</p>
 </div>
-<p class="title" data-l10n-id="world-title" data-l10n-args='{{ {"epithet": epithet, "faction": faction} }}'>{{ epithet }} · {{ faction }}</p>
+<p class="title" data-l10n-id="world-title" data-l10n-args='{{ {"epithet": epithet, "faction": faction} | json }}'>{{ epithet }} · {{ faction }}</p>
 <div class="bar"><div class="fill {{ health }}" style="width: {{ hp }}%"></div></div>
-<p class="status" data-l10n-id="world-status" data-l10n-args='{{ {"hp": hp, "hits": hits} }}'>{{ hp }} HP</p>
+<p class="status" data-l10n-id="world-status" data-l10n-args='{{ {"hp": hp, "hits": hits} | json }}'>{{ hp }} HP</p>
 </div>
 </html>

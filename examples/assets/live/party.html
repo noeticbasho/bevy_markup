@@ -12,7 +12,7 @@
   <div class="unit{% if unit.low %} low{% endif %}" id="unit-{{ unit.name }}" tabindex="0" style="opacity: {{ unit.opacity }}">
     <div class="badge" is="badge"></div>
     <div class="unit-body">
-      <p data-l10n-id="live-unit" data-l10n-args='{{ {"name": unit.name, "hp": unit.hp} }}'>{{ unit.name }}: {{ unit.hp }} HP</p>
+      <p data-l10n-id="live-unit" data-l10n-args='{{ {"name": unit.name, "hp": unit.hp} | json }}'>{{ unit.name }}: {{ unit.hp }} HP</p>
       <div class="bar"><div class="bar-fill{% if unit.low %} low{% endif %}" style="width: {{ unit.hp }}%"></div></div>
     </div>
   </div>

@@ -6,16 +6,16 @@
    frame. #}
 <div class="layout">
   <div class="sidebar" id="sidebar" style="width: {{ settings.sidebar }}px">
-    <p class="label" data-l10n-id="calc-sidebar" data-l10n-args='{{ {"sidebar": settings.sidebar} }}'>Sidebar {{ settings.sidebar }}px</p>
+    <p class="label" data-l10n-id="calc-sidebar" data-l10n-args='{{ {"sidebar": settings.sidebar} | json }}'>Sidebar {{ settings.sidebar }}px</p>
   </div>
   <div class="content" id="content" style="width: calc(100% - {{ settings.sidebar }}px - 12px)">
-    <h2 class="headline" data-l10n-id="calc-headline" data-l10n-args='{{ {"indent": settings.indent} }}' style="margin-left: calc({{ settings.indent }}px + 1em)">Indented by {{ settings.indent }}px + 1em</h2>
-    <p class="formula" data-l10n-id="calc-formula-content" data-l10n-args='{{ {"sidebar": settings.sidebar} }}'>width: calc(100% − {{ settings.sidebar }}px − 12px)</p>
+    <h2 class="headline" data-l10n-id="calc-headline" data-l10n-args='{{ {"indent": settings.indent} | json }}' style="margin-left: calc({{ settings.indent }}px + 1em)">Indented by {{ settings.indent }}px + 1em</h2>
+    <p class="formula" data-l10n-id="calc-formula-content" data-l10n-args='{{ {"sidebar": settings.sidebar} | json }}'>width: calc(100% − {{ settings.sidebar }}px − 12px)</p>
     <div class="cards">
       {% for i in range(start=1, end=settings.cards + 1) %}
       <div class="card" id="card-{{ i }}" style="width: calc(100% / {{ settings.cards }} - 8px)">
         <p class="count">{{ i }}/{{ settings.cards }}</p>
-        <p class="formula" data-l10n-id="calc-formula-card" data-l10n-args='{{ {"cards": settings.cards} }}'>calc(100% / {{ settings.cards }} − 8px)</p>
+        <p class="formula" data-l10n-id="calc-formula-card" data-l10n-args='{{ {"cards": settings.cards} | json }}'>calc(100% / {{ settings.cards }} − 8px)</p>
       </div>
       {% endfor %}
     </div>
@@ -29,7 +29,7 @@
   <div class="setting-row">
     <div class="arrow" tabindex="0" data-on-click="{{ setting[0] }}-down"><p>−</p></div>
     <div class="value" tabindex="0" data-setting="{{ setting[0] }}">
-      <p data-l10n-id="{{ setting[1] }}" data-l10n-args='{{ {"value": settings[setting[0]]} }}'>{{ setting[0] }}: {{ settings[setting[0]] }}</p>
+      <p data-l10n-id="{{ setting[1] }}" data-l10n-args='{{ {"value": settings[setting[0]]} | json }}'>{{ setting[0] }}: {{ settings[setting[0]] }}</p>
     </div>
     <div class="arrow" tabindex="0" data-on-click="{{ setting[0] }}-up"><p>+</p></div>
   </div>

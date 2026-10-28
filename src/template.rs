@@ -5,6 +5,10 @@
 //! HTML autoescaping of `{{ }}` values. A plain `.html` file with no Tera
 //! syntax is a template that renders to itself.
 //!
+//! The crate registers a `json` filter ([`new_tera`]): argument attributes
+//! (`data-l10n-args`, `data-with`, `data-tooltip-args`) print their value
+//! with it, `'{{ {"name": player} | json }}'`.
+//!
 //! Templates compose. `{% extends "base.html" %}` and `{% include
 //! "part.html" %}` name other templates by path relative to the template's
 //! own file (like a URL: `../lib/ui.html`, `/ui/lib.html` from the asset
@@ -216,66 +220,30 @@ static C1_REPLACEMENTS: &[u16] = &[
     0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
     0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178,
 ];
-
-/// Parses an attribute's JSON (`data-l10n-args`, `data-with`,
-/// `data-tooltip-args`), accepting what Tera prints for a map. The docs
-/// build these attributes with Tera map literals
-/// (`'{{ {"name": player} }}'`), and Tera prints a map's strings with
-/// Rust's `Debug` escaping: `\u{200d}` for a zero-width joiner or a
-/// combining accent, `\u{1}` for a control character, `\0` for NUL — none
-/// of them JSON. A player name with a family emoji lost its whole
-/// translation to the fallback (found by the testbench, bug_0128). Those
-/// two escapes become JSON's `\uXXXX` (surrogate pairs above U+FFFF);
-/// everything else is parsed as written.
-pub(crate) fn parse_attribute_json(text: &str) -> serde_json::Result<serde_json::Value> {
-    serde_json::from_str(&json_from_tera(text))
+/// A Tera environment as the template loader builds it (public so tools
+/// can compile templates exactly as the loader does): autoescaping for
+/// the markup extensions and the crate's filters — `json`, which prints a
+/// value as JSON for the argument attributes (`data-l10n-args`,
+/// `data-with`, `data-tooltip-args`): `'{{ {"name": player} | json }}'`.
+/// Tera prints a value without it in Rust's `Debug` style, which isn't
+/// JSON once a string holds an escape (`\u{200d}` in an emoji sequence,
+/// bug_0128).
+pub fn new_tera() -> tera::Tera {
+    let mut tera = tera::Tera::new();
+    tera.autoescape_on([".html", ".htm", ".xml", ".md", ".markdown"]);
+    tera.register_filter("json", json_filter);
+    tera
 }
 
-/// [`parse_attribute_json`]'s rewrite of Rust `Debug` escapes.
-fn json_from_tera(text: &str) -> std::borrow::Cow<'_, str> {
-    if !text.contains("\\u{") && !text.contains("\\0") {
-        return std::borrow::Cow::Borrowed(text);
-    }
-    let bytes = text.as_bytes();
-    let mut out = String::with_capacity(text.len() + 16);
-    let mut at = 0;
-    while at < bytes.len() {
-        if bytes[at] == b'\\' {
-            match bytes.get(at + 1) {
-                Some(b'u') if bytes.get(at + 2) == Some(&b'{') => {
-                    let escape = text[at + 3..].find('}').and_then(|close| {
-                        let code = u32::from_str_radix(&text[at + 3..at + 3 + close], 16).ok()?;
-                        Some((char::from_u32(code)?, close))
-                    });
-                    if let Some((character, close)) = escape {
-                        let mut units = [0u16; 2];
-                        for unit in character.encode_utf16(&mut units) {
-                            out.push_str(&format!("\\u{unit:04x}"));
-                        }
-                        at += 3 + close + 1;
-                        continue;
-                    }
-                }
-                Some(b'0') => {
-                    out.push_str("\\u0000");
-                    at += 2;
-                    continue;
-                }
-                // Any other escape pair is kept whole, so an escaped
-                // backslash can't start a rewrite (`\\u{` is text).
-                Some(next) if next.is_ascii() => {
-                    out.push_str(&text[at..at + 2]);
-                    at += 2;
-                    continue;
-                }
-                _ => {}
-            }
-        }
-        let character = text[at..].chars().next().expect("at a char boundary");
-        out.push(character);
-        at += character.len_utf8();
-    }
-    std::borrow::Cow::Owned(out)
+/// The `json` filter: the value as compact JSON.
+fn json_filter(value: tera::Value, _: tera::Kwargs, _: &tera::State) -> tera::TeraResult<String> {
+    serde_json::to_string(&value).map_err(|err| tera::Error::message(format!("json: {err}")))
+}
+
+/// Parses an argument attribute's JSON (`data-l10n-args`, `data-with`,
+/// `data-tooltip-args`), as printed by the `json` filter.
+pub(crate) fn parse_attribute_json(text: &str) -> serde_json::Result<serde_json::Value> {
+    serde_json::from_str(text)
 }
 
 /// `err: source: source…` — Tera puts the useful detail in the sources.
@@ -692,8 +660,7 @@ async fn load_template(
         }
         templates.push((path.to_string(), source));
     }
-    let mut tera = tera::Tera::new();
-    tera.autoescape_on([".html", ".htm", ".xml", ".md", ".markdown"]);
+    let mut tera = new_tera();
     tera.add_raw_templates(templates)?;
     Ok(HtmlTemplate { tera, name })
 }
@@ -720,20 +687,34 @@ fn remote_includes_are_refused() {
     assert_eq!(references[0].to_string(), "embedded://crate/part.html");
 }
 
-/// Tera's `Debug` escapes become JSON escapes; an escaped backslash
-/// before `u{` stays text; plain JSON passes through untouched.
+/// The `json` filter prints JSON that survives autoescaping and the
+/// attribute's entity decoding unchanged, whatever the string holds
+/// (bug_0128: emoji sequences, combining accents, control characters).
+/// Without the filter Tera prints Rust `Debug` escapes, which aren't JSON:
+/// the attribute fails to parse (the removed `\u{…}` rewrite accepted
+/// them; templates add `| json` instead).
 #[test]
-fn attribute_json_accepts_tera_escapes() {
-    let parsed = |text: &str| parse_attribute_json(text).map(|value| value["v"].clone());
-    assert_eq!(parsed(r#"{"v": "a\u{200d}b"}"#).unwrap(), "a\u{200d}b");
-    assert_eq!(parsed(r#"{"v": "\u{1F468}"}"#).unwrap(), "\u{1F468}");
-    assert_eq!(parsed(r#"{"v": "x\0y"}"#).unwrap(), "x\0y");
-    assert_eq!(parsed(r#"{"v": "\\u{41}"}"#).unwrap(), "\\u{41}");
-    assert_eq!(
-        parsed(r#"{"v": "\u00e9 \"q\" \n"}"#).unwrap(),
-        "\u{e9} \"q\" \n"
-    );
-    assert!(parse_attribute_json(r#"{"v": "\u{zz}"}"#).is_err());
+fn json_filter_round_trips_any_string() {
+    let render = |template: &str, value: &str| {
+        let mut tera = new_tera();
+        tera.add_raw_template("t.html", template).unwrap();
+        let context = tera::Context::from_serialize(&serde_json::json!({ "s": value })).unwrap();
+        decode_entities(&tera.render("t.html", &context).unwrap())
+    };
+    for value in [
+        "Ada \u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}",
+        "Jose\u{301}",
+        "bell\u{7} nul\u{0}",
+        "quotes \" ' and <tags> & \\u{41}",
+        "",
+    ] {
+        let json = render(r#"{{ {"v": s, "n": 2} | json }}"#, value);
+        let parsed = parse_attribute_json(&json).unwrap_or_else(|err| panic!("{json:?}: {err}"));
+        assert_eq!(parsed["v"], value, "{json:?}");
+        assert_eq!(parsed["n"], 2, "numbers stay numbers (plural selectors)");
+    }
+    let debug = render(r#"{{ {"v": s} }}"#, "a\u{200D}b");
+    assert!(parse_attribute_json(&debug).is_err(), "{debug:?}");
 }
 
 /// The scanner's code protection is pulldown's: the shapes the
@@ -814,12 +795,12 @@ fn scanner_code_is_commonmark_code() {
     }
 }
 
-/// A backslash before a non-ASCII character is no escape the rewrite
-/// keeps whole: slicing the pair would cut the character (a panic on
-/// attribute text from the page). Malformed JSON is an error, not a crash.
+/// Malformed attribute JSON is an error, not a crash (a backslash before
+/// a non-ASCII character once panicked the removed escape rewrite).
 #[test]
-fn attribute_json_with_a_backslash_before_non_ascii_is_an_error() {
+fn malformed_attribute_json_is_an_error() {
     assert!(parse_attribute_json("{\"a\": \"\\u{41}\\é\"}").is_err());
+    assert!(parse_attribute_json("{\"a\": ").is_err());
 }
 
 /// The scanner's code protection agrees with pulldown on the shapes G13

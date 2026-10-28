@@ -664,7 +664,7 @@ fn tera_escaped_values_still_localize() {
             &[
                 (
                     "page.html",
-                    r#"<p data-l10n-id="sel" data-l10n-args='{{ {"n": 2, "who": who} }}'>FALLBACK</p><p data-l10n-id="hi" data-l10n-args='{{ {"who": who} }}'>FALLBACK</p>"#,
+                    r#"<p data-l10n-id="sel" data-l10n-args='{{ {"n": 2, "who": who} | json }}'>FALLBACK</p><p data-l10n-id="hi" data-l10n-args='{{ {"who": who} | json }}'>FALLBACK</p>"#,
                 ),
                 (
                     "locales/en-US/main.ftl.ron",
@@ -701,7 +701,7 @@ fn map_literal_args_cannot_be_injected() {
         &[
             (
                 "page.html",
-                r#"<p data-l10n-id="greet" data-l10n-args='{{ {"name": player} }}'>x</p>"#,
+                r#"<p data-l10n-id="greet" data-l10n-args='{{ {"name": player} | json }}'>x</p>"#,
             ),
             (
                 "locales/en-US/main.ftl.ron",

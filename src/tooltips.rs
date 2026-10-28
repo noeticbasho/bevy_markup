@@ -18,7 +18,7 @@
 //!   `above` or `below`; it also picks the side.
 //!
 //! ```html
-//! <html class="tooltip"><p data-l10n-id="{{ key }}" data-l10n-args='{{ args }}'>{{ key }}</p></html>
+//! <html class="tooltip"><p data-l10n-id="{{ key }}" data-l10n-args='{{ args | json }}'>{{ key }}</p></html>
 //! ```
 //!
 //! The tooltip is despawned when the pointer leaves (or its element goes);

@@ -46,7 +46,7 @@
     <div class="quest main" id="quest-{{ quest.id }}" tabindex="0" autofocus>
       <p class="quest-name" data-l10n-id="grid-quest-{{ quest.id }}">{{ quest.id }}</p>
       <div class="quest-bar"><div class="quest-fill {{ quest.status }}" style="width: {{ quest.progress }}%"></div></div>
-      <p class="quest-reward" data-l10n-id="grid-quest-reward" data-l10n-args='{{ {"gold": quest.reward} }}'>{{ quest.reward }}</p>
+      <p class="quest-reward" data-l10n-id="grid-quest-reward" data-l10n-args='{{ {"gold": quest.reward} | json }}'>{{ quest.reward }}</p>
     </div>
     {% endif %}{% endfor %}
     {% for status in ["active", "done", "failed"] %}
@@ -56,7 +56,7 @@
       <div class="quest {{ status }}" id="quest-{{ quest.id }}" tabindex="0">
         <p class="quest-name" data-l10n-id="grid-quest-{{ quest.id }}">{{ quest.id }}</p>
         <div class="quest-bar"><div class="quest-fill {{ quest.status }}" style="width: {{ quest.progress }}%"></div></div>
-        <p class="quest-reward" data-l10n-id="grid-quest-reward" data-l10n-args='{{ {"gold": quest.reward} }}'>{{ quest.reward }}</p>
+        <p class="quest-reward" data-l10n-id="grid-quest-reward" data-l10n-args='{{ {"gold": quest.reward} | json }}'>{{ quest.reward }}</p>
       </div>
       {% endif %}{% endfor %}
     </section>
@@ -89,7 +89,7 @@
     {% endif %}{% endfor %}
     {% for quest in quests %}{% if "quest-" ~ quest.id == selected %}
     <p class="selected" data-l10n-id="grid-quest-{{ quest.id }}">{{ quest.id }}</p>
-    <p class="selected-count" data-l10n-id="grid-quest-progress" data-l10n-args='{{ {"progress": quest.progress, "status": quest.status} }}'>{{ quest.progress }}%</p>
+    <p class="selected-count" data-l10n-id="grid-quest-progress" data-l10n-args='{{ {"progress": quest.progress, "status": quest.status} | json }}'>{{ quest.progress }}%</p>
     {% endif %}{% endfor %}
     <div class="stats">
       <p class="label" data-l10n-id="grid-stat-items">Item kinds</p>
@@ -101,7 +101,7 @@
     </div>
   </aside>
   <footer class="status">
-    <p data-l10n-id="grid-status" data-l10n-args='{{ {"layout": layout} }}'>{{ layout }}</p>
-    <p data-l10n-id="grid-screen" data-l10n-args='{{ {"tab": active_tab} }}'>{{ active_tab }}</p>
+    <p data-l10n-id="grid-status" data-l10n-args='{{ {"layout": layout} | json }}'>{{ layout }}</p>
+    <p data-l10n-id="grid-screen" data-l10n-args='{{ {"tab": active_tab} | json }}'>{{ active_tab }}</p>
   </footer>
 </div>

@@ -623,9 +623,9 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
   data-l10n-args='{"n": 3}'>fallback</p>` on any element (block, container,
   inline, walked-through); the translation replaces the children, the
   element's own content is the fallback. Args are JSON (numbers stay numbers
-  for plurals), built by Tera as a map literal (`'{{ {"name": player} }}'`)
-  or one map variable (`'{{ args }}'`) — Tera prints maps as JSON with the
-  strings escaped. Never splice a value into hand-written JSON
+  for plurals), printed by the crate's `json` Tera filter from a map literal
+  (`'{{ {"name": player} | json }}'`) or one map variable
+  (`'{{ args | json }}'`). Never splice a value into hand-written JSON
   (`'{"name": "{{ player }}"}'`): `decode_entities` undoes Tera's `&quot;`,
   so a value holding `"` adds its own arguments (review_0003 G20; the
   examples and README use map literals). Translations are markup
@@ -846,11 +846,13 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
   `decode_entities`) and drops `<!DOCTYPE>`.
 - Tera 2 (not 1.x): unknown functions/filters fail at template *compile* time,
   so custom ones must be registered in the loader before `add_raw_template`.
-  Tera prints maps as `{"k": v}` with Rust `Debug` string escaping: valid
-  JSON except `\u{…}` (control, combining, zero-width and private-use
-  characters) and `\0`. Attribute JSON (`data-l10n-args`, `data-with`,
-  `data-tooltip-args`) goes through `template::parse_attribute_json`, which
-  rewrites those two escapes (bug_0128: an emoji name lost its translation).
+  `template::new_tera` builds every environment (the loader, the fuzz
+  harness): autoescaping plus the `json` filter. Without the filter Tera
+  prints maps with Rust `Debug` string escaping (`\u{200d}`, `\0`), which
+  isn't JSON (bug_0128: an emoji name lost its translation), so argument
+  attributes (`data-l10n-args`, `data-with`, `data-tooltip-args`) are
+  printed with `| json` and parsed as plain JSON
+  (`template::parse_attribute_json`).
 - Fluent wraps placeables in U+2068/U+2069; the bundle is shared behind an
   `Arc`, so `l10n.rs` strips them. Fluent term arguments only accept literals;
   message references share the caller's variables.

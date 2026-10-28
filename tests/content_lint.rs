@@ -137,23 +137,20 @@ fn inline_contexts() -> Vec<Value> {
 /// `examples/inputs/main.rs`: the fields' initial values and the preview
 /// following them (empty, half typed, both set).
 fn inputs_contexts() -> Vec<Value> {
-    // The preview's `data-l10n-args` is the app-serialized map: one
-    // context carries a quote and a backslash (the spliced-JSON bug).
+    // One context carries a quote and a backslash in the preview's
+    // `data-l10n-args` (the spliced-JSON bug).
     vec![
         json!({
             "name": "Ada", "title": "Cartographer",
             "live_name": "Ada", "live_title": "Cartographer",
-            "preview_args": r#"{"name":"Ada","title":"Cartographer"}"#,
         }),
         json!({
             "name": "Ada", "title": "Cartographer",
             "live_name": "", "live_title": "",
-            "preview_args": r#"{"name":"","title":""}"#,
         }),
         json!({
             "name": "Ada", "title": "Cartographer",
             "live_name": "Ada \"The\" \\ Brave", "live_title": "",
-            "preview_args": "{\"name\":\"Ada \\\"The\\\" \\\\ Brave\",\"title\":\"\"}",
         }),
     ]
 }
@@ -175,10 +172,7 @@ fn forms_contexts() -> Vec<Value> {
         json!({ "name": "Ada" }),
         json!({
             "name": "Ada",
-            "submitted": { "name": "Ada", "role": "Cartographer" },
-            // The receipt's `data-l10n-args`: the whole submitted map,
-            // serialized by the app.
-            "submitted_args": r#"{"name":"Ada","role":"Cartographer"}"#,
+            "submitted": { "name": "Ada \"The\" \\ Brave", "role": "Cartographer" },
         }),
     ]
 }
@@ -1086,7 +1080,7 @@ fn locale_check_reports_missing_extra_and_mismatched_messages() {
 /// path (so `.html` autoescapes), together with every template it includes
 /// or extends.
 fn compile(assets: &Path, template: &str) -> Result<(), String> {
-    let mut tera = bevy_markup::tera::Tera::new();
+    let mut tera = bevy_markup::template::new_tera();
     tera.add_raw_templates(template_set(assets, template)?)
         .map_err(|err| error_chain(&err))
 }

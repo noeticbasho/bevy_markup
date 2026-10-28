@@ -3,13 +3,13 @@
    hot-reload/style.css — press H in the app (or edit this directory) and
    watch the UI restyle without a restart. #}
 <h1 data-l10n-id="hr-title">Hot reload</h1>
-<p class="palette" data-l10n-id="hr-palette" data-l10n-args='{{ {"palette": palette} }}'>Palette: Crimson</p>
+<p class="palette" data-l10n-id="hr-palette" data-l10n-args='{{ {"palette": palette} | json }}'>Palette: Crimson</p>
 <div class="actions">
   <p id="cycle" class="action" autofocus data-on-click="cycle" data-l10n-id="hr-cycle">Cycle palette</p>
   <p id="add-coin" class="action" data-on-click="add-coin" data-l10n-id="hr-add-coin">+ Add a coin</p>
   <p id="language" class="action" data-on-click="switch-language" data-l10n-id="hr-language">Language</p>
 </div>
 <div class="wallet">
-  <p data-l10n-id="hr-coins" data-l10n-args='{{ {"coins": coins} }}'>You have {{ coins }} coins.</p>
+  <p data-l10n-id="hr-coins" data-l10n-args='{{ {"coins": coins} | json }}'>You have {{ coins }} coins.</p>
 </div>
 <p class="hint" data-l10n-id="hr-hint">Press <kbd>H</kbd> (or the button) to rewrite the stylesheet.</p>

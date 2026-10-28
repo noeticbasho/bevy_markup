@@ -5,7 +5,7 @@
 
   <div class="setting">
     <div class="icon" is="icon" data-src="shared/cat.png"></div>
-    <p data-l10n-id="menu-volume" data-l10n-args='{{ {"volume": volume} }}'>Volume: {{ volume }}%</p>
+    <p data-l10n-id="menu-volume" data-l10n-args='{{ {"volume": volume} | json }}'>Volume: {{ volume }}%</p>
   </div>
   {# A slider: the bar is focusable (`tabindex="0"`; ← → change it while
      focused) and `is="slider"` (press or drag sets the value); the arrows
@@ -24,7 +24,7 @@
     {% <ui.button id="difficulty-down" signal="difficulty-down" class="arrow" focusable={false}> %}<p>◀</p>{% </ui.button> %}
     <div class="stepper" id="difficulty" tabindex="0" data-setting="difficulty">
       <div class="icon" is="icon" data-src="shared/cat.png"></div>
-      <p data-l10n-id="menu-difficulty" data-l10n-args='{{ {"difficulty": difficulty} }}'>Difficulty: {{ difficulty }}</p>
+      <p data-l10n-id="menu-difficulty" data-l10n-args='{{ {"difficulty": difficulty} | json }}'>Difficulty: {{ difficulty }}</p>
     </div>
     {% <ui.button id="difficulty-up" signal="difficulty-up" class="arrow" focusable={false}> %}<p>▶</p>{% </ui.button> %}
   </div>
@@ -33,7 +33,7 @@
     <p data-l10n-id="menu-reset">Reset to defaults</p>
   {% </ui.button> %}
 
-  <p class="hint" data-l10n-id="menu-last-input" data-l10n-args='{{ {"input": last_input} }}'>Last click: {{ last_input }}</p>
+  <p class="hint" data-l10n-id="menu-last-input" data-l10n-args='{{ {"input": last_input} | json }}'>Last click: {{ last_input }}</p>
   <p class="hint" data-l10n-id="menu-hint">Arrows, D-pad or left stick: move (← → on a setting: change it) · Enter or A: choose · Esc or B: cancel · L or Y: language</p>
 </div>
 </html>

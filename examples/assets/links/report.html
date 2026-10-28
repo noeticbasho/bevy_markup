@@ -1,12 +1,12 @@
 <h1 data-l10n-id="links-title">Field notes</h1>
 <p class="hint" data-l10n-id="links-hint">Click a link to open it, or cycle them with <kbd>←</kbd> <kbd>→</kbd> / LB RB and press <kbd>Enter</kbd> / A. This app doesn't browse: it just records what you opened.</p>
 
-<p data-l10n-id="links-intro" data-l10n-args='{{ {"href": opened} }}'>The survey continues. Notes live in the <a href="expedition://journal/47">expedition journal</a>, and the <a href="file://maps/ridge.png">ridge map</a> is updated nightly.</p>
+<p data-l10n-id="links-intro" data-l10n-args='{{ {"href": opened} | json }}'>The survey continues. Notes live in the <a href="expedition://journal/47">expedition journal</a>, and the <a href="file://maps/ridge.png">ridge map</a> is updated nightly.</p>
 
 <p><a class="big" href="atlas://north-shelf" data-l10n-id="links-north">North shelf atlas</a></p>
 <p><a class="big" href="atlas://salt-marsh" data-l10n-id="links-salt">Salt marsh atlas</a></p>
 <p><a class="big" href="atlas://lighthouse" data-l10n-id="links-light">Lighthouse log</a></p>
 
-<p class="status" data-l10n-id="links-status" data-l10n-args='{{ {"href": opened} }}'>No links opened yet.</p>
+<p class="status" data-l10n-id="links-status" data-l10n-args='{{ {"href": opened} | json }}'>No links opened yet.</p>
 
 <p id="language" class="action" data-on-click="switch-language" data-l10n-id="links-language">Language</p>

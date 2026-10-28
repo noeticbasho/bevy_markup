@@ -6,7 +6,7 @@
    context; data-l10n-id elements take their text from Fluent. #}
 <div class="ribbon" data-l10n-id="journal-ribbon">Field notes</div>
 <h1 data-l10n-id="journal-title">Field Journal</h1>
-<p data-l10n-id="journal-byline" data-l10n-args='{{ {"name": player, "day": day} }}'>By <span class="author">{{ player }}</span>, day <span class="day">{{ day }}</span> of the expedition.</p>
+<p data-l10n-id="journal-byline" data-l10n-args='{{ {"name": player, "day": day} | json }}'>By <span class="author">{{ player }}</span>, day <span class="day">{{ day }}</span> of the expedition.</p>
 <section class="quests">
   {# Each quest is clickable (data-on-click makes it focusable): clicking
      marks it done — the name is struck through, the author's ink turns grey.
