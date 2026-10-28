@@ -3,8 +3,8 @@
 | Field | Value |
 |---|---|
 | Template | `requirements/supplementary-spec-template.md` |
-| Derived from | `AGENTS.md` ("Conventions", "Testing", "Verification", "Limits and next steps"), ADRs 0002, 0004, 0021, bug ledger, `UPSTREAM.md` |
-| Source state | `f6a2d6a`, 2026-10-28 |
+| Derived from | `AGENTS.md` ("Conventions", "Testing", "Verification", "Limits and next steps"), ADRs 0002, 0004, 0021, 0034, bug ledger, `UPSTREAM.md` |
+| Source state | `cf0da55`, 2026-10-28 |
 
 Numbered, testable statements with what verifies each ("—" = no automated check). `AGENTS.md` and the ADRs are authoritative. "Nightly" checks report, they don't block merges.
 
@@ -25,6 +25,7 @@ Numbered, testable statements with what verifies each ("—" = no automated chec
 |---|---|---|---|
 | NFR-CONF-001 | Computed styles (font, size, color, box widths, border-image) match Chromium for every plain-HTML vector | ADR 0004 | `browser_oracle` (`tests/vectors/*/browser.json`); nightly re-checks against current Chrome |
 | NFR-CONF-002 | Layout boxes match Chromium's within 1px | ADR 0004, 0007 | `layout_oracle` (`tests/vectors/layout_*`) |
+| NFR-CONF-006 | Selectors match as lightningcss parsed them, with spec specificity (`:where()` zero, `:is()` its most specific argument); `:nth-child(0)` matches nothing | ADR 0034 | `browser_oracle` on `tests/vectors/selectors_level4`; `nth_child_zero_matches_no_element`; `tests/selector_model.rs` (Level 4 grammar) |
 | NFR-CONF-003 | Localized output equals `@fluent/dom`'s for the same inputs | ADR 0004, 0013 | `fluent_oracle`; CI checks `fluent.html` is what `scripts/fluent_oracle.sh` produces |
 | NFR-CONF-004 | Rendered pixels match the golden references on lavapipe (≤0.05 % differing pixels) | `AGENTS.md` Testing | `tests/golden.rs` (nightly) |
 | NFR-CONF-005 | Every CSS deviation from the web is a documented limit and logs the skipped value at `debug` | `AGENTS.md` Limits | — (convention) |
@@ -54,6 +55,7 @@ Numbered, testable statements with what verifies each ("—" = no automated chec
 |---|---|---|---|
 | NFR-SEC-001 | Template input is treated as untrusted: a panic reachable from user data is high severity | `AGENTS.md` Bug reports | fuzzing (NFR-REL-001) |
 | NFR-SEC-002 | Tera autoescaping round-trips; entities are decoded one level only | `AGENTS.md` Testing | `template.rs` unit tests and proptest |
+| NFR-SEC-005 | Selector forms parcel's matcher panics on (`:nth-child(… of S)`, `:has()`, `&` nesting, `:nth-col()`) never reach it: the allowlist skips their rules | ADR 0034 | `cascade::tests::the_engine_allowlist`; the testbench's selector-engine scenario |
 | NFR-SEC-003 | Known upstream panics are patched locally until fixed upstream, and apps are told to apply the patch | `UPSTREAM.md` U1, U2 | `[patch.crates-io]` in `Cargo.toml`; README section |
 | NFR-SEC-004 | The `dev-tools` surface (localhost BRP + MCP) is never enabled in a shipped build | `Cargo.toml` features | — (opt-in feature) |
 
@@ -74,6 +76,7 @@ Numbered, testable statements with what verifies each ("—" = no automated chec
 - @docs/agents/adr/0009-in-place-update-model.md
 - @docs/agents/adr/0021-per-element-dirty-tracking.md
 - @docs/agents/adr/0031-windowed-build-spec-level-culling.md
+- @docs/agents/adr/0034-match-selectors-with-parcel-selectors.md
 - @docs/agents/bugs/bug_0001.md
 - @docs/agents/bugs/bug_0170.md
 - @docs/agents/bugs/UPSTREAM.md

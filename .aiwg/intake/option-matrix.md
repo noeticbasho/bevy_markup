@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Derived from | `AGENTS.md`, ADRs 0001, 0002, 0004, 0028 |
-| Source state | `f6a2d6a`, 2026-10-28 |
+| Source state | `cf0da55`, 2026-10-28 |
 
 ## Project Reality
 

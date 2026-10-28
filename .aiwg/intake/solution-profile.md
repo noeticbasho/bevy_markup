@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Derived from | `AGENTS.md`, ADRs 0004, 0018, 0019, 0021, 0028, bug ledger, `UPSTREAM.md`, CI history |
-| Source state | `f6a2d6a`, 2026-10-28 |
+| Source state | `cf0da55`, 2026-10-28 |
 
 ## Current Profile
 
@@ -14,7 +14,7 @@
 | Security | Strong for scope | untrusted-input stance, fuzzing, two upstream panics patched (U1, U2) |
 | Reliability | High | 176 of 178 filed bugs fixed with regression tests; pure update state machine; schedule-order shuffling in every test run |
 | Testing & quality | Very high | oracles, golden images, property/model tests, fuzzing, mutants, coverage (88–98 % by layer) |
-| Process rigor | High | 33 ADRs, bug reports, six review sessions, changelog convention, CI on every push |
+| Process rigor | High | 34 ADRs (0034 accepted after a measured trial), bug reports, six review sessions, changelog convention, CI on every push |
 | Operations | Medium | nightly red since 2026-10-14; releases lag `main` (large `[Unreleased]`) |
 
 ## Recommended Profile Adjustments

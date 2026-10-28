@@ -5,3 +5,5 @@
 ## [2026-10-28 14:24] update | aiwg index build
 ## [2026-10-28 14:24] update | Fixed nightly CI causes (uncommitted): bug_0179 lightningcss exponential nesting (paren bound 8; css harness applies pre-scan), bug_0180 Compound::parse panic, oracle script reads text-transform; regression tests, 4 seeds, UPSTREAM U14/U15
 ## [2026-10-28 15:22] update | ADR 0034 trial on spike/adr-0034-parcel-selectors: parcel_selectors matcher, all tests + Chrome oracle pass, selectors bench -8.4%/-1.6%; report docs/agents/performance/adr-0034-trial.md
+## [2026-10-28 16:32] update | aiwg index build
+## [2026-10-28 16:32] update | Refreshed SDLC pages for ADR 0034 (parcel_selectors matching, allowlist, Level 4 selectors, selectors_level4 vector, trial report); source state cf0da55

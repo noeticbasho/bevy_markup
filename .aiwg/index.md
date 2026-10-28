@@ -11,14 +11,14 @@ Derived pages cite their sources with `@path` mentions; provenance records are i
 
 ## Requirements (2)
 - [Use-case briefs](requirements/use-cases.md) — UC-001–013 built (templates, CSS, Fluent, Markdown, interaction, focus, updates, overlays, custom elements, text input, windowing, hot reload, agent QA); UC-101–104 planned (ADR 0028 tier 4)
-- [Supplementary specification](requirements/supplementary-spec.md) — reliability, conformance (oracles), performance, supportability, security requirements with their checks
+- [Supplementary specification](requirements/supplementary-spec.md) — reliability, conformance (oracles), performance, supportability, security requirements with their checks (incl. ADR 0034's selector engine and allowlist)
 
 ## Risks (1)
-- [Risk list](risks/risk-list.md) — R-001–008; highest: nightly red two weeks (fixed, uncommitted), fluent-syntax patch not reaching apps, silent CSS deviations, Bevy churn
+- [Risk list](risks/risk-list.md) — R-001–008; highest: nightly red two weeks (fixed), fluent-syntax patch not reaching apps, silent CSS deviations, Bevy churn
 
 ## Testing (2)
 - [Test strategy](testing/test-strategy.md) — unit, vectors, oracles, property/model tests, golden images, five fuzzers, mutants, coverage, benchmarks
 - [Defect register](testing/defect-register.md) — bug_0001–0180: 178 fixed, none open; 15 upstream; nightly failures fixed (uncommitted)
 
 ## Architecture (1)
-- [Architecture](architecture/README.md) — pointer to `AGENTS.md` and ADRs 0001–0033
+- [Architecture](architecture/README.md) — pointer to `AGENTS.md` and ADRs 0001–0034

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-28T14:24:31.320Z",
+  "generated": "2026-10-28T16:32:08.457Z",
   "entries": {
     ".aiwg/AIWG.md": {
       "checksum": "4bc5ea9d622d2869",
@@ -8,9 +8,9 @@
       "size": 4009
     },
     ".aiwg/architecture/README.md": {
-      "checksum": "56155a923bf38c4d",
-      "mtime": "2026-10-28T13:01:16.886Z",
-      "size": 380
+      "checksum": "4cb4301db955f67b",
+      "mtime": "2026-10-28T16:31:58.096Z",
+      "size": 462
     },
     ".aiwg/cli-extensions.json": {
       "checksum": "19b7383b57404131",
@@ -33,24 +33,24 @@
       "size": 1141
     },
     ".aiwg/index.md": {
-      "checksum": "3daff0205c1ce31b",
-      "mtime": "2026-10-28T14:24:30.649Z",
-      "size": 1861
+      "checksum": "d5dfd5a23269fdd8",
+      "mtime": "2026-10-28T16:31:58.096Z",
+      "size": 1897
     },
     ".aiwg/intake/option-matrix.md": {
-      "checksum": "1a4d2c6eb2f51ee3",
-      "mtime": "2026-10-28T12:59:30.169Z",
+      "checksum": "0a425d398239c3bf",
+      "mtime": "2026-10-28T16:31:58.102Z",
       "size": 1691
     },
     ".aiwg/intake/project-intake.md": {
-      "checksum": "bba5f4879fd0c12b",
-      "mtime": "2026-10-28T12:59:30.168Z",
-      "size": 7347
+      "checksum": "8810aebd2cf35c1f",
+      "mtime": "2026-10-28T16:31:58.102Z",
+      "size": 8129
     },
     ".aiwg/intake/solution-profile.md": {
-      "checksum": "bbd52d62eaf3ac6e",
-      "mtime": "2026-10-28T12:59:30.168Z",
-      "size": 2074
+      "checksum": "30a9ce9f9588f725",
+      "mtime": "2026-10-28T16:31:58.102Z",
+      "size": 2113
     },
     ".aiwg/receipts/providers/claude.project.evidence.json": {
       "checksum": "c9fa847635299de4",
@@ -58,74 +58,74 @@
       "size": 201
     },
     ".aiwg/requirements/supplementary-spec.md": {
-      "checksum": "0322c09a8415c4c5",
-      "mtime": "2026-10-28T13:00:39.812Z",
-      "size": 6072
+      "checksum": "6d424cf7e31cabf0",
+      "mtime": "2026-10-28T16:31:58.102Z",
+      "size": 6728
     },
     ".aiwg/requirements/use-cases.md": {
-      "checksum": "ad3643f56f699c97",
-      "mtime": "2026-10-28T13:00:39.812Z",
-      "size": 6994
+      "checksum": "7fb963200e0584bd",
+      "mtime": "2026-10-28T16:31:58.102Z",
+      "size": 7278
     },
     ".aiwg/research/provenance/records/README.prov.yaml": {
-      "checksum": "daa95173125dd3b4",
-      "mtime": "2026-10-28T13:01:16.905Z",
-      "size": 2591
+      "checksum": "bc8abbc784781ed4",
+      "mtime": "2026-10-28T16:32:07.993Z",
+      "size": 2984
     },
     ".aiwg/research/provenance/records/defect-register.prov.yaml": {
-      "checksum": "a21f144b9e71e45b",
-      "mtime": "2026-10-28T14:24:30.671Z",
-      "size": 3980
+      "checksum": "ae6fd34ffdfd5d29",
+      "mtime": "2026-10-28T16:32:07.993Z",
+      "size": 4395
     },
     ".aiwg/research/provenance/records/option-matrix.prov.yaml": {
-      "checksum": "655d79fb40ee34cf",
-      "mtime": "2026-10-28T13:01:16.905Z",
+      "checksum": "ad73f73e9d6570f3",
+      "mtime": "2026-10-28T16:32:07.993Z",
       "size": 3742
     },
     ".aiwg/research/provenance/records/project-intake.prov.yaml": {
-      "checksum": "4e478fdd2cddb69a",
-      "mtime": "2026-10-28T13:01:16.905Z",
-      "size": 5244
+      "checksum": "ac8e9d6442336527",
+      "mtime": "2026-10-28T16:32:07.993Z",
+      "size": 6106
     },
     ".aiwg/research/provenance/records/risk-list.prov.yaml": {
-      "checksum": "e00f75624f51c1a0",
-      "mtime": "2026-10-28T14:24:30.672Z",
-      "size": 3774
+      "checksum": "256e01532b56e14c",
+      "mtime": "2026-10-28T16:32:07.993Z",
+      "size": 4209
     },
     ".aiwg/research/provenance/records/solution-profile.prov.yaml": {
-      "checksum": "8e649a0ed1ca31e3",
-      "mtime": "2026-10-28T13:01:16.905Z",
+      "checksum": "b678abcdfda56e48",
+      "mtime": "2026-10-28T16:32:07.993Z",
       "size": 3684
     },
     ".aiwg/research/provenance/records/supplementary-spec.prov.yaml": {
-      "checksum": "106a63abfa591ba0",
-      "mtime": "2026-10-28T13:01:16.905Z",
-      "size": 5566
+      "checksum": "80cdbc21d4c48811",
+      "mtime": "2026-10-28T16:32:07.993Z",
+      "size": 6035
     },
     ".aiwg/research/provenance/records/test-strategy.prov.yaml": {
-      "checksum": "8e673bf04f1e5145",
-      "mtime": "2026-10-28T13:01:16.905Z",
-      "size": 3228
+      "checksum": "f76c014683244912",
+      "mtime": "2026-10-28T16:32:07.993Z",
+      "size": 3637
     },
     ".aiwg/research/provenance/records/use-cases.prov.yaml": {
-      "checksum": "83d03cd98dc94c48",
-      "mtime": "2026-10-28T13:01:16.905Z",
-      "size": 6972
+      "checksum": "7709088d798c0fc3",
+      "mtime": "2026-10-28T16:32:07.993Z",
+      "size": 7414
     },
     ".aiwg/risks/risk-list.md": {
-      "checksum": "159164e6dbee3435",
-      "mtime": "2026-10-28T14:24:30.649Z",
-      "size": 3638
+      "checksum": "036bac15b81d71f6",
+      "mtime": "2026-10-28T16:31:58.102Z",
+      "size": 4552
     },
     ".aiwg/testing/defect-register.md": {
-      "checksum": "bfccc08199811ee9",
-      "mtime": "2026-10-28T14:24:30.648Z",
-      "size": 2500
+      "checksum": "78c4afc62fb4264f",
+      "mtime": "2026-10-28T16:31:58.102Z",
+      "size": 2755
     },
     ".aiwg/testing/test-strategy.md": {
-      "checksum": "a1a184fd27711212",
-      "mtime": "2026-10-28T13:01:16.885Z",
-      "size": 4056
+      "checksum": "c87ff9d6a8a1467c",
+      "mtime": "2026-10-28T16:31:58.102Z",
+      "size": 4217
     },
     "WORKSPACE.md": {
       "checksum": "5c2f54741c490846",

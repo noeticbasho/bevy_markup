@@ -1,18 +1,18 @@
 metadata:
   schema_version: "1.0.0"
-  created_at: "2026-10-28T13:01:16Z"
+  created_at: "2026-10-28T16:32:07Z"
   description: "Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)"
 entity:
   id: "urn:aiwg:artifact:.aiwg/intake/project-intake.md"
   type: "document"
-  created_at: "2026-10-28T13:01:16Z"
-  checksum: "sha256:bba5f4879fd0c12b7677acc1dd48c8fc8b76bf4909e978f2c4567c3a966134ed"
-  size_bytes: 7347
+  created_at: "2026-10-28T16:32:07Z"
+  checksum: "sha256:8810aebd2cf35c1fd16ba661753b10edda4aceab210c01bd01d864b25133c67b"
+  size_bytes: 8129
 activity:
   id: "urn:aiwg:activity:derivation:project-intake:1"
   type: "derivation"
-  started_at: "2026-10-28T13:01:16Z"
-  ended_at: "2026-10-28T13:01:16Z"
+  started_at: "2026-10-28T16:32:07Z"
+  ended_at: "2026-10-28T16:32:07Z"
   description: "Derived from the repository records cited in the page"
 agent:
   id: "urn:aiwg:agent:claude-opus-5-5"
@@ -23,7 +23,7 @@ relationships:
   wasGeneratedBy:
     entity: "urn:aiwg:artifact:.aiwg/intake/project-intake.md"
     activity: "urn:aiwg:activity:derivation:project-intake:1"
-    time: "2026-10-28T13:01:16Z"
+    time: "2026-10-28T16:32:07Z"
   used:
     - activity: "urn:aiwg:activity:derivation:project-intake:1"
       entity: "urn:aiwg:artifact:AGENTS.md"
@@ -47,6 +47,9 @@ relationships:
       entity: "urn:aiwg:artifact:docs/agents/adr/0028-modern-authoring-gaps-roadmap.md"
       role: "source_record"
     - activity: "urn:aiwg:activity:derivation:project-intake:1"
+      entity: "urn:aiwg:artifact:docs/agents/adr/0034-match-selectors-with-parcel-selectors.md"
+      role: "source_record"
+    - activity: "urn:aiwg:activity:derivation:project-intake:1"
       entity: "urn:aiwg:artifact:docs/agents/adr/README.md"
       role: "source_record"
     - activity: "urn:aiwg:activity:derivation:project-intake:1"
@@ -54,6 +57,9 @@ relationships:
       role: "source_record"
     - activity: "urn:aiwg:activity:derivation:project-intake:1"
       entity: "urn:aiwg:artifact:docs/agents/bugs/UPSTREAM.md"
+      role: "source_record"
+    - activity: "urn:aiwg:activity:derivation:project-intake:1"
+      entity: "urn:aiwg:artifact:docs/agents/performance/adr-0034-trial.md"
       role: "source_record"
   wasDerivedFrom:
     - entity: "urn:aiwg:artifact:.aiwg/intake/project-intake.md"
@@ -85,6 +91,10 @@ relationships:
       derivation_type: "derives_from"
       activity: "urn:aiwg:activity:derivation:project-intake:1"
     - entity: "urn:aiwg:artifact:.aiwg/intake/project-intake.md"
+      source: "urn:aiwg:artifact:docs/agents/adr/0034-match-selectors-with-parcel-selectors.md"
+      derivation_type: "derives_from"
+      activity: "urn:aiwg:activity:derivation:project-intake:1"
+    - entity: "urn:aiwg:artifact:.aiwg/intake/project-intake.md"
       source: "urn:aiwg:artifact:docs/agents/adr/README.md"
       derivation_type: "derives_from"
       activity: "urn:aiwg:activity:derivation:project-intake:1"
@@ -94,6 +104,10 @@ relationships:
       activity: "urn:aiwg:activity:derivation:project-intake:1"
     - entity: "urn:aiwg:artifact:.aiwg/intake/project-intake.md"
       source: "urn:aiwg:artifact:docs/agents/bugs/UPSTREAM.md"
+      derivation_type: "derives_from"
+      activity: "urn:aiwg:activity:derivation:project-intake:1"
+    - entity: "urn:aiwg:artifact:.aiwg/intake/project-intake.md"
+      source: "urn:aiwg:artifact:docs/agents/performance/adr-0034-trial.md"
       derivation_type: "derives_from"
       activity: "urn:aiwg:activity:derivation:project-intake:1"
   wasAssociatedWith:

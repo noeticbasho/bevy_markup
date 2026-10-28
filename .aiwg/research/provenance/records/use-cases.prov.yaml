@@ -1,18 +1,18 @@
 metadata:
   schema_version: "1.0.0"
-  created_at: "2026-10-28T13:01:16Z"
+  created_at: "2026-10-28T16:32:07Z"
   description: "Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)"
 entity:
   id: "urn:aiwg:artifact:.aiwg/requirements/use-cases.md"
   type: "document"
-  created_at: "2026-10-28T13:01:16Z"
-  checksum: "sha256:ad3643f56f699c97a9b68e60b5b35c369bd4b73b22aa3b0505c12f3f51c9097e"
-  size_bytes: 6994
+  created_at: "2026-10-28T16:32:07Z"
+  checksum: "sha256:7fb963200e0584bd3d07a1a579e7049f0cc0a929b657f35c86ec5ce4f4d9d2e6"
+  size_bytes: 7278
 activity:
   id: "urn:aiwg:activity:derivation:use-cases:1"
   type: "derivation"
-  started_at: "2026-10-28T13:01:16Z"
-  ended_at: "2026-10-28T13:01:16Z"
+  started_at: "2026-10-28T16:32:07Z"
+  ended_at: "2026-10-28T16:32:07Z"
   description: "Derived from the repository records cited in the page"
 agent:
   id: "urn:aiwg:agent:claude-opus-5-5"
@@ -23,7 +23,7 @@ relationships:
   wasGeneratedBy:
     entity: "urn:aiwg:artifact:.aiwg/requirements/use-cases.md"
     activity: "urn:aiwg:activity:derivation:use-cases:1"
-    time: "2026-10-28T13:01:16Z"
+    time: "2026-10-28T16:32:07Z"
   used:
     - activity: "urn:aiwg:activity:derivation:use-cases:1"
       entity: "urn:aiwg:artifact:AGENTS.md"
@@ -60,6 +60,9 @@ relationships:
       role: "source_record"
     - activity: "urn:aiwg:activity:derivation:use-cases:1"
       entity: "urn:aiwg:artifact:docs/agents/adr/0032-windowed-build-revised.md"
+      role: "source_record"
+    - activity: "urn:aiwg:activity:derivation:use-cases:1"
+      entity: "urn:aiwg:artifact:docs/agents/adr/0034-match-selectors-with-parcel-selectors.md"
       role: "source_record"
     - activity: "urn:aiwg:activity:derivation:use-cases:1"
       entity: "urn:aiwg:artifact:docs/agents/adr/README.md"
@@ -114,6 +117,10 @@ relationships:
       activity: "urn:aiwg:activity:derivation:use-cases:1"
     - entity: "urn:aiwg:artifact:.aiwg/requirements/use-cases.md"
       source: "urn:aiwg:artifact:docs/agents/adr/0032-windowed-build-revised.md"
+      derivation_type: "derives_from"
+      activity: "urn:aiwg:activity:derivation:use-cases:1"
+    - entity: "urn:aiwg:artifact:.aiwg/requirements/use-cases.md"
+      source: "urn:aiwg:artifact:docs/agents/adr/0034-match-selectors-with-parcel-selectors.md"
       derivation_type: "derives_from"
       activity: "urn:aiwg:activity:derivation:use-cases:1"
     - entity: "urn:aiwg:artifact:.aiwg/requirements/use-cases.md"

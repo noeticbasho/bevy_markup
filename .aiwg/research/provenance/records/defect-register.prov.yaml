@@ -1,18 +1,18 @@
 metadata:
   schema_version: "1.0.0"
-  created_at: "2026-10-28T14:24:30Z"
+  created_at: "2026-10-28T16:32:07Z"
   description: "Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)"
 entity:
   id: "urn:aiwg:artifact:.aiwg/testing/defect-register.md"
   type: "document"
-  created_at: "2026-10-28T14:24:30Z"
-  checksum: "sha256:bfccc08199811ee9d702d5fa1eb0bc37d4f9b5d827c52345370b22359ff236d9"
-  size_bytes: 2500
+  created_at: "2026-10-28T16:32:07Z"
+  checksum: "sha256:78c4afc62fb4264f13995d0bf5a51650a0da2639ddc5efc2a0867ce6cb3bad99"
+  size_bytes: 2755
 activity:
   id: "urn:aiwg:activity:derivation:defect-register:1"
   type: "derivation"
-  started_at: "2026-10-28T14:24:30Z"
-  ended_at: "2026-10-28T14:24:30Z"
+  started_at: "2026-10-28T16:32:07Z"
+  ended_at: "2026-10-28T16:32:07Z"
   description: "Derived from the repository records cited in the page"
 agent:
   id: "urn:aiwg:agent:claude-opus-5-5"
@@ -23,7 +23,7 @@ relationships:
   wasGeneratedBy:
     entity: "urn:aiwg:artifact:.aiwg/testing/defect-register.md"
     activity: "urn:aiwg:activity:derivation:defect-register:1"
-    time: "2026-10-28T14:24:30Z"
+    time: "2026-10-28T16:32:07Z"
   used:
     - activity: "urn:aiwg:activity:derivation:defect-register:1"
       entity: "urn:aiwg:artifact:docs/agents/bugs/INDEX.md"
@@ -42,6 +42,9 @@ relationships:
       role: "source_record"
     - activity: "urn:aiwg:activity:derivation:defect-register:1"
       entity: "urn:aiwg:artifact:docs/agents/bugs/bug_0180.md"
+      role: "source_record"
+    - activity: "urn:aiwg:activity:derivation:defect-register:1"
+      entity: "urn:aiwg:artifact:docs/agents/performance/adr-0034-trial.md"
       role: "source_record"
     - activity: "urn:aiwg:activity:derivation:defect-register:1"
       entity: "urn:aiwg:artifact:docs/agents/reviews/review_0006.md"
@@ -69,6 +72,10 @@ relationships:
       activity: "urn:aiwg:activity:derivation:defect-register:1"
     - entity: "urn:aiwg:artifact:.aiwg/testing/defect-register.md"
       source: "urn:aiwg:artifact:docs/agents/bugs/bug_0180.md"
+      derivation_type: "derives_from"
+      activity: "urn:aiwg:activity:derivation:defect-register:1"
+    - entity: "urn:aiwg:artifact:.aiwg/testing/defect-register.md"
+      source: "urn:aiwg:artifact:docs/agents/performance/adr-0034-trial.md"
       derivation_type: "derives_from"
       activity: "urn:aiwg:activity:derivation:defect-register:1"
     - entity: "urn:aiwg:artifact:.aiwg/testing/defect-register.md"

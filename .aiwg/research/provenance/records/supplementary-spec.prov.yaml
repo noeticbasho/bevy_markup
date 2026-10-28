@@ -1,18 +1,18 @@
 metadata:
   schema_version: "1.0.0"
-  created_at: "2026-10-28T13:01:16Z"
+  created_at: "2026-10-28T16:32:07Z"
   description: "Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)"
 entity:
   id: "urn:aiwg:artifact:.aiwg/requirements/supplementary-spec.md"
   type: "document"
-  created_at: "2026-10-28T13:01:16Z"
-  checksum: "sha256:0322c09a8415c4c507aab3ad6f25c161673da23cc461727d0b3d673fa9f35bc4"
-  size_bytes: 6072
+  created_at: "2026-10-28T16:32:07Z"
+  checksum: "sha256:6d424cf7e31cabf04f9b78457d4c7011f012d37ba71315ca238bab8b24d9cd24"
+  size_bytes: 6728
 activity:
   id: "urn:aiwg:activity:derivation:supplementary-spec:1"
   type: "derivation"
-  started_at: "2026-10-28T13:01:16Z"
-  ended_at: "2026-10-28T13:01:16Z"
+  started_at: "2026-10-28T16:32:07Z"
+  ended_at: "2026-10-28T16:32:07Z"
   description: "Derived from the repository records cited in the page"
 agent:
   id: "urn:aiwg:agent:claude-opus-5-5"
@@ -23,7 +23,7 @@ relationships:
   wasGeneratedBy:
     entity: "urn:aiwg:artifact:.aiwg/requirements/supplementary-spec.md"
     activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
-    time: "2026-10-28T13:01:16Z"
+    time: "2026-10-28T16:32:07Z"
   used:
     - activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
       entity: "urn:aiwg:artifact:AGENTS.md"
@@ -45,6 +45,9 @@ relationships:
       role: "source_record"
     - activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
       entity: "urn:aiwg:artifact:docs/agents/adr/0031-windowed-build-spec-level-culling.md"
+      role: "source_record"
+    - activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
+      entity: "urn:aiwg:artifact:docs/agents/adr/0034-match-selectors-with-parcel-selectors.md"
       role: "source_record"
     - activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
       entity: "urn:aiwg:artifact:docs/agents/bugs/UPSTREAM.md"
@@ -82,6 +85,10 @@ relationships:
       activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
     - entity: "urn:aiwg:artifact:.aiwg/requirements/supplementary-spec.md"
       source: "urn:aiwg:artifact:docs/agents/adr/0031-windowed-build-spec-level-culling.md"
+      derivation_type: "derives_from"
+      activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
+    - entity: "urn:aiwg:artifact:.aiwg/requirements/supplementary-spec.md"
+      source: "urn:aiwg:artifact:docs/agents/adr/0034-match-selectors-with-parcel-selectors.md"
       derivation_type: "derives_from"
       activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
     - entity: "urn:aiwg:artifact:.aiwg/requirements/supplementary-spec.md"

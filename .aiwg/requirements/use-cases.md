@@ -3,8 +3,8 @@
 | Field | Value |
 |---|---|
 | Template | `requirements/use-case-brief-template.md` (one brief per section) |
-| Derived from | `AGENTS.md` ("Public API", "Limits and next steps", "Verification"), ADRs 0001–0033, examples |
-| Source state | `f6a2d6a`, 2026-10-28 |
+| Derived from | `AGENTS.md` ("Public API", "Limits and next steps", "Verification"), ADRs 0001–0034, examples |
+| Source state | `cf0da55`, 2026-10-28 |
 
 Status: **Built** or **Planned**. IDs are stable. Each brief names the example that exercises it (`cargo run --example <name>`).
 
@@ -28,7 +28,7 @@ Status: **Built** or **Planned**. IDs are stable. Each brief names the example t
 ### UC-002 — Author styles and lays out UI with CSS
 
 - **Main success scenario:** a stylesheet (per entity or `DefaultStylesheet`) styles elements through the cascade; flex, grid (named lines and areas), positioning and `calc()` lay them out; `border-image` draws 9-slice frames; swapping the default sheet changes theme.
-- **Notes:** the supported subset and its deviations are documented limits, each skipped value logged at `debug`. Examples: `grid`, `grid-names`, `calc`, `combinators`, `demo`. Sources: ADR 0003, 0007, 0027, 0028, 0030.
+- **Notes:** the supported subset and its deviations are documented limits, each skipped value logged at `debug`. Selectors are lightningcss's parse matched by its engine (ADR 0034): `:is()`, `:where()`, `:not()` lists, `:nth-last-*`, `:only-*` and attribute operators on `data-*` work; an unsupported selector skips its rule. Examples: `grid`, `grid-names`, `calc`, `combinators`, `demo`. Sources: ADR 0003, 0007, 0027, 0028, 0030, 0034.
 
 ### UC-003 — Translator localizes the UI
 
@@ -120,4 +120,5 @@ Deferred until Bevy offers the capability: `position: sticky`, `<textarea>`, bui
 - @docs/agents/adr/0021-per-element-dirty-tracking.md
 - @docs/agents/adr/0028-modern-authoring-gaps-roadmap.md
 - @docs/agents/adr/0032-windowed-build-revised.md
+- @docs/agents/adr/0034-match-selectors-with-parcel-selectors.md
 - @examples/README.md
