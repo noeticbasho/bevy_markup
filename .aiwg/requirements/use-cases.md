@@ -3,8 +3,8 @@
 | Field | Value |
 |---|---|
 | Template | `requirements/use-case-brief-template.md` (one brief per section) |
-| Derived from | `AGENTS.md` ("Public API", "Limits and next steps", "Verification"), ADRs 0001–0034, examples |
-| Source state | `cf0da55`, 2026-10-28 |
+| Derived from | `AGENTS.md` ("Public API", "Limits and next steps", "Verification"), ADRs 0001–0037, examples |
+| Source state | `7792cea`, 2026-10-29 |
 
 Status: **Built** or **Planned**. IDs are stable. Each brief names the example that exercises it (`cargo run --example <name>`).
 
@@ -33,7 +33,7 @@ Status: **Built** or **Planned**. IDs are stable. Each brief names the example t
 ### UC-003 — Translator localizes the UI
 
 - **Main success scenario:** elements carry `data-l10n-id` (and `data-l10n-args`); setting `ActiveLocale` translates them, with plurals and `data-l10n-name` overlays; swapping it changes language at runtime.
-- **Notes:** numbers format without locale grouping. Examples: `demo`, `menu`. Sources: ADR 0013, bug_0006, bug_0007.
+- **Notes:** numbers format without locale grouping. Templates print `data-l10n-args` with the `json` filter (`'{{ {"name": player} | json }}'`); a map printed without it is a JSON error, not rewritten. Examples: `demo`, `menu`. Sources: ADR 0013, bug_0006, bug_0007.
 
 ### UC-004 — Author writes pages in Markdown
 
@@ -47,8 +47,8 @@ Status: **Built** or **Planned**. IDs are stable. Each brief names the example t
 
 ### UC-006 — Player navigates with keyboard or gamepad
 
-- **Main success scenario:** the app binds its own input to `HtmlFocus::navigate` (compass directions) and `activate`; focus moves between focusable elements, `:focus-visible` shows it, activation emits the element's click signals; `HtmlModal` confines focus.
-- **Notes:** no Tab order (directional only). Example: `menu`. Source: ADR 0008.
+- **Main success scenario:** the app binds its own input to `HtmlFocus::navigate` (compass directions), `HtmlFocus::tab` (Tab / Shift+Tab) and `activate`; focus moves between focusable elements (`data-on-click`, `<button>`, text `<input>`, `tabindex >= 0`), `:focus-visible` shows it, activation emits the element's click signals; `HtmlModal` confines focus and Tab.
+- **Notes:** Tab order is HTML's (positive `tabindex` first, then document order; `display: none` skipped; wraps). Elements also carry Bevy's `TabIndex`/`TabGroup`, so Bevy's `TabNavigationPlugin` works on rendered apps. The examples bind Tab. Example: `menu`. Source: ADR 0008; CHANGELOG.
 
 ### UC-007 — App updates the UI in place
 
@@ -57,8 +57,8 @@ Status: **Built** or **Planned**. IDs are stable. Each brief names the example t
 
 ### UC-008 — Developer shows overlays and tooltips
 
-- **Main success scenario:** `data-tooltip` shows a tooltip template beside the hovered element; `HtmlAnchor` keeps an overlay beside an element; `HtmlWorldAnchor` keeps a UI root over a 3D entity.
-- **Example:** `world`. Source: ADR 0010.
+- **Main success scenario:** `data-tooltip` shows a tooltip template beside the hovered element; `HtmlAnchor` keeps an overlay beside an element, placed in the same frame, flipping to the opposite side when it doesn't fit (`AnchoredSide`; tooltip templates get it as `side`); `HtmlWorldAnchor` keeps a UI root over a 3D entity.
+- **Notes:** Bevy's `Popover` was evaluated and rejected (ADR 0037). Example: `world`. Sources: ADR 0010, 0037.
 
 ### UC-009 — Developer attaches app behaviour to elements
 
@@ -121,4 +121,5 @@ Deferred until Bevy offers the capability: `position: sticky`, `<textarea>`, bui
 - @docs/agents/adr/0028-modern-authoring-gaps-roadmap.md
 - @docs/agents/adr/0032-windowed-build-revised.md
 - @docs/agents/adr/0034-match-selectors-with-parcel-selectors.md
+- @docs/agents/adr/0037-anchored-overlays-with-bevy-popover.md
 - @examples/README.md

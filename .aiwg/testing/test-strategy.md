@@ -3,8 +3,8 @@
 | Field | Value |
 |---|---|
 | Template | `test/test-strategy-template.md` (condensed) |
-| Derived from | `AGENTS.md` ("Testing", "Verification"), `docs/agents/skills/testing.md`, ADRs 0004, 0018, 0019 |
-| Source state | `cf0da55`, 2026-10-28 |
+| Derived from | `AGENTS.md` ("Testing", "Verification"), `docs/agents/skills/testing.md`, ADRs 0004, 0018, 0019, 0036 |
+| Source state | `7792cea`, 2026-10-29 |
 
 ## Context and Objectives
 
@@ -15,7 +15,7 @@ The library's promise is that HTML/CSS/Fluent behave as an author expects and th
 | Level | What | Where | When |
 |---|---|---|---|
 | Unit | cascade, templates and entities, l10n, fonts, 9-slice, rebuild state machine | `src/*` `#[cfg(test)]` | every push |
-| Test vectors | inputs → text dump of the built world (25 vector directories plus inline vectors; `selectors_level4` since ADR 0034) | `tests/html_ui.rs`, `tests/vectors/` | every push |
+| Test vectors | inputs → text dump of the built world (27 vector directories plus inline vectors; `selectors_level4` since ADR 0034, `text_transform_unicode` and `character_references` since 2026-10-29) | `tests/html_ui.rs`, `tests/vectors/` | every push |
 | Oracles | computed styles and layout vs Chromium; localized output vs `@fluent/dom` | `browser_oracle`, `layout_oracle`, `fluent_oracle` | every push; nightly re-checks Chrome |
 | Interaction | signals over the real picking stack; property test against a reference model | `tests/signals.rs`, `tests/signal_properties.rs` | every push |
 | Property and model-based | layout invariants, selector model (Level 4 grammar since ADR 0034), stateful op sequences, windowing model, quickcheck, arbtest | `tests/layout_properties.rs`, `selector_model.rs`, `stateful.rs`, `windowing_model.rs`, `quickcheck.rs`, `arbtest.rs` | every push |
@@ -33,7 +33,7 @@ The library's promise is that HTML/CSS/Fluent behave as an author expects and th
 
 `ci.yml` on every push and PR: warning-free checks and docs, `cargo test` (all of the push-time levels above), the Fluent oracle regeneration check. `nightly.yml`: golden images, browser oracle vs current Chrome, fuzzing, coverage, benchmarks — failures are reports to triage, not merge blockers. `cache.yml` builds shared caches once. Schedule order is shuffled in every test run.
 
-Status on 2026-10-28: CI green on the last push; the nightly red every night since 2026-10-14 (risk R-001).
+Status on 2026-10-29: CI green at `0262408` (the run on `7792cea` in progress); bug_0181 fixed a timing test that failed on a slower runner. The nightly was red 2026-10-14 to 2026-10-28; its causes are fixed and the first run after them is pending (risk R-001). A timing-based scaling test can pass narrowly on a fast machine and fail on CI: bug_0181 added a deterministic step-count test beside it.
 
 ## Defect Management
 
@@ -51,3 +51,5 @@ Each requirement's "Verified by" column in @.aiwg/requirements/supplementary-spe
 - @docs/agents/adr/0018-benchmarks-with-criterion.md
 - @docs/agents/adr/0019-benchmarks-with-divan.md
 - @docs/agents/performance/adr-0034-trial.md
+- @docs/agents/performance/adr-0036-trial.md
+- @docs/agents/bugs/bug_0181.md

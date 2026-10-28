@@ -1,18 +1,18 @@
 metadata:
   schema_version: "1.0.0"
-  created_at: "2026-10-28T16:32:07Z"
+  created_at: "2026-10-28T22:24:50Z"
   description: "Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)"
 entity:
   id: "urn:aiwg:artifact:.aiwg/requirements/supplementary-spec.md"
   type: "document"
-  created_at: "2026-10-28T16:32:07Z"
-  checksum: "sha256:6d424cf7e31cabf04f9b78457d4c7011f012d37ba71315ca238bab8b24d9cd24"
-  size_bytes: 6728
+  created_at: "2026-10-28T22:24:50Z"
+  checksum: "sha256:2603cbdcbcc0e8be18a4d451ff053b720d762a4aa31e3ceda4dabf0689904a8c"
+  size_bytes: 8133
 activity:
   id: "urn:aiwg:activity:derivation:supplementary-spec:1"
   type: "derivation"
-  started_at: "2026-10-28T16:32:07Z"
-  ended_at: "2026-10-28T16:32:07Z"
+  started_at: "2026-10-28T22:24:50Z"
+  ended_at: "2026-10-28T22:24:50Z"
   description: "Derived from the repository records cited in the page"
 agent:
   id: "urn:aiwg:agent:claude-opus-5-5"
@@ -23,7 +23,7 @@ relationships:
   wasGeneratedBy:
     entity: "urn:aiwg:artifact:.aiwg/requirements/supplementary-spec.md"
     activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
-    time: "2026-10-28T16:32:07Z"
+    time: "2026-10-28T22:24:50Z"
   used:
     - activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
       entity: "urn:aiwg:artifact:AGENTS.md"
@@ -50,6 +50,9 @@ relationships:
       entity: "urn:aiwg:artifact:docs/agents/adr/0034-match-selectors-with-parcel-selectors.md"
       role: "source_record"
     - activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
+      entity: "urn:aiwg:artifact:docs/agents/adr/0036-decode-character-references-with-htmlize.md"
+      role: "source_record"
+    - activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
       entity: "urn:aiwg:artifact:docs/agents/bugs/UPSTREAM.md"
       role: "source_record"
     - activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
@@ -57,6 +60,9 @@ relationships:
       role: "source_record"
     - activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
       entity: "urn:aiwg:artifact:docs/agents/bugs/bug_0170.md"
+      role: "source_record"
+    - activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
+      entity: "urn:aiwg:artifact:docs/agents/bugs/bug_0181.md"
       role: "source_record"
   wasDerivedFrom:
     - entity: "urn:aiwg:artifact:.aiwg/requirements/supplementary-spec.md"
@@ -92,6 +98,10 @@ relationships:
       derivation_type: "derives_from"
       activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
     - entity: "urn:aiwg:artifact:.aiwg/requirements/supplementary-spec.md"
+      source: "urn:aiwg:artifact:docs/agents/adr/0036-decode-character-references-with-htmlize.md"
+      derivation_type: "derives_from"
+      activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
+    - entity: "urn:aiwg:artifact:.aiwg/requirements/supplementary-spec.md"
       source: "urn:aiwg:artifact:docs/agents/bugs/UPSTREAM.md"
       derivation_type: "derives_from"
       activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
@@ -101,6 +111,10 @@ relationships:
       activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
     - entity: "urn:aiwg:artifact:.aiwg/requirements/supplementary-spec.md"
       source: "urn:aiwg:artifact:docs/agents/bugs/bug_0170.md"
+      derivation_type: "derives_from"
+      activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
+    - entity: "urn:aiwg:artifact:.aiwg/requirements/supplementary-spec.md"
+      source: "urn:aiwg:artifact:docs/agents/bugs/bug_0181.md"
       derivation_type: "derives_from"
       activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
   wasAssociatedWith:

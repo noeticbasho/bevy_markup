@@ -3,24 +3,24 @@
 | Field | Value |
 |---|---|
 | Derived from | `AGENTS.md`, ADRs 0004, 0018, 0019, 0021, 0028, bug ledger, `UPSTREAM.md`, CI history |
-| Source state | `cf0da55`, 2026-10-28 |
+| Source state | `7792cea`, 2026-10-29 |
 
 ## Current Profile
 
-**Published library, early versions (0.x), used by the studio's own projects.** Verification is far above the norm for its size: reference oracles (Chromium styles and layout, `@fluent/dom`), golden images, property, stateful and model-based tests, five fuzzing drivers, mutation testing, coverage per testing layer, benchmarks. The weak spot is operations: the nightly workflow that runs the oracles, fuzzers and coverage has been red for two weeks without triage.
+**Published library, early versions (0.x), used by the studio's own projects.** Verification is far above the norm for its size: reference oracles (Chromium styles and layout, `@fluent/dom`), golden images, property, stateful and model-based tests, five fuzzing drivers, mutation testing, coverage per testing layer, benchmarks. The weak spot is operations: the nightly workflow that runs the oracles, fuzzers and coverage was red for two weeks before its causes were fixed (2026-10-28); a timing-based CI test also failed on a slower runner once, a real quadratic (bug_0181).
 
 | Dimension | Level | Evidence |
 |---|---|---|
 | Security | Strong for scope | untrusted-input stance, fuzzing, two upstream panics patched (U1, U2) |
-| Reliability | High | 176 of 178 filed bugs fixed with regression tests; pure update state machine; schedule-order shuffling in every test run |
+| Reliability | High | 179 of 181 filed bugs fixed with regression tests (the other two: one won't-fix, one withdrawn); pure update state machine; schedule-order shuffling in every test run |
 | Testing & quality | Very high | oracles, golden images, property/model tests, fuzzing, mutants, coverage (88–98 % by layer) |
-| Process rigor | High | 34 ADRs (0034 accepted after a measured trial), bug reports, six review sessions, changelog convention, CI on every push |
-| Operations | Medium | nightly red since 2026-10-14; releases lag `main` (large `[Unreleased]`) |
+| Process rigor | High | 37 ADRs (0034 and 0036 accepted after measured trials; 0035 and 0037 rejected on measured evidence), bug reports, six review sessions, changelog convention, CI on every push |
+| Operations | Medium | nightly fixed 2026-10-28, first run after the fixes pending; releases lag `main` (large `[Unreleased]`, now with breaking changes) |
 
 ## Recommended Profile Adjustments
 
-- Triage the nightly failures and get it green again; treat a red nightly as a reason to file bugs, not noise (R-001).
-- Release the `[Unreleased]` work and move prototype_19 off 0.4.0 (R-004).
+- Confirm the next nightly is green, and triage a red one within days; treat it as a reason to file bugs, not noise (R-001).
+- Release the `[Unreleased]` work (a minor bump: it breaks templates without `| json`) and move prototype_19 off 0.4.0 (R-004).
 
 ## Improvement Roadmap
 
@@ -34,5 +34,9 @@
 - @docs/agents/adr/0004-verification-strategy.md
 - @docs/agents/adr/0021-per-element-dirty-tracking.md
 - @docs/agents/adr/0028-modern-authoring-gaps-roadmap.md
+- @docs/agents/adr/0035-replace-tl-with-html5ever.md
+- @docs/agents/adr/0036-decode-character-references-with-htmlize.md
+- @docs/agents/adr/0037-anchored-overlays-with-bevy-popover.md
 - @docs/agents/bugs/INDEX.md
+- @docs/agents/bugs/bug_0181.md
 - @docs/agents/bugs/UPSTREAM.md

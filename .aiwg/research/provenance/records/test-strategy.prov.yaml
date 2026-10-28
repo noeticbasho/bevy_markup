@@ -1,18 +1,18 @@
 metadata:
   schema_version: "1.0.0"
-  created_at: "2026-10-28T16:32:07Z"
+  created_at: "2026-10-28T22:24:50Z"
   description: "Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)"
 entity:
   id: "urn:aiwg:artifact:.aiwg/testing/test-strategy.md"
   type: "document"
-  created_at: "2026-10-28T16:32:07Z"
-  checksum: "sha256:c87ff9d6a8a1467c0d14d5b51477aa137e31857e16a98b7fc2a9d5d58b7d70de"
-  size_bytes: 4217
+  created_at: "2026-10-28T22:24:50Z"
+  checksum: "sha256:c89e40c5884041907d91c50cf61729886d7d1dbb79c2728adc0d31890e3113a3"
+  size_bytes: 4662
 activity:
   id: "urn:aiwg:activity:derivation:test-strategy:1"
   type: "derivation"
-  started_at: "2026-10-28T16:32:07Z"
-  ended_at: "2026-10-28T16:32:07Z"
+  started_at: "2026-10-28T22:24:50Z"
+  ended_at: "2026-10-28T22:24:50Z"
   description: "Derived from the repository records cited in the page"
 agent:
   id: "urn:aiwg:agent:claude-opus-5-5"
@@ -23,7 +23,7 @@ relationships:
   wasGeneratedBy:
     entity: "urn:aiwg:artifact:.aiwg/testing/test-strategy.md"
     activity: "urn:aiwg:activity:derivation:test-strategy:1"
-    time: "2026-10-28T16:32:07Z"
+    time: "2026-10-28T22:24:50Z"
   used:
     - activity: "urn:aiwg:activity:derivation:test-strategy:1"
       entity: "urn:aiwg:artifact:AGENTS.md"
@@ -38,7 +38,13 @@ relationships:
       entity: "urn:aiwg:artifact:docs/agents/adr/0019-benchmarks-with-divan.md"
       role: "source_record"
     - activity: "urn:aiwg:activity:derivation:test-strategy:1"
+      entity: "urn:aiwg:artifact:docs/agents/bugs/bug_0181.md"
+      role: "source_record"
+    - activity: "urn:aiwg:activity:derivation:test-strategy:1"
       entity: "urn:aiwg:artifact:docs/agents/performance/adr-0034-trial.md"
+      role: "source_record"
+    - activity: "urn:aiwg:activity:derivation:test-strategy:1"
+      entity: "urn:aiwg:artifact:docs/agents/performance/adr-0036-trial.md"
       role: "source_record"
     - activity: "urn:aiwg:activity:derivation:test-strategy:1"
       entity: "urn:aiwg:artifact:docs/agents/skills/testing.md"
@@ -61,7 +67,15 @@ relationships:
       derivation_type: "derives_from"
       activity: "urn:aiwg:activity:derivation:test-strategy:1"
     - entity: "urn:aiwg:artifact:.aiwg/testing/test-strategy.md"
+      source: "urn:aiwg:artifact:docs/agents/bugs/bug_0181.md"
+      derivation_type: "derives_from"
+      activity: "urn:aiwg:activity:derivation:test-strategy:1"
+    - entity: "urn:aiwg:artifact:.aiwg/testing/test-strategy.md"
       source: "urn:aiwg:artifact:docs/agents/performance/adr-0034-trial.md"
+      derivation_type: "derives_from"
+      activity: "urn:aiwg:activity:derivation:test-strategy:1"
+    - entity: "urn:aiwg:artifact:.aiwg/testing/test-strategy.md"
+      source: "urn:aiwg:artifact:docs/agents/performance/adr-0036-trial.md"
       derivation_type: "derives_from"
       activity: "urn:aiwg:activity:derivation:test-strategy:1"
     - entity: "urn:aiwg:artifact:.aiwg/testing/test-strategy.md"

@@ -1,18 +1,18 @@
 metadata:
   schema_version: "1.0.0"
-  created_at: "2026-10-28T16:32:07Z"
+  created_at: "2026-10-28T22:24:50Z"
   description: "Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)"
 entity:
   id: "urn:aiwg:artifact:.aiwg/intake/option-matrix.md"
   type: "document"
-  created_at: "2026-10-28T16:32:07Z"
-  checksum: "sha256:0a425d398239c3bf498be27b635133ef76fa7757ba8f2e20e89a8137ff301995"
-  size_bytes: 1691
+  created_at: "2026-10-28T22:24:50Z"
+  checksum: "sha256:4a06c570622670f9370dd82a9ef32be2e565c83c9229b2348d91af43727e75d4"
+  size_bytes: 2305
 activity:
   id: "urn:aiwg:activity:derivation:option-matrix:1"
   type: "derivation"
-  started_at: "2026-10-28T16:32:07Z"
-  ended_at: "2026-10-28T16:32:07Z"
+  started_at: "2026-10-28T22:24:50Z"
+  ended_at: "2026-10-28T22:24:50Z"
   description: "Derived from the repository records cited in the page"
 agent:
   id: "urn:aiwg:agent:claude-opus-5-5"
@@ -23,7 +23,7 @@ relationships:
   wasGeneratedBy:
     entity: "urn:aiwg:artifact:.aiwg/intake/option-matrix.md"
     activity: "urn:aiwg:activity:derivation:option-matrix:1"
-    time: "2026-10-28T16:32:07Z"
+    time: "2026-10-28T22:24:50Z"
   used:
     - activity: "urn:aiwg:activity:derivation:option-matrix:1"
       entity: "urn:aiwg:artifact:AGENTS.md"
@@ -42,6 +42,15 @@ relationships:
       role: "source_record"
     - activity: "urn:aiwg:activity:derivation:option-matrix:1"
       entity: "urn:aiwg:artifact:docs/agents/adr/0028-modern-authoring-gaps-roadmap.md"
+      role: "source_record"
+    - activity: "urn:aiwg:activity:derivation:option-matrix:1"
+      entity: "urn:aiwg:artifact:docs/agents/adr/0035-replace-tl-with-html5ever.md"
+      role: "source_record"
+    - activity: "urn:aiwg:activity:derivation:option-matrix:1"
+      entity: "urn:aiwg:artifact:docs/agents/adr/0036-decode-character-references-with-htmlize.md"
+      role: "source_record"
+    - activity: "urn:aiwg:activity:derivation:option-matrix:1"
+      entity: "urn:aiwg:artifact:docs/agents/adr/0037-anchored-overlays-with-bevy-popover.md"
       role: "source_record"
   wasDerivedFrom:
     - entity: "urn:aiwg:artifact:.aiwg/intake/option-matrix.md"
@@ -66,6 +75,18 @@ relationships:
       activity: "urn:aiwg:activity:derivation:option-matrix:1"
     - entity: "urn:aiwg:artifact:.aiwg/intake/option-matrix.md"
       source: "urn:aiwg:artifact:docs/agents/adr/0028-modern-authoring-gaps-roadmap.md"
+      derivation_type: "derives_from"
+      activity: "urn:aiwg:activity:derivation:option-matrix:1"
+    - entity: "urn:aiwg:artifact:.aiwg/intake/option-matrix.md"
+      source: "urn:aiwg:artifact:docs/agents/adr/0035-replace-tl-with-html5ever.md"
+      derivation_type: "derives_from"
+      activity: "urn:aiwg:activity:derivation:option-matrix:1"
+    - entity: "urn:aiwg:artifact:.aiwg/intake/option-matrix.md"
+      source: "urn:aiwg:artifact:docs/agents/adr/0036-decode-character-references-with-htmlize.md"
+      derivation_type: "derives_from"
+      activity: "urn:aiwg:activity:derivation:option-matrix:1"
+    - entity: "urn:aiwg:artifact:.aiwg/intake/option-matrix.md"
+      source: "urn:aiwg:artifact:docs/agents/adr/0037-anchored-overlays-with-bevy-popover.md"
       derivation_type: "derives_from"
       activity: "urn:aiwg:activity:derivation:option-matrix:1"
   wasAssociatedWith:
