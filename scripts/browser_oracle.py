@@ -126,18 +126,20 @@ COLLECTOR = r"""
       }
     };
     visit(document.body);
-    // text-transform changes the rendered text, not the DOM's: read it
-    // as Chrome renders it (innerText applies the transform, capitalize's
-    // word rules included) through a temporary span, which inherits the
-    // parent's text-transform. After every record, so the spans can't
-    // move a measured box.
+    // text-transform changes the rendered text, not the DOM's: read each
+    // node as Chrome renders it in its line. A selection over just that
+    // node serializes the laid-out text, the transform applied in context
+    // (capitalize continues a word across elements: `<b>foo</b>bar`).
+    // An element's own innerText would transform it in isolation.
+    const selection = window.getSelection();
     for (const [index, node] of transformed) {
-      const span = document.createElement("span");
-      node.replaceWith(span);
-      span.append(node);
-      runs[index].text = span.innerText.replace(/\s+/g, " ");
-      span.replaceWith(node);
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      runs[index].text = selection.toString().replace(/\s+/g, " ");
     }
+    selection.removeAllRanges();
     const out = document.createElement("pre");
     out.id = "bevy_markup-oracle";
     out.textContent = JSON.stringify({ elements, runs });

@@ -6851,7 +6851,11 @@ fn run_walk<'a>(
         match handle.get(ctx.parser) {
             Some(tl::Node::Raw(text)) => {
                 let text = decode_entities(&text.as_utf8_str());
-                let text = transform_text(&text, style.text_transform);
+                // Capitalization continues a word across inline elements
+                // (`<b>foo</b>bar` is one word): the block's previous
+                // character is the context, as in Blink.
+                let previous = runs.last().and_then(|run| run.text.chars().last());
+                let text = transform_text(&text, style.text_transform, previous);
                 match runs.last_mut() {
                     Some(last)
                         if last.style == style && last.extras == extras && last.image.is_none() =>
@@ -7070,28 +7074,66 @@ fn push_runs(
 /// ADR 0028: `text-transform` applied to the run's text at collection
 /// (post-`decode`, pre-collapse: the transform never produces or removes
 /// whitespace).
-fn transform_text(text: &str, transform: TextTransformSpec) -> String {
+fn transform_text(text: &str, transform: TextTransformSpec, previous: Option<char>) -> String {
     match transform {
         TextTransformSpec::None => text.to_owned(),
+        // Full case mappings (`ß` → `SS`) and the final-sigma rule.
         TextTransformSpec::Uppercase => text.to_uppercase(),
         TextTransformSpec::Lowercase => text.to_lowercase(),
-        // An approximation of CSS's titlecase: the first cased character
-        // after any run of non-alphanumerics uppercases; the rest stays.
-        TextTransformSpec::Capitalize => {
-            let mut out = String::with_capacity(text.len());
-            let mut at_boundary = true;
-            for character in text.chars() {
-                let boundary = at_boundary;
-                at_boundary = !character.is_alphanumeric();
-                out.push(if boundary {
-                    character.to_uppercase().next().unwrap_or(character)
-                } else {
-                    character
-                });
-            }
-            out
+        TextTransformSpec::Capitalize => capitalize(text, previous),
+    }
+}
+
+/// `text-transform: capitalize` as Chrome renders it (checked against it
+/// by the browser oracle, `tests/vectors/text_transform_unicode`): the
+/// first character of each word takes its simple titlecase mapping
+/// (`ǆ` → `ǅ`; `ß`, `ŉ`, `ﬁ` stay, having no single-character titlecase).
+/// Words are ICU's (UAX #29: apostrophes and `·` join, a word starting
+/// with a digit has nothing to capitalize, CJK breaks from Latin) plus a
+/// break around `.` and `:` between letters, where Chrome's ICU is
+/// tailored to break (`A.B.C`, `O:Clock`). `previous` is the character
+/// before `text` in the block, so a word continues across elements.
+fn capitalize(text: &str, previous: Option<char>) -> String {
+    use icu_casemap::CaseMapperBorrowed;
+    use icu_segmenter::WordSegmenter;
+    use icu_segmenter::options::WordBreakInvariantOptions;
+
+    let mut probe = String::with_capacity(text.len() + 4);
+    probe.extend(previous);
+    let offset = probe.len();
+    probe.push_str(text);
+    let mut starts: Vec<usize> = WordSegmenter::new_auto(WordBreakInvariantOptions::default())
+        .segment_str(&probe)
+        .collect();
+    let chars: Vec<(usize, char)> = probe.char_indices().collect();
+    for (index, &(at, character)) in chars.iter().enumerate() {
+        if matches!(
+            character,
+            '.' | ':' | '\u{FE52}' | '\u{FE55}' | '\u{FF0E}' | '\u{FF1A}'
+        ) && index > 0
+            && chars[index - 1].1.is_alphabetic()
+            && chars
+                .get(index + 1)
+                .is_some_and(|(_, next)| next.is_alphabetic())
+        {
+            starts.push(at);
+            starts.push(at + character.len_utf8());
         }
     }
+    starts.sort_unstable();
+    let case = CaseMapperBorrowed::new();
+    let mut out = String::with_capacity(text.len());
+    for &(at, character) in &chars {
+        if at < offset {
+            continue;
+        }
+        out.push(if starts.binary_search(&at).is_ok() {
+            case.simple_titlecase(character)
+        } else {
+            character
+        });
+    }
+    out
 }
 
 /// Whitespace handling for a block's runs (ADR 0028): collapsed as in
@@ -7534,47 +7576,35 @@ mod transform_tests {
 
     #[test]
     fn text_transform_cases() {
+        let t = |text, transform| transform_text(text, transform, None);
+        assert_eq!(t("mixed Case", TextTransformSpec::None), "mixed Case");
+        assert_eq!(t("mixed Case", TextTransformSpec::Uppercase), "MIXED CASE");
+        assert_eq!(t("MIXED Case", TextTransformSpec::Lowercase), "mixed case");
+        // Full mappings: ß uppercases to SS; Σ lowercases to a final ς.
+        assert_eq!(t("ß", TextTransformSpec::Uppercase), "SS");
+        assert_eq!(t("ΟΔΟΣ.", TextTransformSpec::Lowercase), "οδος.");
+        // Capitalize, as Chrome renders it (the browser oracle checks the
+        // full set in tests/vectors/text_transform_unicode).
+        for (text, chrome) in [
+            ("hello world", "Hello World"),
+            ("don't stop-me_now (yes)", "Don't Stop-Me_now (Yes)"),
+            ("\"quoted\"", "\"Quoted\""),
+            ("v2next 2nd", "V2next 2nd"),
+            ("a.b.c o:clock e·g 'tis", "A.B.C O:Clock E·g 'Tis"),
+            ("ǆemal ßtraße ﬁne", "ǅemal ßtraße ﬁne"),
+            ("e\u{301}cole 漢字abc", "E\u{301}cole 漢字Abc"),
+            ("a  b", "A  B"),
+        ] {
+            assert_eq!(t(text, TextTransformSpec::Capitalize), chrome, "{text}");
+        }
+        // A word continues across elements: `<b>foo</b>bar`.
         assert_eq!(
-            transform_text("mixed Case", TextTransformSpec::None),
-            "mixed Case"
+            transform_text("bar baz", TextTransformSpec::Capitalize, Some('o')),
+            "bar Baz"
         );
         assert_eq!(
-            transform_text("mixed Case", TextTransformSpec::Uppercase),
-            "MIXED CASE"
-        );
-        assert_eq!(
-            transform_text("MIXED Case", TextTransformSpec::Lowercase),
-            "mixed case"
-        );
-        // Unicode-aware: ß uppercases to SS.
-        assert_eq!(transform_text("ß", TextTransformSpec::Uppercase), "SS");
-        // Capitalize: the first typographic letter unit of each word
-        // uppercases — a word boundary is any non-letter-unit (punctuation
-        // included: `don't` capitalizes the T, as Chrome does); digits ARE
-        // letter units (no boundary inside `v2next`); the rest stays.
-        assert_eq!(
-            transform_text("hello world", TextTransformSpec::Capitalize),
-            "Hello World"
-        );
-        assert_eq!(
-            transform_text("don't stop-me_now (yes)", TextTransformSpec::Capitalize),
-            "Don'T Stop-Me_Now (Yes)"
-        );
-        // A leading non-letter: the boundary carries to the first cased
-        // character.
-        assert_eq!(
-            transform_text("\"quoted\"", TextTransformSpec::Capitalize),
-            "\"Quoted\""
-        );
-        // Digits are alphanumeric: no case boundary inside `v2next`.
-        assert_eq!(
-            transform_text("v2next", TextTransformSpec::Capitalize),
-            "V2next"
-        );
-        // The transform never touches whitespace shape.
-        assert_eq!(
-            transform_text("a  b", TextTransformSpec::Capitalize),
-            "A  B"
+            transform_text("bar", TextTransformSpec::Capitalize, Some(' ')),
+            "Bar"
         );
     }
 }

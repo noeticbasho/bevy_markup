@@ -77,6 +77,11 @@ fluent = "0.16.0"
 unic-langid = { version = "0.9", features = ["serde"] }
 # CSS. `into_owned`: parsed StyleSheet<'i> → StyleSheet<'static> for storing as an asset.
 lightningcss = { version = "1.0.0-alpha.72", features = ["into_owned"] }
+# `text-transform: capitalize` as Chrome does it: ICU's word boundaries and
+# simple titlecasing (ICU4X; `icu_segmenter` is already in the tree through
+# Bevy's text stack, parley).
+icu_segmenter = "2.3"
+icu_casemap = "2"
 # Selector matching (ADR 0034): lightningcss's own selector engine. Pinned
 # to the version lightningcss requires so the selector types unify; bump
 # the two together.

@@ -17,10 +17,13 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   `|=`, the `i` flag) on `data-*` attributes. Specificity follows the spec
   (`:where()` counts nothing, `:is()` its most specific argument).
 - **`text-transform`** (`none`/`uppercase`/`lowercase`/`capitalize`,
-  inherited): applied to the run text at collection (Unicode-aware
-  upper/lowercase; `capitalize` uppercases the first typographic letter
-  unit of each word — punctuation starts a word, digits don't, as in
-  browsers).
+  inherited): applied to the run text at collection. Upper/lowercase use
+  the full Unicode mappings (`ß` → `SS`, a final `ς`); `capitalize`
+  titlecases the first letter of each word as Chrome does: ICU's word
+  boundaries (apostrophes join, `.`/`:` between letters break, a word can
+  continue across elements: `<b>foo</b>bar` → "Foobar") and simple
+  titlecasing (`ǆ` → `ǅ`; `ß` stays). Checked against Chrome by the browser
+  oracle.
 - **`white-space`** (`normal`/`nowrap`/`pre`/`pre-wrap`, inherited):
   collapsing and wrapping per kind, replacing the `pre` tag's
   hard-coded behavior (which stays the tag's UA default — a

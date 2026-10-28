@@ -1026,7 +1026,7 @@ harnesses below) are filed in `docs/agents/bugs/` — see **Bug reports**.
   breaking the code once).
 - **Browser oracle** (`browser_oracle` test): every `tests/vectors/*/` with a
   `browser.json` is built and compared with Chromium's computed styles — per
-  non-whitespace character as rendered (`text-transform` applied; face from CSS font matching over the harness's
+  non-whitespace character as rendered (`text-transform` applied in context, read through a selection per text node; face from CSS font matching over the harness's
   registered families, size, color) and per root/block/container (padding,
   border widths, border-image file/slices/repeat with `%` resolved on the
   32×24 fixture, background, container gap). Regenerate after changing a
