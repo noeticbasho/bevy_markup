@@ -1,0 +1,8 @@
+/* ADR 0036: character references decode by the spec's rules. Text is
+   compared as rendered; attribute values through attribute selectors
+   (each rule matches only if the value decoded as Chrome decodes it). */
+p { color: #808080 }
+[data-q="?a=1&copy=2"] { color: #00ff00 }
+[data-c="&copy2"] { color: #00ffff }
+[data-n="A"] { color: #ff00ff }
+[data-e="©"] { color: #ffff00 }

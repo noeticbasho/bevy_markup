@@ -95,7 +95,7 @@ use unic_langid::LanguageIdentifier;
 
 use crate::html::RenderedHtml;
 use crate::md;
-use crate::template::decode_entities;
+use crate::template::decode_attribute;
 
 /// The Fluent resources of one locale, loaded from a `*.ftl.ron` manifest
 /// (see the [locale bundles](self#locale-bundles) section). Use it via
@@ -338,8 +338,8 @@ fn resolve_all(
         match attributes.get("data-l10n-id").flatten() {
             Some(id) => {
                 let args = attributes.get("data-l10n-args").flatten();
-                let id = decode_entities(&id.as_utf8_str());
-                let args = args.map(|args| decode_entities(&args.as_utf8_str()));
+                let id = decode_attribute(id.as_utf8_str()).into_owned();
+                let args = args.map(|args| decode_attribute(args.as_utf8_str()));
                 let text = translate(bundle, &id, args.as_deref());
                 out.insert(
                     handle,
@@ -785,7 +785,7 @@ fn parse_args(json: &str, inert: bool) -> Result<FluentArgs<'static>, String> {
     Ok(args)
 }
 
-/// Escapes text for inclusion in markup (inverse of `decode_entities`).
+/// Escapes text for inclusion in markup (inverse of `decode_text`).
 fn escape_html(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
@@ -866,7 +866,7 @@ mod tests {
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(64))]
 
-        /// `escape_html` is undone exactly by `decode_entities` and leaves no
+        /// `escape_html` is undone exactly by `decode_text` and leaves no
         /// markup-significant character behind. Catches an escape the
         /// decoder doesn't know (entities shown in the UI) or a missing one
         /// (string args injecting markup into translations).
@@ -874,7 +874,7 @@ mod tests {
         fn escape_then_decode_is_identity(s in MARKUP_TEXT) {
             let escaped = escape_html(&s);
             prop_assert!(!escaped.contains(['<', '>', '"', '\'']), "{escaped:?}");
-            prop_assert_eq!(decode_entities(&escaped), s);
+            prop_assert_eq!(crate::template::decode_text(&escaped), s);
         }
 
         /// JSON numbers stay Fluent numbers, so English plural selection
@@ -896,7 +896,7 @@ mod tests {
             let json = serde_json::json!({ "s": s }).to_string();
             let text = translate(&bundle("m = [{ $s }]"), "m", Some(&json)).unwrap();
             prop_assert!(!text.contains('<'), "{text:?}");
-            prop_assert_eq!(decode_entities(&text), format!("[{s}]"));
+            prop_assert_eq!(crate::template::decode_text(&text), format!("[{s}]"));
         }
 
         /// Every cached entry substitutes exactly what the per-value
@@ -1094,8 +1094,8 @@ mod tests {
             // in text, the cache keeps `&quot;`).
             let cached = run(source, "hi", &args);
             assert_eq!(
-                decode_entities(&per_value),
-                decode_entities(&cached),
+                crate::template::decode_text(&per_value),
+                crate::template::decode_text(&cached),
                 "{who:?}"
             );
         }

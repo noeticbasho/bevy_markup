@@ -125,6 +125,16 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   Previously `auto` scrolled always.
 
 ### Changed
+- **Character references decode by the HTML spec's rules** (ADR 0036),
+  through the `htmlize` crate instead of the crate's own decoder and
+  generated WHATWG table (both removed, with
+  `scripts/generate_entities.py`). New, as in browsers: legacy names
+  decode without `;` (`&copy2` → "©2", `&notareal;` → "¬areal;"), and so
+  do numeric references (`&#65` → "A"); in attribute values a legacy name
+  followed by a letter, digit or `=` stays as written
+  (`href="?a=1&copy=2"` survives). Checked against Chrome by the new
+  `character_references` oracle vector. Decoding is also faster (escaped
+  JSON attributes about 11×).
 - **Breaking:** `Focusable` has a `tab_index` field (the element's
   `tabindex`, 0 when absent); code building one by struct literal needs it.
 - **Breaking:** argument attributes (`data-l10n-args`, `data-with`,

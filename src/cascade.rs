@@ -1327,7 +1327,7 @@ impl InlineStyle {
 #[hotpath::measure]
 pub(crate) fn inline_style(tag: &tl::HTMLTag) -> Option<InlineStyle> {
     let text =
-        crate::template::decode_entities(&tag.attributes().get("style").flatten()?.as_utf8_str());
+        crate::template::decode_attribute(tag.attributes().get("style").flatten()?.as_utf8_str());
     if nesting_over_limit(&text) {
         debug!("html css: style attribute nests too deeply: {text:?}");
         return None;

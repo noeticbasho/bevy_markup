@@ -34,7 +34,7 @@ use crate::l10n::LocalizedText;
 use crate::rebuild::{Decision, Frame, Phase, RebuildState, Source};
 use crate::signals::{self, ElementSignals, PseudoState, SignalBinding, SignalTrigger};
 use crate::style::{DefaultStylesheet, HtmlStylesheet, Stylesheet};
-use crate::template::{HtmlDocument, HtmlTemplate, decode_entities};
+use crate::template::{HtmlDocument, HtmlTemplate, decode_attribute, decode_text};
 
 /// Values when no stylesheet rule applies (white suits the dark UIs Bevy
 /// apps usually draw on; 16px is the CSS initial size).
@@ -761,7 +761,7 @@ impl Styler<'_> {
             .attributes()
             .get("src")
             .flatten()
-            .map(|src| decode_entities(&src.as_utf8_str()))?;
+            .map(|src| decode_attribute(src.as_utf8_str()))?;
         let template = match &self.template {
             Some(template) => template,
             None => {
@@ -4795,7 +4795,7 @@ impl Ctx<'_, '_, '_> {
         else {
             return Some(element);
         };
-        let name = decode_entities(&name.as_utf8_str());
+        let name = decode_attribute(name.as_utf8_str());
         let mut named = named.borrow_mut();
         let index = named.iter().position(|(source, _)| *source == name)?;
         if named[index].1.tag != element.tag {
@@ -4827,7 +4827,10 @@ fn walk_translation(
         .filter_map(|node| {
             let tag = node.as_tag()?;
             let name = tag.attributes().get("data-l10n-name").flatten()?;
-            Some((decode_entities(&name.as_utf8_str()), element_of(tag)))
+            Some((
+                decode_attribute(name.as_utf8_str()).into_owned(),
+                element_of(tag),
+            ))
         })
         .collect();
     let named = RefCell::new(named);
@@ -6249,12 +6252,12 @@ fn collect_node(
                 .attributes()
                 .get("value")
                 .flatten()
-                .map(|value| decode_entities(&value.as_utf8_str()).to_string());
+                .map(|value| decode_attribute(value.as_utf8_str()).to_string());
             let name = tag
                 .attributes()
                 .get("name")
                 .flatten()
-                .map(|name| decode_entities(&name.as_utf8_str()).to_string());
+                .map(|name| decode_attribute(name.as_utf8_str()).to_string());
             // The outer `boxed` already has the placement (`resolve_names`),
             // the outline and the fade applied.
             items.push(Item::TextInput {
@@ -6713,7 +6716,7 @@ fn element_of(tag: &tl::HTMLTag) -> HtmlElement {
         tag.attributes()
             .get(key)
             .flatten()
-            .map(|value| decode_entities(&value.as_utf8_str()))
+            .map(|value| decode_attribute(value.as_utf8_str()).into_owned())
     };
     HtmlElement {
         tag: tag.name().as_utf8_str().to_ascii_lowercase(),
@@ -6832,7 +6835,7 @@ fn run_walk<'a>(
     while let Some((handle, style, extras, chain, depth, element_state)) = stack.pop() {
         match handle.get(ctx.parser) {
             Some(tl::Node::Raw(text)) => {
-                let text = decode_entities(&text.as_utf8_str());
+                let text = decode_text(text.as_utf8_str());
                 // Capitalization continues a word across inline elements
                 // (`<b>foo</b>bar` is one word): the block's previous
                 // character is the context, as in Blink.
@@ -6959,7 +6962,7 @@ fn run_walk<'a>(
                 if tag.name().as_utf8_str() == *"a"
                     && let Some(href) = tag.attributes().get("href").flatten()
                 {
-                    let href = decode_entities(&href.as_utf8_str());
+                    let href = decode_attribute(href.as_utf8_str());
                     if !href.is_empty() {
                         let mut bindings = signals::signal_bindings(tag);
                         bindings.push(SignalBinding {

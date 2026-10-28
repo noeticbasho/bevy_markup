@@ -51,5 +51,7 @@ as `[INFERENCE]`.
 | [0032](./0032-windowed-build-revised.md) | Windowed build, revised: one unit system, nested culling, scroll reuse and slack | Accepted; amended by 0033 |
 | [0033](./0033-sibling-alignment-and-height-estimates.md) | Sibling alignment and height estimates for content changes | Accepted |
 | [0034](./0034-match-selectors-with-parcel-selectors.md) | Match selectors with lightningcss's selector engine (parcel_selectors) | Accepted |
+| [0035](./0035-replace-tl-with-html5ever.md) | Replace tl with html5ever | Rejected |
+| [0036](./0036-decode-character-references-with-htmlize.md) | Decode character references with htmlize | Accepted |
 
 Add new records to this index in the same commit that adds the file.

@@ -372,7 +372,7 @@ impl Arbitrary for SafeText {
 }
 
 /// Whatever a context variable holds, `{{ s }}` renders it back verbatim:
-/// Tera's autoescaping and `decode_entities` must cancel exactly.
+/// Tera's autoescaping and the crate's decoding must cancel exactly.
 #[quickcheck]
 fn context_text_round_trips_through_template(text: SafeText) {
     let SafeText(s) = &text;

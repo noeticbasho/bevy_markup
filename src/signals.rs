@@ -47,7 +47,7 @@ use bevy::text::EditableText;
 use serde_json::Value;
 
 use crate::html::HtmlElement;
-use crate::template::decode_entities;
+use crate::template::decode_attribute;
 
 /// Which interaction emits a signal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,7 +164,7 @@ pub(crate) fn signal_bindings(tag: &tl::HTMLTag) -> Vec<SignalBinding> {
         let Some(Some(value)) = attributes.get(attribute) else {
             continue;
         };
-        let name = decode_entities(&value.as_utf8_str());
+        let name = decode_attribute(value.as_utf8_str()).into_owned();
         if name.trim().is_empty() {
             debug!("html signals: empty {attribute} value; skipped");
             continue;
@@ -172,7 +172,7 @@ pub(crate) fn signal_bindings(tag: &tl::HTMLTag) -> Vec<SignalBinding> {
         if !payload_parsed {
             payload = match attributes.get("data-with").flatten() {
                 Some(value) => {
-                    let json = decode_entities(&value.as_utf8_str());
+                    let json = decode_attribute(value.as_utf8_str());
                     match crate::template::parse_attribute_json(&json) {
                         Ok(payload) => payload,
                         Err(error) => {

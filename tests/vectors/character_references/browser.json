@@ -1,0 +1,24 @@
+{
+ "generator": {"browser": "Chromium 156.0.8078.47 Arch Linux", "script": "scripts/browser_oracle.py", "viewport": [640, 480]},
+ "elements": [
+  {"tag": "html", "id": null, "classes": [], "color": "rgb(255, 255, 255)", "fontSize": 16, "fontWeight": 400, "fontStyle": "normal", "fontFamily": "\"bevy_markup default\"", "padding": [0, 0, 0, 0], "border": [0, 0, 0, 0], "borderImageSource": "none", "borderImageSlice": "100%", "borderImageRepeat": "stretch", "rowGap": "normal", "backgroundColor": "rgba(0, 0, 0, 0)"},
+  {"tag": "p", "id": null, "classes": ["legacy"], "color": "rgb(128, 128, 128)", "fontSize": 16, "fontWeight": 400, "fontStyle": "normal", "fontFamily": "\"bevy_markup default\"", "padding": [0, 0, 0, 0], "border": [0, 0, 0, 0], "borderImageSource": "none", "borderImageSlice": "100%", "borderImageRepeat": "stretch", "rowGap": "normal", "backgroundColor": "rgba(0, 0, 0, 0)"},
+  {"tag": "p", "id": null, "classes": ["numeric"], "color": "rgb(128, 128, 128)", "fontSize": 16, "fontWeight": 400, "fontStyle": "normal", "fontFamily": "\"bevy_markup default\"", "padding": [0, 0, 0, 0], "border": [0, 0, 0, 0], "borderImageSource": "none", "borderImageSlice": "100%", "borderImageRepeat": "stretch", "rowGap": "normal", "backgroundColor": "rgba(0, 0, 0, 0)"},
+  {"tag": "p", "id": null, "classes": ["kept"], "color": "rgb(128, 128, 128)", "fontSize": 16, "fontWeight": 400, "fontStyle": "normal", "fontFamily": "\"bevy_markup default\"", "padding": [0, 0, 0, 0], "border": [0, 0, 0, 0], "borderImageSource": "none", "borderImageSlice": "100%", "borderImageRepeat": "stretch", "rowGap": "normal", "backgroundColor": "rgba(0, 0, 0, 0)"},
+  {"tag": "p", "id": null, "classes": ["named"], "color": "rgb(128, 128, 128)", "fontSize": 16, "fontWeight": 400, "fontStyle": "normal", "fontFamily": "\"bevy_markup default\"", "padding": [0, 0, 0, 0], "border": [0, 0, 0, 0], "borderImageSource": "none", "borderImageSlice": "100%", "borderImageRepeat": "stretch", "rowGap": "normal", "backgroundColor": "rgba(0, 0, 0, 0)"},
+  {"tag": "p", "id": null, "classes": ["query"], "color": "rgb(0, 255, 0)", "fontSize": 16, "fontWeight": 400, "fontStyle": "normal", "fontFamily": "\"bevy_markup default\"", "padding": [0, 0, 0, 0], "border": [0, 0, 0, 0], "borderImageSource": "none", "borderImageSlice": "100%", "borderImageRepeat": "stretch", "rowGap": "normal", "backgroundColor": "rgba(0, 0, 0, 0)"},
+  {"tag": "p", "id": null, "classes": ["legacy-attr"], "color": "rgb(0, 255, 255)", "fontSize": 16, "fontWeight": 400, "fontStyle": "normal", "fontFamily": "\"bevy_markup default\"", "padding": [0, 0, 0, 0], "border": [0, 0, 0, 0], "borderImageSource": "none", "borderImageSlice": "100%", "borderImageRepeat": "stretch", "rowGap": "normal", "backgroundColor": "rgba(0, 0, 0, 0)"},
+  {"tag": "p", "id": null, "classes": ["numeric-attr"], "color": "rgb(255, 0, 255)", "fontSize": 16, "fontWeight": 400, "fontStyle": "normal", "fontFamily": "\"bevy_markup default\"", "padding": [0, 0, 0, 0], "border": [0, 0, 0, 0], "borderImageSource": "none", "borderImageSlice": "100%", "borderImageRepeat": "stretch", "rowGap": "normal", "backgroundColor": "rgba(0, 0, 0, 0)"},
+  {"tag": "p", "id": null, "classes": ["end-attr"], "color": "rgb(255, 255, 0)", "fontSize": 16, "fontWeight": 400, "fontStyle": "normal", "fontFamily": "\"bevy_markup default\"", "padding": [0, 0, 0, 0], "border": [0, 0, 0, 0], "borderImageSource": "none", "borderImageSlice": "100%", "borderImageRepeat": "stretch", "rowGap": "normal", "backgroundColor": "rgba(0, 0, 0, 0)"}
+ ],
+ "runs": [
+  {"text": "Legacy: ©2 & < ¬areal; & end", "color": "rgb(128, 128, 128)", "fontSize": 16, "fontWeight": 400, "fontStyle": "normal", "fontFamily": "\"bevy_markup default\""},
+  {"text": "Numeric: A B C — � end", "color": "rgb(128, 128, 128)", "fontSize": 16, "fontWeight": 400, "fontStyle": "normal", "fontFamily": "\"bevy_markup default\""},
+  {"text": "Kept: &zzunknown; &lt; a & b &; end", "color": "rgb(128, 128, 128)", "fontSize": 16, "fontWeight": 400, "fontStyle": "normal", "fontFamily": "\"bevy_markup default\""},
+  {"text": "Named: ⪢̸ ∉ ¬ ♥ end", "color": "rgb(128, 128, 128)", "fontSize": 16, "fontWeight": 400, "fontStyle": "normal", "fontFamily": "\"bevy_markup default\""},
+  {"text": "query attribute keeps its legacy name", "color": "rgb(0, 255, 0)", "fontSize": 16, "fontWeight": 400, "fontStyle": "normal", "fontFamily": "\"bevy_markup default\""},
+  {"text": "legacy name before a digit stays", "color": "rgb(0, 255, 255)", "fontSize": 16, "fontWeight": 400, "fontStyle": "normal", "fontFamily": "\"bevy_markup default\""},
+  {"text": "numeric reference decodes", "color": "rgb(255, 0, 255)", "fontSize": 16, "fontWeight": 400, "fontStyle": "normal", "fontFamily": "\"bevy_markup default\""},
+  {"text": "legacy name at the end decodes", "color": "rgb(255, 255, 0)", "fontSize": 16, "fontWeight": 400, "fontStyle": "normal", "fontFamily": "\"bevy_markup default\""}
+ ]
+}

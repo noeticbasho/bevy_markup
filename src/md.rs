@@ -591,9 +591,11 @@ fn decode_code_entities(events: Vec<Event<'_>>) -> Vec<Event<'_>> {
                 code_block = false;
                 event
             }
-            Event::Code(code) => Event::Code(crate::template::decode_entities(&code).into()),
+            Event::Code(code) => {
+                Event::Code(crate::template::decode_text(&*code).into_owned().into())
+            }
             Event::Text(text) if code_block => {
-                Event::Text(crate::template::decode_entities(&text).into())
+                Event::Text(crate::template::decode_text(&*text).into_owned().into())
             }
             event => event,
         })
@@ -1283,7 +1285,7 @@ mod tests {
     }
 
     /// Entities survive: escaped text is not re-interpreted as markup
-    /// (`&lt;` stays an entity for `tl`/`decode_entities`).
+    /// (`&lt;` stays an entity for `tl`/`decode_text`).
     #[test]
     fn keeps_entities_as_entities() {
         let html = to_html("a &lt;b&gt; c\n");

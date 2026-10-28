@@ -22,6 +22,7 @@
 //! A template that extends another may only hold blocks at its top level,
 //! so include libraries inside a block there.
 
+use std::borrow::Cow;
 use std::fmt::Write;
 
 use bevy::asset::{AssetLoader, AssetPath, LoadContext, io::Reader};
@@ -109,117 +110,22 @@ impl HtmlDocument {
     }
 }
 
-/// `tl` leaves character references as written. Decode the named (WHATWG's
-/// table, semicolon forms — ADR 0027) and numeric ones, so text and
-/// attribute values read as authored. One level: a decoded `&` is not
-/// re-scanned (`&amp;lt;` reads back `&lt;`); an unknown reference is kept
-/// verbatim, as in a browser.
-#[path = "entity_data.rs"]
-mod entity_data;
-
-pub(crate) fn decode_entities(text: &str) -> String {
-    if !text.contains('&') {
-        return text.to_owned();
-    }
-    let mut out = String::with_capacity(text.len());
-    let mut at = 0;
-    while at < text.len() {
-        if !text[at..].starts_with('&') {
-            let character = text[at..].chars().next().expect("at a char boundary");
-            out.push(character);
-            at += character.len_utf8();
-            continue;
-        }
-        // Numeric: decimal or hex, terminated by `;`. Invalid code points
-        // (0, surrogates, past the top) read U+FFFD, and the C1 controls
-        // read their Windows-1252 replacements (HTML §13.4's table).
-        let numeric = text[at..]
-            .strip_prefix("&#x")
-            .or_else(|| text[at..].strip_prefix("&#X"))
-            .and_then(|rest| terminated_digits(rest, 16, 1, 8, 3))
-            .or_else(|| {
-                text[at..]
-                    .strip_prefix("&#")
-                    .and_then(|rest| terminated_digits(rest, 10, 1, 10, 2))
-            });
-        if let Some((consumed, code)) = numeric {
-            let code = match code {
-                0x00 => 0xFFFD,
-                0x80..=0x9F => u32::from(C1_REPLACEMENTS[(code - 0x80) as usize]),
-                code => code,
-            };
-            out.push(char::from_u32(code).unwrap_or('\u{FFFD}'));
-            at += consumed;
-            continue;
-        }
-        // Named: the longest `&name;` in the table wins.
-        let limit = text.len().min(at + entity_data::MAX_REFERENCE);
-        let mut decoded = false;
-        for end in (at + 3..=limit).rev() {
-            // Byte-level: `end - 1` may land inside a multi-byte char.
-            if text.as_bytes()[end - 1] != b';' {
-                continue;
-            }
-            let name = &text[at + 1..end];
-            match entity_data::ENTITIES.binary_search_by(|(known, _)| (*known).cmp(name)) {
-                Ok(index) => {
-                    for code in entity_data::ENTITIES[index].1 {
-                        out.push(char::from_u32(*code).expect("a table code point"));
-                    }
-                    at = end;
-                    decoded = true;
-                    break;
-                }
-                // Keep going: a shorter name may still match (the
-                // longest-match rule).
-                Err(_) => continue,
-            }
-        }
-        if !decoded {
-            out.push('&');
-            at += 1;
-        }
-    }
-    out
+/// `tl` leaves character references as written: decode them, so text
+/// reads as authored (ADR 0036, the spec's algorithm via `htmlize`). One
+/// level: a decoded `&` is not re-scanned (`&amp;lt;` reads back `&lt;`);
+/// an unknown reference stays verbatim; legacy names decode without `;`
+/// (`&copy2` → "©2"), as in a browser. Borrows when there's nothing to
+/// decode.
+pub(crate) fn decode_text<'a>(text: impl Into<Cow<'a, str>>) -> Cow<'a, str> {
+    htmlize::unescape(text)
 }
 
-/// The digits up to the reference's `;`: `(consumed including the `;`,
-/// value)`, or `None` without the terminator, past the digit bound, or
-/// non-parsing (the reference stays verbatim).
-fn terminated_digits(
-    rest: &str,
-    radix: u32,
-    min: usize,
-    max: usize,
-    prefix: usize,
-) -> Option<(usize, u32)> {
-    // Only the digit run, at most `max` long (review_0005 I04: finding
-    // the `;` first scanned the rest of the text per `&#`, O(n²) on a
-    // text of unterminated references). Digits only: `from_str_radix`
-    // would accept a sign (`&#+5;` isn't a reference).
-    let length = rest
-        .bytes()
-        .take(max + 1)
-        .take_while(|byte| char::from(*byte).is_digit(radix))
-        .count();
-    let digits = &rest[..length];
-    (length >= min && length <= max && rest[length..].starts_with(';')).then_some(())?;
-    // The consumed span includes the terminator and the `&#`/`&#x`
-    // prefix (the caller's `at` still sits on the `&`).
-    Some((
-        digits.len() + 1 + prefix,
-        u32::from_str_radix(digits, radix).ok()?,
-    ))
+/// [`decode_text`] for an attribute value: the spec's attribute rule keeps
+/// a legacy name followed by an alphanumeric or `=` verbatim, so a query
+/// string like `?a=1&copy=2` survives.
+pub(crate) fn decode_attribute<'a>(value: impl Into<Cow<'a, str>>) -> Cow<'a, str> {
+    htmlize::unescape_attribute(value)
 }
-
-/// The C1 controls' Windows-1252 replacements, indexed from 0x80.
-#[rustfmt::skip]
-static C1_REPLACEMENTS: &[u16] = &[
-    0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
-    0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
-    0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
-    0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178,
-];
 /// A Tera environment as the template loader builds it (public so tools
 /// can compile templates exactly as the loader does): autoescaping for
 /// the markup extensions and the crate's filters — `json`, which prints a
@@ -699,7 +605,7 @@ fn json_filter_round_trips_any_string() {
         let mut tera = new_tera();
         tera.add_raw_template("t.html", template).unwrap();
         let context = tera::Context::from_serialize(&serde_json::json!({ "s": value })).unwrap();
-        decode_entities(&tera.render("t.html", &context).unwrap())
+        decode_text(&tera.render("t.html", &context).unwrap()).into_owned()
     };
     for value in [
         "Ada \u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}",
@@ -853,8 +759,9 @@ mod tests {
     /// three runs each, so machine speed and load cancel out.
     /// review_0005 I04: each `&#` scanned to the next `;` (or the end of the
     /// text) before checking the digit bound, so a text of `&#` references
-    /// without terminators decoded in O(n²) — on every render. Scaling, not
-    /// wall time: 4× the input may cost at most 8× (best of three).
+    /// without terminators decoded in O(n²) — on every render. Kept for the
+    /// dependency that decodes now (ADR 0036). Scaling, not wall time: 4×
+    /// the input may cost at most 8× (best of three).
     #[test]
     fn entity_decoding_stays_linear_without_terminators() {
         use std::time::{Duration, Instant};
@@ -862,7 +769,7 @@ mod tests {
             (0..3)
                 .map(|_| {
                     let start = Instant::now();
-                    std::hint::black_box(decode_entities(text));
+                    std::hint::black_box(decode_text(text));
                     start.elapsed()
                 })
                 .min()
@@ -872,7 +779,7 @@ mod tests {
             let (small, large) = (best(&unit.repeat(10_000)), best(&unit.repeat(40_000)));
             assert!(
                 large < small * 8 + Duration::from_millis(5),
-                "decode_entities scales superlinearly on {shape}: 10k {small:?}, 40k {large:?}"
+                "decode_text scales superlinearly on {shape}: 10k {small:?}, 40k {large:?}"
             );
         }
     }
@@ -1020,7 +927,7 @@ mod tests {
     #[test]
     fn decodes_the_five_escapes() {
         assert_eq!(
-            decode_entities("&lt;b&gt; &quot;x&quot; &#39;y&#39; &amp;"),
+            decode_text("&lt;b&gt; &quot;x&quot; &#39;y&#39; &amp;"),
             "<b> \"x\" 'y' &"
         );
     }
@@ -1031,48 +938,58 @@ mod tests {
     /// (or decoding repeatedly), which turns authored `&lt;` into `<`.
     #[test]
     fn decodes_one_level_only() {
-        assert_eq!(decode_entities("&amp;lt;"), "&lt;");
-        assert_eq!(decode_entities("&amp;amp;"), "&amp;");
-        assert_eq!(decode_entities("&amp;quot;&amp;#39;"), "&quot;&#39;");
+        for decode in [decode_text, decode_attribute] {
+            assert_eq!(decode("&amp;lt;"), "&lt;");
+            assert_eq!(decode("&amp;amp;"), "&amp;");
+            assert_eq!(decode("&amp;quot;&amp;#39;"), "&quot;&#39;");
+        }
     }
 
-    /// Known references decode (ADR 0027); unknown, unterminated, or
-    /// non-semicolon legacy ones stay verbatim, as in a browser; and the
-    /// one-level rule keeps a partial decode from re-decoding
-    /// (`&amp;nbsp;` reads `&nbsp;`, not the space).
+    /// Known references decode; unknown ones stay verbatim; the spec's
+    /// legacy forms decode without `;` in text but not where an attribute
+    /// value continues with an alphanumeric or `=` (ADR 0036; Chrome agrees,
+    /// the `text_props` vector). The one-level rule keeps a partial decode
+    /// from re-decoding (`&amp;nbsp;` reads `&nbsp;`, not the space).
     #[test]
-    fn other_references_decode_or_stay_verbatim() {
-        for (text, expected) in [
-            ("&nbsp;", "\u{a0}"),
-            ("&#169;", "©"),
-            ("&#x3C;", "<"),
-            ("&copy;", "©"),
-            ("&NotEqualTilde;", "\u{2242}\u{338}"), // two code points
-            ("a & b", "a & b"),
-            // The legacy non-`;` aliases are unsupported (the table holds
-            // the semicolon forms only).
-            ("&lt", "&lt"),
-            ("&nbsp", "&nbsp"),
-            ("&;", "&;"),
-            // Unterminated numerics stay verbatim.
-            ("&#39", "&#39"),
+    fn references_decode_as_the_spec_says() {
+        // (input, as text, as an attribute value)
+        for (input, text, attribute) in [
+            ("&nbsp;", "\u{a0}", "\u{a0}"),
+            ("&#169;", "©", "©"),
+            ("&#x3C;", "<", "<"),
+            ("&NotEqualTilde;", "\u{2242}\u{338}", "\u{2242}\u{338}"), // two code points
+            ("a & b", "a & b", "a & b"),
+            ("&unknown;", "&unknown;", "&unknown;"),
+            ("&;", "&;", "&;"),
+            // Legacy names without `;`: decoded, except in an attribute
+            // where an alphanumeric or `=` follows.
+            ("&lt", "<", "<"),
+            ("&copy2", "©2", "&copy2"),
+            ("?a=1&copy=2", "?a=1©=2", "?a=1&copy=2"),
+            ("&notit;", "¬it;", "&notit;"),
+            // Numeric references without `;` decode in both.
+            ("&#39", "'", "'"),
             // Invalid code points read U+FFFD (0, surrogates, past the top).
-            ("&#0;", "\u{FFFD}"),
-            ("&#xD800;", "\u{FFFD}"),
-            ("&#x110000;", "\u{FFFD}"),
-            // The C1 controls read their Windows-1252 replacements
-            // (0x97 = U+2014, 0x92 = U+2019).
-            ("&#151;", "\u{2014}"),
-            ("&#146;", "\u{2019}"),
+            ("&#0;", "\u{FFFD}", "\u{FFFD}"),
+            ("&#xD800;", "\u{FFFD}", "\u{FFFD}"),
+            ("&#x110000;", "\u{FFFD}", "\u{FFFD}"),
+            // The C1 controls read their Windows-1252 replacements.
+            ("&#151;", "\u{2014}", "\u{2014}"),
             // Digits only: a sign is no reference.
-            ("&#+65;", "&#+65;"),
-            ("&#x+41;", "&#x+41;"),
-            ("&#x41;&#66;", "AB"),
-            // One level: a decoded `&` is not re-scanned.
-            ("&amp;lt;", "&lt;"),
+            ("&#+65;", "&#+65;", "&#+65;"),
+            ("&#x41;&#66;", "AB", "AB"),
         ] {
-            assert_eq!(decode_entities(text), expected);
+            assert_eq!(decode_text(input), text, "text {input:?}");
+            assert_eq!(decode_attribute(input), attribute, "attribute {input:?}");
         }
+    }
+
+    /// Nothing to decode borrows: most values (class names, ids, text)
+    /// have no `&`.
+    #[test]
+    fn decoding_borrows_without_references() {
+        assert!(matches!(decode_text("plain text"), Cow::Borrowed(_)));
+        assert!(matches!(decode_attribute("card wide"), Cow::Borrowed(_)));
     }
 
     /// Concatenated text of every raw node in `document`, decoded.
@@ -1081,7 +998,7 @@ mod tests {
         dom.nodes()
             .iter()
             .filter_map(|node| match node {
-                tl::Node::Raw(text) => Some(decode_entities(&text.as_utf8_str())),
+                tl::Node::Raw(text) => Some(decode_text(text.as_utf8_str()).into_owned()),
                 _ => None,
             })
             .collect()
@@ -1091,7 +1008,7 @@ mod tests {
         #![proptest_config(ProptestConfig::with_cases(128))]
 
         /// Any string from a Tera variable (`.html` name → autoescaping)
-        /// reads back verbatim after `tl` parsing and `decode_entities`:
+        /// reads back verbatim after `tl` parsing and `decode_text`:
         /// Tera's escape set and ours must match exactly (a Tera upgrade
         /// emitting `&#x27;`/`&apos;`, or a missing decode, shows entities
         /// in the UI; a missing escape lets data inject markup).

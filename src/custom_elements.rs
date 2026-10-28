@@ -36,7 +36,7 @@ use bevy::ecs::system::SystemId;
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 
-use crate::template::decode_entities;
+use crate::template::decode_attribute;
 
 /// The input of an element definition's system (see the [module
 /// docs](self)): the spawned element and its `data-*` attributes.
@@ -77,7 +77,7 @@ pub(crate) struct ConnectedAs(pub(crate) CustomElement);
 /// `tag`'s `is` attribute and dataset, if it names a definition.
 pub(crate) fn custom_element(tag: &tl::HTMLTag) -> Option<CustomElement> {
     let attributes = tag.attributes();
-    let name = decode_entities(&attributes.get("is").flatten()?.as_utf8_str());
+    let name = decode_attribute(attributes.get("is").flatten()?.as_utf8_str());
     let name = name.trim();
     if name.is_empty() {
         return None;
@@ -96,7 +96,8 @@ pub(crate) fn dataset(tag: &tl::HTMLTag) -> std::collections::BTreeMap<String, S
         .iter()
         .filter_map(|(key, value)| {
             let key = key.strip_prefix("data-")?;
-            let value = value.map_or_else(String::new, |value| decode_entities(&value));
+            let value =
+                value.map_or_else(String::new, |value| decode_attribute(value).into_owned());
             Some((key.to_ascii_lowercase(), value))
         })
         .collect()

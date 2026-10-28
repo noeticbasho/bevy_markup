@@ -1258,15 +1258,6 @@ fn needs_translation(text: &str, data: &[String]) -> bool {
     residue.chars().any(char::is_alphabetic)
 }
 
-/// Undoes the escapes Tera's autoescaping and authors use (`tl` keeps them).
-fn decode_entities(text: &str) -> String {
-    text.replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&amp;", "&")
-}
-
 /// Visible text in `dom` that isn't under a `data-l10n-id` element and
 /// [needs translation](needs_translation), as `tag > tag: "text"`. Skips what
 /// bevy_markup never shows: `head`, `script`, `style`, comments.
@@ -1292,7 +1283,8 @@ fn hard_coded_text(dom: &tl::VDom, data: &[String]) -> Vec<String> {
                 path.pop();
             }
             Some(tl::Node::Raw(text)) => {
-                let text = decode_entities(&text.as_utf8_str());
+                // `tl` keeps character references; decode as the crate does.
+                let text = htmlize::unescape(text.as_utf8_str());
                 let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
                 if needs_translation(&text, data) {
                     out.push(format!("{}: {text:?}", path.join(" > ")));

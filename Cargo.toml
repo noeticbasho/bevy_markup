@@ -71,6 +71,9 @@ tera = { version = "2.4.0", features = ["fast"] }
 # character of the attribute after a value-less one (`autofocus data-on-click` →
 # `ata-on-click`); see docs/agents/bugs/bug_0019.md and UPSTREAM.md.
 tl = { package = "astral-tl", version = "0.8.0" }
+# Character references, which tl leaves as written: the spec's text and
+# attribute rules (ADR 0036; replaced a generated WHATWG table).
+htmlize = { version = "1.1.0", features = ["unescape"] }
 # Localization: FTL syntax, bundle, formatting (https://projectfluent.org).
 fluent = "0.16.0"
 # Locale identifiers: the `*.ftl.ron` manifest's `locale` field.

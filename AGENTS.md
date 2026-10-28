@@ -2,6 +2,8 @@
 
 Bevy 0.20 library: HTML templates (Tera) + Fluent + CSS → Bevy UI, with
 9-slice frames. Dependencies are limited to that; don't add unrelated crates.
+A maintained crate in that domain that replaces code the crate maintains
+is in scope (ADR 0036: `htmlize` replaced the generated entity table).
 
 - `cargo run --example quickstart` — the API in one small app.
 - `cargo run --example grid` — CSS grid layout (page grid, responsive slots).
@@ -82,7 +84,7 @@ src/
                    → one Tera set per template, components shared), each file converted by its
                    own root extension (a `.md` partial included from an `.html` page converts,
                    an `.html` partial from a `.md` page stays HTML), HtmlDocument (+ outline),
-                   decode_entities
+                   decode_text / decode_attribute (htmlize, ADR 0036)
   l10n.rs          LocaleBundle asset + loader (`.ftl.ron`: manifest → Fluent resources, read as
                    dependencies), ActiveLocale, LocalizedText; localize system (data-l10n-id/-args);
                    with `markdown: true`, each cacheable message's pattern pre-converts at load
@@ -626,7 +628,7 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
   for plurals), printed by the crate's `json` Tera filter from a map literal
   (`'{{ {"name": player} | json }}'`) or one map variable
   (`'{{ args | json }}'`). Never splice a value into hand-written JSON
-  (`'{"name": "{{ player }}"}'`): `decode_entities` undoes Tera's `&quot;`,
+  (`'{"name": "{{ player }}"}'`): attribute decoding undoes Tera's `&quot;`,
   so a value holding `"` adds its own arguments (review_0003 G20; the
   examples and README use map literals). Translations are markup
   (`walk_translation` in `build.rs` parses them as a fragment): inline
@@ -842,8 +844,9 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
   so the DOM is never mutated; translations live beside it keyed by
   `tl::NodeHandle`.
 - `tl` misparses raw Tera (`{% if a < b %}` becomes a `<b>` tag) — hence
-  render-then-parse. `tl` keeps character references as written (use
-  `decode_entities`) and drops `<!DOCTYPE>`.
+  render-then-parse. `tl` keeps character references as written (decode
+  with `decode_text` for text, `decode_attribute` for attribute values:
+  the spec's two rules, via `htmlize`) and drops `<!DOCTYPE>`.
 - Tera 2 (not 1.x): unknown functions/filters fail at template *compile* time,
   so custom ones must be registered in the loader before `add_raw_template`.
   `template::new_tera` builds every environment (the loader, the fuzz
