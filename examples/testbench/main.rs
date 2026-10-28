@@ -1387,6 +1387,63 @@ fn check_scenario(
                     _ => ("wait", String::new()),
                 }
             }
+            // bug_0179: a `style` attribute nesting functions past the
+            // paren guard is dropped whole: the sheet's green stays.
+            "inline-dropped" => match workload_elements()
+                .find(|(_, element, _)| element.id.as_deref() == Some("inline"))
+            {
+                Some((entity, ..)) => {
+                    let green = std::iter::once(entity)
+                        .chain(tree.iter_descendants_depth_first(entity))
+                        .filter_map(|entity| paint.get(entity).ok())
+                        .any(|(color, _)| {
+                            color.is_some_and(|color| color.0 == Color::srgb_u8(0x7f, 0xdb, 0x8f))
+                        });
+                    (if green { "pass" } else { "fail" }, String::new())
+                }
+                None => ("wait", String::new()),
+            },
+            // ADR 0034 / bug_0180: the unsupported and panicking selectors
+            // skip their rules while the sheet loads (`#ok` is green),
+            // `:nth-child(0)` doesn't colour the root (`#plain` keeps the
+            // page colour) and a Level 4 selector matches (`#level4`).
+            "engine-rules" => {
+                let paint_of = |id: &str| {
+                    workload_elements()
+                        .find(|(_, element, _)| element.id.as_deref() == Some(id))
+                        .map(|(entity, ..)| {
+                            std::iter::once(entity)
+                                .chain(tree.iter_descendants_depth_first(entity))
+                                .filter_map(|entity| paint.get(entity).ok())
+                                .collect::<Vec<_>>()
+                        })
+                };
+                let colored = |paints: &[(Option<&TextColor>, Option<&BackgroundColor>)],
+                               rgb: (u8, u8, u8)| {
+                    paints.iter().any(|(color, _)| {
+                        color.is_some_and(|color| color.0 == Color::srgb_u8(rgb.0, rgb.1, rgb.2))
+                    })
+                };
+                match (paint_of("ok"), paint_of("plain"), paint_of("level4")) {
+                    (Some(ok), Some(plain), Some(level4)) => {
+                        let valid = colored(&ok, (0x7f, 0xdb, 0x8f));
+                        let root = colored(&plain, (0xdf, 0xe6, 0xee));
+                        let level = level4.iter().any(|(_, bg)| {
+                            bg.is_some_and(|bg| bg.0 == Color::srgb_u8(0x2a, 0x6f, 0x2a))
+                        });
+                        let detail = format!("(valid {valid}, root {root}, level 4 {level})");
+                        (
+                            if valid && root && level {
+                                "pass"
+                            } else {
+                                "fail"
+                            },
+                            detail,
+                        )
+                    }
+                    _ => ("wait", String::new()),
+                }
+            }
             // Character references decode as browsers do (review_0005
             // I04's fix also stopped a sign from counting as a digit).
             "decoded" => match workload_elements()

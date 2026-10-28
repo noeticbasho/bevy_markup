@@ -39,6 +39,8 @@ pub const GROUPS: [(&str, &[&str]); 3] = [
             "selector-bombs",
             "sibling-bombs",
             "entity-bombs",
+            "function-bombs",
+            "selector-engine",
         ],
     ),
     (
@@ -828,14 +830,14 @@ pub fn plan(scenario: &str, dir: &Dir, prefix: &str) -> Plan {
                     i % 7
                 ));
             }
-            // Nested `:not()` (a parenthesized argument drops the rule)
-            // and a long compound.
-            // (Past the loader's nesting guard the whole sheet is refused —
-            // bug_0106 — which the nested-rules scenario covers.)
+            // Nested `:not()` (ADR 0034's allowlist drops the rule) and a
+            // long compound. Six deep: past the loader's paren guard (8,
+            // bug_0179) the whole sheet is refused, which the
+            // function-bombs scenario covers.
             css.push_str(&format!(
                 "p{}x{} {{ color: red }}\n",
-                ":not(".repeat(20),
-                ")".repeat(20)
+                ":not(".repeat(6),
+                ")".repeat(6)
             ));
             css.push_str(&format!(
                 "p{} {{ color: #9fb3c8 }}\n",
@@ -893,6 +895,78 @@ pub fn plan(scenario: &str, dir: &Dir, prefix: &str) -> Plan {
             column(
                 vec![probe(&paths[0], &paths[1], "page", json!({}))],
                 &["built", "decoded", "budget"],
+            )
+        }
+        "function-bombs" => {
+            // bug_0179: lightningcss parses nested `light-dark(` and
+            // `calc(` around a `var()` in exponential time — 30 deep took
+            // minutes and hours. The paren guard (8) refuses the sheet and
+            // drops the `style` attribute at once.
+            let light_dark = "light-dark(".repeat(30);
+            let calc_var = (0..30).fold("var(--x)".to_owned(), |v, _| format!("calc({v} - 1px)"));
+            let bomb = format!(
+                "html {{ color: #ff6b6b }}\np {{ color: {light_dark} }}\n.x {{ width: {calc_var} }}\n"
+            );
+            let inline = format!(
+                "<p id=\"inline\" style=\"color: #ff6b6b; width: {calc_var}\">a style attribute with 30 nested calc() around a var(): dropped, the sheet's green stays</p>\
+                 <p style=\"color: {light_dark}\">a style attribute with 30 nested light-dark(</p>"
+            );
+            let paths = write(
+                dir,
+                prefix,
+                &[
+                    (
+                        "page.html",
+                        "<p>The sheet must fail its load at once: this text keeps the default colour.</p>"
+                            .into(),
+                    ),
+                    ("bomb.css", bomb),
+                    ("inline.html", inline),
+                    (
+                        "inline.css",
+                        "html { color: #dfe6ee }\n#inline { color: #7fdb8f }\n".into(),
+                    ),
+                ],
+            );
+            column(
+                vec![
+                    probe(&paths[0], &paths[1], "sheet", json!({})),
+                    probe(&paths[2], &paths[3], "inline", json!({})),
+                ],
+                &["sheet-refused", "inline-dropped", "built", "budget"],
+            )
+        }
+        "selector-engine" => {
+            // ADR 0034's allowlist and bug_0180: the forms parcel's matcher
+            // panics on (`:nth-child(… of S)`, `:has()`, `:nth-col()`,
+            // nested `&` rules), the `:not\0()` that panicked the old
+            // parser, a nested `:not()` and a far sibling combinator all
+            // skip their rule while the sheet loads; `:nth-child(0)`
+            // matches nothing (it coloured the root, so the whole page);
+            // and the Level 4 forms match.
+            let css = "html { color: #dfe6ee }\n\
+                :nth-child(0) { color: #ff6b6b }\n\
+                :nth-child(-n+0) { color: #ff6b6b }\n\
+                :not\u{0}() { color: #ff6b6b }\n\
+                li:nth-child(2 of .a) { color: #ff6b6b }\n\
+                p:has(> b) { color: #ff6b6b }\n\
+                li:nth-col(2), li:nth-last-col(1) { color: #ff6b6b }\n\
+                .a { & > p { color: #ff6b6b } }\n\
+                p:not(:not(#plain)) { color: #ff6b6b }\n\
+                section + section p { color: #ff6b6b }\n\
+                #ok { color: #7fdb8f }\n\
+                :is(section, .none) > p:only-of-type[data-k^=\"ab\"] { background-color: #2a6f2a }\n";
+            let html = "<section><p id=\"plain\">no rule colours this paragraph: it keeps the page colour</p>\
+                <p id=\"ok\">a valid rule after the unsupported ones applies</p></section>\
+                <section><p id=\"level4\" data-k=\"abc\">matched by :is(), :only-of-type and ^=</p></section>";
+            let paths = write(
+                dir,
+                prefix,
+                &[("page.html", html.into()), ("engine.css", css.into())],
+            );
+            column(
+                vec![probe(&paths[0], &paths[1], "page", json!({}))],
+                &["built", "engine-rules", "budget"],
             )
         }
         _ => column(Vec::new(), &[]),

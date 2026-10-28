@@ -25,6 +25,8 @@ tb-sc-text-features = Text features
 tb-sc-selector-bombs = Selector bombs
 tb-sc-sibling-bombs = Sibling bombs
 tb-sc-entity-bombs = Entity bombs
+tb-sc-function-bombs = Function bombs
+tb-sc-selector-engine = Selector engine
 tb-sc-selectors-vs-fresh = Selectors vs fresh build
 tb-sc-restyle-vs-full = Scoped vs full restyle
 tb-sc-order-independence = Order independence
@@ -50,9 +52,11 @@ tb-desc-reuse-vs-fresh = A UI mutated at random every frame is compared with a f
 tb-desc-indent-vs-flat = An indented and a flat Markdown template of the same document must build the same UI.
 tb-desc-selector-list = N rows in a container, plus a list and a table, styled by structural pseudo-classes, sibling combinators, attribute selectors and :not(); about one row in a hundred changes per frame, and the unchanged rows must keep reusing.
 tb-desc-text-features = text-align, line-height, letter-spacing, text-transform and white-space on N rows in an overflow: auto panel with a tiled background image, plus list markers and a table.
-tb-desc-selector-bombs = Extreme An+B offsets, a 10 000-character attribute value, 1 000 sibling rules, 200 nested :not() and combinator characters inside quoted values: nothing panics and the quoted probes still match.
+tb-desc-selector-bombs = Extreme An+B offsets, a 10 000-character attribute value, 1 000 sibling rules, nested :not() and combinator characters inside quoted values: nothing panics and the quoted probes still match.
 tb-desc-sibling-bombs = One container of N siblings under ~, :nth-child and :last-of-type rules while the .hot element moves every frame.
 tb-desc-entity-bombs = 50 000 character references without a semicolon, a 100 000-letter name and references in attributes: decoding stays linear and correct.
+tb-desc-function-bombs = 30 nested light-dark( and 30 nested calc() around a var(), in a stylesheet and in style attributes: the sheet is refused and the attributes dropped at once, not after minutes (bug_0179).
+tb-desc-selector-engine = :not\0() (bug_0180), :has(), :nth-child(2 of .a), :nth-col(), nested rules, nested :not() and a far sibling combinator skip their rules while the sheet loads; :nth-child(0) colours nothing; :is(), :only-of-type and ^= match (ADR 0034).
 tb-desc-selectors-vs-fresh = The selector list mutated at random every frame (change, insert, remove, move, highlight), compared with a fresh build of the same state every few frames.
 tb-desc-restyle-vs-full = The focus moves to a random row every frame (:focus, :focus-visible, :focus-within, :not(), + and ~); every few frames the scoped result is compared with a forced full restyle of the same UI.
 tb-desc-order-independence = Rows whose style depends only on themselves (data-* attributes, classes): a fresh build of the same rows in reverse order must style every row the same. Catches results cached on too little, which a same-order twin shares.
@@ -176,3 +180,15 @@ tb-check-band =
         [fail] FAIL
        *[other] WAIT
     } built rows cover the viewport { $detail }
+tb-check-inline-dropped =
+    { $state ->
+        [pass] PASS
+        [fail] FAIL
+       *[other] WAIT
+    } the style attribute is dropped { $detail }
+tb-check-engine-rules =
+    { $state ->
+        [pass] PASS
+        [fail] FAIL
+       *[other] WAIT
+    } unsupported rules skip, :nth-child(0) matches nothing, Level 4 matches { $detail }

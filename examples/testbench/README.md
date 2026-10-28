@@ -63,6 +63,8 @@ fixed.
 | | Selector bombs | extreme `An+B` offsets (bug_0133), a 10 000-character attribute value, 1 000 `~` rules, nested `:not()`, a 500-class compound, `]`/quotes/combinators inside quoted values (bug_0144) | built, quoted values match |
 | | Sibling bombs | one container of N siblings under `~`, `:nth-child`, `:last-of-type` rules while the `.hot` element moves (bug_0134) | built |
 | | Entity bombs | 50 000 references without `;` (bug_0135), a 100 000-letter name, references in attributes, `&#+65;` (bug_0146) | built, references decode |
+| | Function bombs | 30 nested `light-dark(` and 30 nested `calc()` around a `var()`, in a stylesheet and in `style` attributes: refused or dropped at once by the paren guard, where lightningcss took minutes to hours (bug_0179) | sheet refused, attribute dropped, built |
+| | Selector engine | `:not\0()` (bug_0180), the forms parcel's matcher panics on (`:has()`, `:nth-child(2 of .a)`, `:nth-col()`, nested `&` rules), nested `:not()` and a far sibling combinator skip their rules while the sheet loads; `:nth-child(0)` no longer colours the root; `:is()`, `:only-of-type` and `^=` match (ADR 0034) | built, rules |
 | Correctness | Reuse vs fresh build | random edits (change, insert, remove, move, highlight) every frame; every 20 frames the churn holds and the UI is compared with a fresh build of the same state | twins match |
 | | Indented vs flat | an indented and a flat Markdown template of the same document must build the same UI | twins match |
 | | Selectors vs fresh | the selector list under count-preserving random edits (value, flag, swap), compared with a fresh build every 20 frames (bug_0136) | twins match |

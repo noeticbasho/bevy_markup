@@ -25,6 +25,8 @@ tb-sc-text-features = Texteigenschaften
 tb-sc-selector-bombs = Selektor-Bomben
 tb-sc-sibling-bombs = Geschwister-Bomben
 tb-sc-entity-bombs = Entity-Bomben
+tb-sc-function-bombs = Funktions-Bomben
+tb-sc-selector-engine = Selektor-Engine
 tb-sc-selectors-vs-fresh = Selektoren gegen Neubau
 tb-sc-restyle-vs-full = Gezielt gegen vollständig neu gestaltet
 tb-sc-order-independence = Reihenfolge-Unabhängigkeit
@@ -50,9 +52,11 @@ tb-desc-reuse-vs-fresh = Eine UI, die in jedem Frame zufällig verändert wird, 
 tb-desc-indent-vs-flat = Eine eingerückte und eine flache Markdown-Vorlage desselben Dokuments müssen dieselbe UI ergeben.
 tb-desc-selector-list = N Zeilen in einem Container, dazu eine Liste und eine Tabelle, gestaltet mit Struktur-Pseudoklassen, Geschwister-Kombinatoren, Attributselektoren und :not(); pro Frame ändert sich etwa eine von hundert Zeilen, die unveränderten müssen weiter wiederverwendet werden.
 tb-desc-text-features = text-align, line-height, letter-spacing, text-transform und white-space auf N Zeilen in einem overflow: auto-Feld mit gekacheltem Hintergrundbild, dazu Listenmarken und eine Tabelle.
-tb-desc-selector-bombs = Extreme An+B-Werte, ein Attributwert mit 10 000 Zeichen, 1 000 Geschwisterregeln, 200 verschachtelte :not() und Kombinator-Zeichen in Werten in Anführungszeichen: nichts stürzt ab, und die Prüf-Elemente passen weiterhin.
+tb-desc-selector-bombs = Extreme An+B-Werte, ein Attributwert mit 10 000 Zeichen, 1 000 Geschwisterregeln, verschachtelte :not() und Kombinator-Zeichen in Werten in Anführungszeichen: nichts stürzt ab, und die Prüf-Elemente passen weiterhin.
 tb-desc-sibling-bombs = Ein Container mit N Geschwistern unter Regeln mit ~, :nth-child und :last-of-type, während das .hot-Element in jedem Frame wandert.
 tb-desc-entity-bombs = 50 000 Zeichenreferenzen ohne Semikolon, ein Name aus 100 000 Buchstaben und Referenzen in Attributen: die Dekodierung bleibt linear und korrekt.
+tb-desc-function-bombs = 30 verschachtelte light-dark( und 30 verschachtelte calc() um ein var(), im Stylesheet und in style-Attributen: das Stylesheet wird sofort abgelehnt und die Attribute verworfen, nicht erst nach Minuten (bug_0179).
+tb-desc-selector-engine = :not\0() (bug_0180), :has(), :nth-child(2 of .a), :nth-col(), verschachtelte Regeln, verschachteltes :not() und ein entfernter Geschwister-Kombinator überspringen ihre Regeln, während das Stylesheet lädt; :nth-child(0) färbt nichts; :is(), :only-of-type und ^= passen (ADR 0034).
 tb-desc-selectors-vs-fresh = Die Selektorliste wird in jedem Frame zufällig verändert (ändern, einfügen, entfernen, verschieben, hervorheben) und alle paar Frames mit einem Neubau desselben Zustands verglichen.
 tb-desc-restyle-vs-full = Der Fokus springt in jedem Frame zu einer zufälligen Zeile (:focus, :focus-visible, :focus-within, :not(), + und ~); alle paar Frames wird das gezielte Ergebnis mit einer erzwungenen vollständigen Neugestaltung derselben UI verglichen.
 tb-desc-order-independence = Zeilen, deren Stil nur von ihnen selbst abhängt (data-*-Attribute, Klassen): ein Neubau derselben Zeilen in umgekehrter Reihenfolge muss jede Zeile gleich gestalten. Findet zu knapp zwischengespeicherte Ergebnisse, die ein Zwilling in gleicher Reihenfolge teilt.
@@ -176,3 +180,15 @@ tb-check-band =
         [fail] FEHLER
        *[other] WARTE
     } gebaute Zeilen decken den Sichtbereich { $detail }
+tb-check-inline-dropped =
+    { $state ->
+        [pass] OK
+        [fail] FEHLER
+       *[other] WARTE
+    } das style-Attribut wird verworfen { $detail }
+tb-check-engine-rules =
+    { $state ->
+        [pass] OK
+        [fail] FEHLER
+       *[other] WARTE
+    } nicht unterstützte Regeln entfallen, :nth-child(0) passt auf nichts, Level 4 passt { $detail }
