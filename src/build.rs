@@ -6114,7 +6114,7 @@ fn collect_node(
         }
 
         let signals = signals::signal_bindings(tag);
-        let mut focus = focus::focusable(tag, &signals);
+        let mut focus = focus::focusable(tag, &signals, false);
         let custom = custom_elements::custom_element(tag);
         let state = ctx
             .states
@@ -6244,9 +6244,7 @@ fn collect_node(
             // Other `type`s stay unsupported (the field is not built). An
             // `<input>` is focusable like a block with `data-on-click` (HTML
             // inputs are focusable), unless `tabindex="-1"`.
-            focus = Some(Focusable {
-                autofocus: tag.attributes().get("autofocus").flatten().is_some(),
-            });
+            focus = focus::focusable(tag, &signals, true);
             let value = tag
                 .attributes()
                 .get("value")
@@ -6336,7 +6334,8 @@ fn collect_node(
         let is_button = element.tag == "button";
         let kind = match element.tag.as_str() {
             "button" => {
-                kind_button_focus(&mut focus, tag);
+                // HTML buttons are focusable without `data-on-click`.
+                focus = focus::focusable(tag, &signals, true);
                 BlockKind::Button
             }
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => BlockKind::Heading,
@@ -6709,23 +6708,6 @@ fn column_height(
 }
 
 /// Tag name (lowercase), `id` and `class` of an element.
-/// A `<button>` is focusable like a block with `data-on-click` (HTML
-/// buttons are focusable), unless the author opts out with `tabindex="-1"`.
-fn kind_button_focus(focus: &mut Option<Focusable>, tag: &tl::HTMLTag) {
-    if focus.is_none()
-        && tag
-            .attributes()
-            .get("tabindex")
-            .flatten()
-            .map(|v| v.as_utf8_str())
-            != Some("-1".into())
-    {
-        *focus = Some(Focusable {
-            autofocus: tag.attributes().get("autofocus").flatten().is_some(),
-        });
-    }
-}
-
 fn element_of(tag: &tl::HTMLTag) -> HtmlElement {
     let attribute = |key: &str| {
         tag.attributes()

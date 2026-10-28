@@ -185,13 +185,15 @@
 //!   `data-tooltip-args` / `data-tooltip-placement`) shows the app's
 //!   [`HtmlTooltips`](tooltips::HtmlTooltips) template beside the hovered
 //!   element, like a browser's `title`.
-//! - **Focus and navigation** ([`focus`]): `data-on-click` and
-//!   `tabindex="0"` elements are focusable (`tabindex="-1"` opts out),
-//!   `autofocus` takes the initial focus, focus survives rebuilds by `id`,
-//!   `:focus` / `:focus-visible` and `outline` style it, and an
+//! - **Focus and navigation** ([`focus`]): `data-on-click`, `<button>`,
+//!   text `<input>` and `tabindex="0"` elements are focusable
+//!   (`tabindex="-1"` opts out), `autofocus` takes the initial focus, focus
+//!   survives rebuilds by `id`, `:focus` / `:focus-visible` and `outline`
+//!   style it, Tab order follows `tabindex` as in HTML, and an
 //!   [`HtmlModal`](focus::HtmlModal) root confines it. Focus is Bevy's
 //!   `InputFocus`; bind your own gamepad/keyboard input and call
 //!   [`HtmlFocus::navigate`](focus::HtmlFocus::navigate) /
+//!   [`tab`](focus::HtmlFocus::tab) /
 //!   [`activate`](focus::HtmlFocus::activate) with the input you saw
 //!   (activation emits the same `ElementSignal` as a click, its source that
 //!   input — a key, a gamepad button, or `Synthetic` for harnesses).
@@ -255,7 +257,7 @@ pub mod prelude {
     pub use crate::anchor::{AnchorPlacement, HtmlAnchor, HtmlWorldAnchor, HtmlWorldAnchorView};
     pub use crate::custom_elements::{ElementConnected, HtmlCustomElementsExt};
     pub use crate::focus::{
-        ActivateElement, FocusEdge, Focusable, HtmlFocus, HtmlModal, HtmlNoFocus,
+        ActivateElement, FocusEdge, Focusable, HtmlFocus, HtmlModal, HtmlNoFocus, NavAction,
     };
     pub use crate::fonts::{FontFaces, FontFamilies, GenericFamily};
     pub use crate::html::{

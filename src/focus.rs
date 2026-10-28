@@ -1,9 +1,9 @@
 //! Focus and directional (gamepad / keyboard) navigation, browser-style.
 //!
 //! - **Focusable elements**: elements with a `data-on-click` hook (the
-//!   counterpart of a `<button>`) and elements with `tabindex="0"` (or any
-//!   non-negative value); `tabindex="-1"` opts an element out. They get a
-//!   [`Focusable`] component.
+//!   counterpart of a `<button>`), `<button>`s, text `<input>`s and
+//!   elements with `tabindex="0"` (or any non-negative value); a negative
+//!   `tabindex` opts an element out. They get a [`Focusable`] component.
 //! - **Focus** is Bevy's own [`InputFocus`] resource, so markup UIs share it
 //!   with any other UI in the app. [`InputFocusVisible`] says whether focus
 //!   should be *shown*: directional navigation sets it, a pointer press
@@ -29,8 +29,17 @@
 //!   (like a modal `<dialog>`); with several, the topmost wins (highest
 //!   `GlobalZIndex`, then `ZIndex` — e.g. the root rule's `z-index`).
 //!   An element's scope is its nearest `HtmlUi` ancestor.
+//! - **Tab order** is HTML's: positive `tabindex` values first, ascending,
+//!   then the other focusable elements in document order; elements under
+//!   `display: none` are skipped. [`HtmlFocus::tab`] steps through it
+//!   (wrapping; an open modal keeps it inside), [`HtmlFocus::tab_order`]
+//!   lists it. Elements in scope carry Bevy's [`TabIndex`] and roots a
+//!   [`TabGroup`] (modal on the open [`HtmlModal`]), so Bevy's
+//!   `TabNavigationPlugin` drives them too in an app that renders (it
+//!   reads `InheritedVisibility`); `HtmlFocus::tab` doesn't need that.
 //! - **Input is the app's**: bevy_markup reads no keys or buttons. Bind your
-//!   own input and call [`HtmlFocus::navigate`] / [`HtmlFocus::activate`].
+//!   own input and call [`HtmlFocus::navigate`] / [`HtmlFocus::tab`] /
+//!   [`HtmlFocus::activate`].
 //!   Activation emits the element's `data-on-click` signals as
 //!   [`ElementSignal`] messages, like a pointer click, with the input the
 //!   app reports as the source ([`SignalSource::Activation`]: a key, a
@@ -42,6 +51,10 @@ use std::borrow::Cow;
 
 use bevy::ecs::system::SystemParam;
 use bevy::input_focus::directional_navigation::DirectionalNavigationPlugin;
+/// [`HtmlFocus::tab`]'s step (Bevy's): `Next` for Tab, `Previous` for
+/// Shift+Tab, `First` / `Last`.
+pub use bevy::input_focus::tab_navigation::NavAction;
+use bevy::input_focus::tab_navigation::{TabGroup, TabIndex};
 use bevy::input_focus::{FocusCause, InputFocus, InputFocusVisible};
 use bevy::math::CompassOctant;
 use bevy::picking::events::PointerPress;
@@ -57,11 +70,26 @@ use crate::signals::{
 };
 
 /// A focusable element (see the [module docs](self)). `autofocus` is the
-/// HTML attribute.
+/// HTML attribute; `tab_index` is its `tabindex` (`0` when absent), which
+/// orders Tab navigation.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component, Default)]
 pub struct Focusable {
     pub autofocus: bool,
+    pub tab_index: i32,
+}
+
+impl Focusable {
+    /// The Bevy [`TabIndex`] giving HTML's order: positive `tabindex`
+    /// values first, ascending, then the `0`s in document order. Bevy
+    /// sorts by the number (ties in tree order), so `0` maps to the
+    /// largest value and positive values stay below it.
+    pub fn bevy_tab_index(&self) -> TabIndex {
+        TabIndex(match self.tab_index {
+            0 => i32::MAX,
+            n => n.clamp(1, i32::MAX - 1),
+        })
+    }
 }
 
 /// On an `HtmlUi` root: while it's visible, focus and navigation stay inside
@@ -99,6 +127,10 @@ pub struct ActivateElement {
 #[derive(SystemParam)]
 pub struct HtmlFocus<'w, 's> {
     navigator: AutoDirectionalNavigator<'w, 's>,
+    tab_roots: Query<'w, 's, (Entity, Option<&'static TabGroup>), FocusRoots>,
+    tab_indices: Query<'w, 's, &'static TabIndex, With<Focusable>>,
+    children: Query<'w, 's, &'static Children>,
+    roots: Query<'w, 's, (), With<HtmlUi>>,
     visible: ResMut<'w, InputFocusVisible>,
     commands: Commands<'w, 's>,
 }
@@ -120,6 +152,69 @@ impl HtmlFocus<'_, '_> {
         }
     }
 
+    /// Moves focus in Tab order and shows it (`:focus-visible`):
+    /// [`NavAction::Next`] for Tab, [`NavAction::Previous`] for Shift+Tab
+    /// (`First` / `Last` jump). The order is HTML's — positive `tabindex`
+    /// ascending, then the rest in document order — across the UIs in
+    /// scope, wrapping at the ends; an open [`HtmlModal`] keeps it inside.
+    /// Returns the newly focused element, `None` when nothing is
+    /// focusable.
+    pub fn tab(&mut self, action: NavAction) -> Option<Entity> {
+        self.visible.0 = true;
+        let order = self.tab_order();
+        let focus = &mut self.navigator.manual_directional_navigation.focus;
+        let current = focus
+            .get()
+            .and_then(|entity| order.iter().position(|&e| e == entity));
+        let count = order.len();
+        let next = match (current, action) {
+            _ if count == 0 => return None,
+            (Some(index), NavAction::Next) => (index + 1) % count,
+            (Some(index), NavAction::Previous) => (index + count - 1) % count,
+            (None, NavAction::Next) | (_, NavAction::First) => 0,
+            (None, NavAction::Previous) | (_, NavAction::Last) => count - 1,
+        };
+        focus.set(order[next], FocusCause::Navigated);
+        Some(order[next])
+    }
+
+    /// The focusable elements in scope in Tab order (what [`tab`](Self::tab)
+    /// steps through), e.g. to stop at the ends instead of wrapping.
+    pub fn tab_order(&self) -> Vec<Entity> {
+        // The elements `sync_navigation` gave a `TabIndex` (in scope,
+        // shown), each root's subtree in document order, roots by their
+        // `TabGroup` order, then stably by index. Walked here rather than
+        // with Bevy's `TabNavigation`, which skips entities whose
+        // `InheritedVisibility` hasn't propagated (headless apps, the frame
+        // after a spawn).
+        let mut roots: Vec<(Entity, i32)> = self
+            .tab_roots
+            .iter()
+            .map(|(root, group)| (root, group.map_or(0, |group| group.order)))
+            .collect();
+        roots.sort_by_key(|&(_, order)| order);
+        let mut order: Vec<(Entity, TabIndex)> = Vec::new();
+        for (root, _) in roots {
+            let mut stack = vec![root];
+            while let Some(entity) = stack.pop() {
+                if let Ok(index) = self.tab_indices.get(entity) {
+                    order.push((entity, *index));
+                }
+                if let Ok(children) = self.children.get(entity) {
+                    // A nested `HtmlUi` is walked as its own root.
+                    stack.extend(
+                        children
+                            .iter()
+                            .rev()
+                            .filter(|&child| !self.roots.contains(child)),
+                    );
+                }
+            }
+        }
+        order.sort_by_key(|&(_, index)| index);
+        order.into_iter().map(|(entity, _)| entity).collect()
+    }
+
     /// Activates the focused element (see [`ActivateElement`]); `input` is
     /// what the app saw (the signals' [`SignalSource::Activation`]).
     pub fn activate(&mut self, input: ActivationInput) {
@@ -135,8 +230,13 @@ impl HtmlFocus<'_, '_> {
 }
 
 /// `tag`'s focusability: `tabindex` decides when present (`>= 0` focusable,
-/// negative not); otherwise elements with a `data-on-click` hook are.
-pub(crate) fn focusable(tag: &tl::HTMLTag, signals: &[SignalBinding]) -> Option<Focusable> {
+/// negative not); otherwise `native` elements (`<button>`, a text
+/// `<input>`) and elements with a `data-on-click` hook are.
+pub(crate) fn focusable(
+    tag: &tl::HTMLTag,
+    signals: &[SignalBinding],
+    native: bool,
+) -> Option<Focusable> {
     let attributes = tag.attributes();
     let tabindex = attributes
         .get("tabindex")
@@ -144,12 +244,17 @@ pub(crate) fn focusable(tag: &tl::HTMLTag, signals: &[SignalBinding]) -> Option<
         .and_then(|value| value.as_utf8_str().trim().parse::<i32>().ok());
     let focusable = match tabindex {
         Some(index) => index >= 0,
-        None => signals
-            .iter()
-            .any(|binding| binding.trigger == SignalTrigger::Click),
+        None => {
+            native
+                || signals
+                    .iter()
+                    .any(|binding| binding.trigger == SignalTrigger::Click)
+        }
     };
     focusable.then(|| Focusable {
+        // `contains`: a value-less `autofocus` has no value to `get`.
         autofocus: attributes.contains("autofocus"),
+        tab_index: tabindex.unwrap_or(0),
     })
 }
 
@@ -164,6 +269,7 @@ pub(crate) fn plugin(app: &mut App) {
         .init_resource::<FocusMemory>()
         .add_observer(activate_element)
         .add_observer(focus_on_press)
+        .add_observer(drop_navigation)
         .add_systems(
             PostUpdate,
             (
@@ -334,6 +440,20 @@ fn update_focus_states(
     }
 }
 
+/// The `HtmlUi` roots that take part in focus.
+type FocusRoots = (With<HtmlUi>, Without<HtmlNoFocus>);
+
+/// An `HtmlUi` root's tab group as `sync_navigation` keeps it.
+type RootTabGroup = (Entity, Has<HtmlNoFocus>, Option<&'static TabGroup>);
+
+/// A focusable element and the navigation components it has.
+type FocusableNavigation = (
+    Entity,
+    &'static Focusable,
+    Has<AutoDirectionalNavigation>,
+    Option<&'static TabIndex>,
+);
+
 /// An `HtmlUi` root that takes part in focus: entity, modal, stacking.
 type ScopeRoot = (
     Entity,
@@ -342,25 +462,32 @@ type ScopeRoot = (
     Option<&'static ZIndex>,
 );
 
-/// Gives exactly the focusable elements in scope `AutoDirectionalNavigation`.
+/// Gives exactly the focusable elements in scope `AutoDirectionalNavigation`
+/// and Bevy's [`TabIndex`] (not under a `display: none` element, which Tab
+/// skips like a browser), and every root in scope a [`TabGroup`] — modal
+/// on the active [`HtmlModal`] only, so Bevy's tab navigation (ours, or
+/// its own `TabNavigationPlugin`) stays inside it.
+#[allow(clippy::too_many_arguments)] // a Bevy system
 #[hotpath::measure]
 fn sync_navigation(
     roots_in_scope: Query<ScopeRoot, (With<HtmlUi>, Without<HtmlNoFocus>)>,
-    elements: Query<(Entity, Has<AutoDirectionalNavigation>), With<Focusable>>,
+    all_roots: Query<RootTabGroup, With<HtmlUi>>,
+    elements: Query<FocusableNavigation>,
     visibility: Query<&Visibility>,
+    nodes: Query<&Node>,
     parents: Query<&ChildOf>,
     roots: Query<(), With<HtmlUi>>,
     mut commands: Commands,
 ) {
     let visible = |entity| visible_in_hierarchy(entity, &visibility, &parents);
     let modal = active_modal(&roots_in_scope, &visibility, &parents);
-    for (entity, navigable) in &elements {
+    for (entity, focusable, navigable, tab_index) in &elements {
         let wanted = html_root(entity, &parents, &roots).is_some_and(|root| match modal {
             Some(modal) => root == modal,
             None => roots_in_scope.contains(root) && visible(root),
         });
+        // `try_`: the app may despawn the UI in the same frame (bug_0021).
         if wanted && !navigable {
-            // `try_`: the app may despawn the UI in the same frame (bug_0021).
             commands
                 .entity(entity)
                 .try_insert(AutoDirectionalNavigation::default());
@@ -369,7 +496,51 @@ fn sync_navigation(
                 .entity(entity)
                 .try_remove::<AutoDirectionalNavigation>();
         }
+        let tab_wanted = (wanted && !displayed_none(entity, &nodes, &parents, &roots))
+            .then(|| focusable.bevy_tab_index());
+        if tab_wanted != tab_index.copied() {
+            match tab_wanted {
+                Some(index) => commands.entity(entity).try_insert(index),
+                None => commands.entity(entity).try_remove::<TabIndex>(),
+            };
+        }
     }
+    for (root, no_focus, group) in &all_roots {
+        let wanted = (!no_focus).then(|| TabGroup {
+            // An order the app set on the root is kept.
+            order: group.map_or(0, |group| group.order),
+            modal: modal == Some(root),
+        });
+        let current = group.map(|group| (group.order, group.modal));
+        if wanted.map(|group| (group.order, group.modal)) != current {
+            match wanted {
+                Some(group) => commands.entity(root).try_insert(group),
+                None => commands.entity(root).try_remove::<TabGroup>(),
+            };
+        }
+    }
+}
+
+/// Whether `entity` or an ancestor up to its `HtmlUi` root is
+/// `display: none`.
+fn displayed_none(
+    entity: Entity,
+    nodes: &Query<&Node>,
+    parents: &Query<&ChildOf>,
+    roots: &Query<(), With<HtmlUi>>,
+) -> bool {
+    for ancestor in std::iter::once(entity).chain(parents.iter_ancestors(entity)) {
+        if nodes
+            .get(ancestor)
+            .is_ok_and(|node| node.display == Display::None)
+        {
+            return true;
+        }
+        if roots.contains(ancestor) {
+            break;
+        }
+    }
+    false
 }
 
 /// Puts focus back on a focusable element in scope when it isn't on one:
@@ -442,6 +613,15 @@ fn repair_focus(
         None if current.is_some() => focus.clear(),
         None => {}
     }
+}
+
+/// An element a rebuild made unfocusable (its `Focusable` removed) leaves
+/// directional and Tab navigation; `sync_navigation` only visits
+/// focusable elements.
+fn drop_navigation(remove: On<Remove<Focusable>>, mut commands: Commands) {
+    commands
+        .entity(remove.entity)
+        .try_remove::<(AutoDirectionalNavigation, TabIndex)>();
 }
 
 /// A pointer press focuses the pressed focusable element (the deepest one

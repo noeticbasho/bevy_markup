@@ -6,8 +6,10 @@
 //!   hold-to-repeat; on a focused element with `data-setting="<name>"`,
 //!   left/right instead send a [`SettingStep`] for the app to apply
 //!   (sliders, steppers). With [`ArrowMode::Linear`] (an app resource),
-//!   left/right instead step through the focusable elements in document
-//!   order and up/down are left to the app (the demo scrolls with them);
+//!   left/right instead step through the focusable elements in Tab order
+//!   and up/down are left to the app (the demo scrolls with them);
+//! - Tab / Shift+Tab move to the next / previous element in Tab order
+//!   ([`HtmlFocus::tab`]: positive `tabindex` first, then document order);
 //! - Enter / gamepad A activate the focused element
 //!   ([`HtmlFocus::activate`]): the same `ElementSignal` a click sends, with
 //!   the key or button as its source;
@@ -20,7 +22,6 @@
 #![allow(dead_code)]
 
 use bevy::ecs::system::SystemParam;
-use bevy::input_focus::{FocusCause, InputFocus, InputFocusVisible};
 use bevy::math::CompassOctant;
 use bevy::prelude::*;
 use bevy_markup::prelude::*;
@@ -36,6 +37,7 @@ impl Plugin for ExampleInputPlugin {
                 (
                     navigate.run_if(resource_equals(ArrowMode::Directional)),
                     step_linear.run_if(resource_equals(ArrowMode::Linear)),
+                    tab,
                     activate,
                 ),
             );
@@ -48,8 +50,9 @@ pub enum ArrowMode {
     /// All four directions move focus to the nearest element that way.
     #[default]
     Directional,
-    /// Left/right step to the previous/next focusable element in document
-    /// order; up/down do nothing here (the app uses them, e.g. to scroll).
+    /// Left/right step to the previous/next focusable element in Tab order
+    /// (document order unless a positive `tabindex` reorders it); up/down
+    /// do nothing here (the app uses them, e.g. to scroll).
     Linear,
 }
 
@@ -201,113 +204,43 @@ fn navigate(
     }
 }
 
-/// The entity's (global, local) z-order, for picking the topmost modal: a
-/// missing component counts as 0, like the library's `active_modal` (both
-/// were required, and most roots have no `GlobalZIndex`, so every modal
-/// tied and the last one iterated won — review_0003 G40).
-fn z_order(entity: Entity, global: &Query<&GlobalZIndex>, local: &Query<&ZIndex>) -> (i32, i32) {
-    (
-        global.get(entity).map_or(0, |z| z.0),
-        local.get(entity).map_or(0, |z| z.0),
-    )
-}
-
-/// Whether `entity` shows: the nearest ancestor-or-self with an explicit
-/// `Visibility` decides (`Inherited` defers to the parent), as Bevy's
-/// visibility propagation and the library's focus scope read it.
-fn shown(entity: Entity, visibility: &Query<&Visibility>, parents: &Query<&ChildOf>) -> bool {
-    for ancestor in std::iter::once(entity).chain(parents.iter_ancestors(entity)) {
-        match visibility.get(ancestor) {
-            Ok(Visibility::Hidden) => return false,
-            Ok(Visibility::Visible) => return true,
-            _ => {}
-        }
-    }
-    true
-}
-
-/// The roots the linear walk visits, in order — the library's
-/// `active_modal` rule: hidden and `HtmlNoFocus` roots are skipped, and an
-/// open modal (the visible one, topmost by z-order) confines the walk to
-/// its subtree.
-fn walk_roots(
-    roots: impl Iterator<Item = Entity>,
-    no_focus_roots: &Query<(), With<HtmlNoFocus>>,
-    modals: &Query<(), With<HtmlModal>>,
-    visibility: &Query<&Visibility>,
-    parents: &Query<&ChildOf>,
-    global_z: &Query<&GlobalZIndex>,
-    z_index: &Query<&ZIndex>,
-) -> Vec<Entity> {
-    let candidates: Vec<Entity> = roots
-        .filter(|&root| !no_focus_roots.contains(root) && shown(root, visibility, parents))
-        .collect();
-    let modal = candidates
-        .iter()
-        .copied()
-        .filter(|&root| modals.contains(root))
-        .max_by_key(|&root| z_order(root, global_z, z_index));
-    match modal {
-        Some(modal) => vec![modal],
-        None => candidates,
-    }
-}
-
 /// [`ArrowMode::Linear`]: left/right step through the focusable elements in
-/// document order (a depth-first walk of the top-level UI roots), stopping
-/// at the ends, and show the focus ring like navigating does.
-#[allow(clippy::too_many_arguments)]
-fn step_linear(
-    time: Res<Time>,
-    arrows: Arrows,
-    mut repeat: Local<Repeat>,
-    roots: Query<Entity, (With<HtmlUi>, Without<ChildOf>)>,
-    children: Query<&Children>,
-    focusable: Query<(), (With<Focusable>, Without<HtmlNoFocus>)>,
-    no_focus_roots: Query<(), With<HtmlNoFocus>>,
-    modals: Query<(), With<HtmlModal>>,
-    visibility: Query<&Visibility>,
-    parents: Query<&ChildOf>,
-    global_z: Query<&GlobalZIndex>,
-    z_index: Query<&ZIndex>,
-    mut focus: ResMut<InputFocus>,
-    mut visible: ResMut<InputFocusVisible>,
-) {
+/// Tab order ([`HtmlFocus::tab`]), stopping at the ends, and show the focus
+/// ring like navigating does.
+fn step_linear(time: Res<Time>, arrows: Arrows, mut repeat: Local<Repeat>, mut focus: HtmlFocus) {
     let step = repeat.update(arrows.axes().x, time.elapsed_secs());
     if step == 0 {
         return;
     }
-    let topmost = walk_roots(
-        roots.iter(),
-        &no_focus_roots,
-        &modals,
-        &visibility,
-        &parents,
-        &global_z,
-        &z_index,
-    );
-    let mut order = Vec::new();
-    for root in &topmost {
-        let mut stack = vec![*root];
-        while let Some(entity) = stack.pop() {
-            if focusable.contains(entity) {
-                order.push(entity);
+    let order = focus.tab_order();
+    let at_end = focus
+        .focused()
+        .and_then(|current| order.iter().position(|&entity| entity == current))
+        .is_some_and(|index| {
+            if step > 0 {
+                index + 1 == order.len()
+            } else {
+                index == 0
             }
-            if let Ok(kids) = children.get(entity) {
-                stack.extend(kids.iter().rev());
-            }
-        }
+        });
+    if !at_end {
+        focus.tab(if step > 0 {
+            NavAction::Next
+        } else {
+            NavAction::Previous
+        });
     }
-    let next = match focus
-        .get()
-        .and_then(|current| order.iter().position(|e| *e == current))
-    {
-        Some(index) => (index as i32 + step).clamp(0, order.len() as i32 - 1) as usize,
-        None => 0,
-    };
-    if let Some(&entity) = order.get(next) {
-        focus.set(entity, FocusCause::Navigated);
-        visible.0 = true;
+}
+
+/// Tab / Shift+Tab: the next / previous element in Tab order, wrapping.
+fn tab(keys: Res<ButtonInput<KeyCode>>, mut focus: HtmlFocus) {
+    if keys.just_pressed(KeyCode::Tab) {
+        let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+        focus.tab(if shift {
+            NavAction::Previous
+        } else {
+            NavAction::Next
+        });
     }
 }
 
@@ -330,60 +263,5 @@ fn activate(
     };
     if let Some(input) = activation {
         focus.activate(input);
-    }
-}
-
-#[cfg(test)]
-mod input_tests {
-    use super::*;
-    use bevy::ecs::system::RunSystemOnce;
-
-    /// The topmost modal is chosen by z-order with a missing component as 0
-    /// (review_0003 G40: requiring both made every modal without a
-    /// `GlobalZIndex` tie, so the last one iterated won), and a hidden or
-    /// `HtmlNoFocus` root never captures the walk.
-    #[test]
-    fn linear_walk_confines_to_the_topmost_visible_modal() {
-        let mut world = World::new();
-        let low = world.spawn((HtmlModal, ZIndex(10))).id();
-        let high = world.spawn((HtmlModal, ZIndex(20))).id();
-        let plain = world.spawn_empty().id();
-        let hidden = world
-            .spawn((HtmlModal, ZIndex(30), Visibility::Hidden))
-            .id();
-        let no_focus = world.spawn((HtmlModal, ZIndex(40), HtmlNoFocus)).id();
-        let walk = |world: &mut World, roots: Vec<Entity>| {
-            world
-                .run_system_once(
-                    move |no_focus_roots: Query<(), With<HtmlNoFocus>>,
-                          modals: Query<(), With<HtmlModal>>,
-                          visibility: Query<&Visibility>,
-                          parents: Query<&ChildOf>,
-                          global_z: Query<&GlobalZIndex>,
-                          z_index: Query<&ZIndex>| {
-                        walk_roots(
-                            roots.clone().into_iter(),
-                            &no_focus_roots,
-                            &modals,
-                            &visibility,
-                            &parents,
-                            &global_z,
-                            &z_index,
-                        )
-                    },
-                )
-                .unwrap()
-        };
-        // Either iteration order: z 20 wins, whatever comes last.
-        assert_eq!(
-            walk(&mut world, vec![high, low, plain, hidden, no_focus]),
-            vec![high]
-        );
-        assert_eq!(
-            walk(&mut world, vec![no_focus, hidden, plain, high, low]),
-            vec![high]
-        );
-        // No visible modal: every shown, focus-taking root participates.
-        assert_eq!(walk(&mut world, vec![plain, hidden, no_focus]), vec![plain]);
     }
 }

@@ -1822,6 +1822,139 @@ fn focus_navigation_scope_and_styles() {
     assert_eq!(focused(world), Some(new_b));
 }
 
+/// `HtmlFocus::tab` walks HTML's Tab order: positive `tabindex` first,
+/// ascending, then the `0`s (`data-on-click`, `tabindex="0"`, `<button>`)
+/// in document order, wrapping at both ends. `tabindex="-1"` (any negative
+/// value, also on a `<button>`) and anything under `display: none` are
+/// skipped. A modal keeps Tab inside it; a rebuild that makes an element
+/// unfocusable takes it out of the order. `<button autofocus>` takes the
+/// initial focus (a value-less attribute).
+#[test]
+fn html_focus_tabs_in_html_order() {
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy::input_focus::tab_navigation::{NavAction, TabGroup, TabIndex};
+
+    let page = r#"<div id="z1"{% if clickable %} data-on-click="z1"{% endif %}><p>1</p></div>
+        <div id="p2" tabindex="2"><p>2</p></div>
+        <button id="btn">Go</button>
+        <div class="gone"><div id="inner" tabindex="0"><p>hidden</p></div></div>
+        <div id="p1" tabindex="1" autofocus><p>p1</p></div>
+        <div id="neg" tabindex="-1" data-on-click="neg"><p>neg</p></div>
+        <button id="optout" tabindex="-2">No</button>"#;
+    let modal = r#"<div id="ok" data-on-click="ok"><p>OK</p></div>
+        <button id="cancel" autofocus>Cancel</button>"#;
+    let mut ui = TestUi::new(
+        "tab",
+        &[
+            ("page.html", page),
+            ("modal.html", modal),
+            ("style.css", ".gone { display: none }"),
+        ],
+    )
+    .stylesheet("style.css");
+    let modal_template = ui.load::<HtmlTemplate>("modal.html");
+    let mut ui = ui.spawn(
+        "page.html",
+        TemplateContext::new().with("clickable", &true),
+        Node::default(),
+    );
+    ui.settle();
+    ui.update(3);
+    let root = ui.root();
+    let world = ui.world_mut();
+    let [z1, p2, btn, inner, p1, neg, optout] = ["z1", "p2", "btn", "inner", "p1", "neg", "optout"]
+        .map(|id| element_by_id(world, root, id));
+    assert!(
+        world
+            .get::<TabGroup>(root)
+            .is_some_and(|group| !group.modal)
+    );
+    assert_eq!(
+        [z1, p2, btn, inner, p1, neg, optout].map(|entity| world.get::<TabIndex>(entity).copied()),
+        [
+            Some(TabIndex(i32::MAX)),
+            Some(TabIndex(2)),
+            Some(TabIndex(i32::MAX)),
+            None,
+            Some(TabIndex(1)),
+            None,
+            None
+        ]
+    );
+    assert_eq!(focused(world), Some(p1), "autofocus");
+
+    let tab = |ui: &mut TestUi, action| {
+        let moved = ui
+            .world_mut()
+            .run_system_once(move |mut focus: HtmlFocus| focus.tab(action))
+            .unwrap();
+        ui.update(1);
+        moved
+    };
+    let forward: Vec<_> = (0..4).map(|_| tab(&mut ui, NavAction::Next)).collect();
+    assert_eq!(forward, [Some(p2), Some(z1), Some(btn), Some(p1)], "wraps");
+    assert_eq!(focused(ui.world_mut()), Some(p1));
+    assert!(
+        ui.world_mut()
+            .resource::<bevy::input_focus::InputFocusVisible>()
+            .0
+    );
+    assert_eq!(
+        tab(&mut ui, NavAction::Previous),
+        Some(btn),
+        "Shift+Tab wraps"
+    );
+    assert_eq!(tab(&mut ui, NavAction::First), Some(p1));
+    assert_eq!(tab(&mut ui, NavAction::Last), Some(btn));
+
+    // A modal: its `<button autofocus>` takes focus and Tab stays inside.
+    let dialog = ui
+        .world_mut()
+        .spawn((HtmlUi::new(modal_template.clone()), HtmlModal))
+        .id();
+    ui.settle_quiet();
+    ui.update(5);
+    let world = ui.world_mut();
+    let [ok, cancel] = ["ok", "cancel"].map(|id| element_by_id(world, dialog, id));
+    assert!(
+        world
+            .get::<TabGroup>(dialog)
+            .is_some_and(|group| group.modal)
+    );
+    assert_eq!(world.get::<TabIndex>(p1), None, "page outside the modal");
+    assert_eq!(focused(world), Some(cancel), "button autofocus");
+    let inside: Vec<_> = (0..3).map(|_| tab(&mut ui, NavAction::Next)).collect();
+    assert_eq!(inside, [Some(ok), Some(cancel), Some(ok)]);
+
+    // Closed: the page's order is back.
+    ui.world_mut().entity_mut(dialog).despawn();
+    ui.update(3);
+    assert_eq!(focused(ui.world_mut()), Some(p1));
+    assert_eq!(tab(&mut ui, NavAction::Next), Some(p2));
+
+    // `z1` loses its click hook: it leaves the order.
+    ui.world_mut()
+        .get_mut::<TemplateContext>(root)
+        .unwrap()
+        .insert("clickable", &false);
+    ui.settle();
+    ui.update(3);
+    let world = ui.world_mut();
+    let z1 = element_by_id(world, root, "z1");
+    assert_eq!(world.get::<TabIndex>(z1), None);
+    assert!(!navigable(world, z1));
+    assert_eq!(tab(&mut ui, NavAction::Next), Some(btn));
+
+    // An `HtmlNoFocus` root gets no tab group.
+    let panel = ui
+        .world_mut()
+        .spawn((HtmlUi::new(modal_template), HtmlNoFocus))
+        .id();
+    ui.settle_quiet();
+    ui.update(3);
+    assert!(ui.world_mut().get::<TabGroup>(panel).is_none());
+}
+
 /// `HtmlFocus::navigate` moves focus by layout position and shows it; at an
 /// edge it triggers `FocusEdge` instead. `HtmlFocus::activate` emits the
 /// focused element's click signal.

@@ -97,9 +97,10 @@ under the pointer wins, like the DOM.
 
 **Focus is browser-style, and the gamepad comes along.** Elements with
 `data-on-click` or `tabindex` are focusable; `autofocus` takes the initial
-focus; `:focus` / `:focus-visible` (with `outline`) style it; modal roots
-confine it; focus survives updates by `id`. bevy_markup moves focus and
-activates — you bind the actual input (arrows, D-pad, Enter, A) in a couple
+focus; `:focus` / `:focus-visible` (with `outline`) style it; Tab order
+follows `tabindex` as in HTML; modal roots confine it; focus survives
+updates by `id`. bevy_markup moves focus and activates — you bind the
+actual input (arrows, D-pad, Tab, Enter, A) in a couple
 of lines, and the examples ship a ready-made binding
 (`examples/shared/input.rs`).
 
@@ -167,7 +168,8 @@ bevy_markup implements a useful subset of the web, not all of it:
   `flex-shrink: 1` (a scrolling panel needs it on every level down to the
   panel).
 - **Focus:** as above — `data-on-click`/`tabindex` focusable, `autofocus`,
-  `:focus`/`:focus-visible`, modal roots, focus kept across updates.
+  `:focus`/`:focus-visible`, directional and Tab navigation, modal roots,
+  focus kept across updates.
 - **Text input:** the `text-input` feature, as above (fields, cursor and
   selection, live values for form submits).
 - **Tooltips:** `data-tooltip="shop-buy-tooltip"` shows your tooltip

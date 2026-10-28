@@ -9,6 +9,13 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Tab order**: `HtmlFocus::tab(NavAction)` moves focus in HTML's Tab
+  order (positive `tabindex` ascending, then document order; skips
+  `display: none`; wraps; an open `HtmlModal` keeps it inside), and
+  `HtmlFocus::tab_order()` lists it. Elements in scope carry Bevy's
+  `TabIndex` and roots a `TabGroup`, so Bevy's `TabNavigationPlugin` works
+  on markup UIs too. `NavAction` is in the prelude. The examples bind Tab /
+  Shift+Tab, and `ArrowMode::Linear` now steps through Tab order.
 - **More selectors** (ADR 0034: selectors are now matched by
   lightningcss's own engine): `:is()` and `:where()`, `:not()` with a
   selector list or descendant/child combinators inside,
@@ -118,6 +125,8 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   Previously `auto` scrolled always.
 
 ### Changed
+- **Breaking:** `Focusable` has a `tab_index` field (the element's
+  `tabindex`, 0 when absent); code building one by struct literal needs it.
 - **Breaking:** argument attributes (`data-l10n-args`, `data-with`,
   `data-tooltip-args`) are printed with the new `json` Tera filter:
   `data-l10n-args='{{ {"name": player} | json }}'`. They are parsed as
@@ -138,6 +147,10 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   changed.
 
 ### Fixed
+- `<button autofocus>` and `<input autofocus>` now take the initial focus
+  (the check read the attribute's value, which a bare `autofocus` doesn't
+  have), and a negative `tabindex` opts a `<button>` or text `<input>` out
+  of focus (the input ignored it; the button only honoured exactly `-1`).
 - **`:nth-child(0)` (and other patterns no position satisfies) styled the
   root element**, so the whole page inherited the rule; they now match
   nothing, as in browsers.

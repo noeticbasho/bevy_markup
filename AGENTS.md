@@ -48,7 +48,7 @@ never reach library users. A missing feature shows up in `cargo check --lib`.
 | `HtmlTooltips { template, gap }`, `HtmlTooltip { element }` | Resource, Component | `data-tooltip="key"` (+ `data-tooltip-args` JSON, `data-tooltip-placement` right/left/above/below): while a pointer hovers the element or a descendant (nearest wins), an `HtmlUi` of `template` with `key`/`args`/`placement` is anchored beside it (the nearest ancestor that has a node — a link span carries the tooltip but no box); refreshed by updates, despawned on leave |
 | `ElementSignal`, `ElementSignals`, `SignalBinding`, `SignalTrigger`, `SignalSource`, `ActivationInput` | Message, Component, enums | `data-on-<trigger>`/`data-with` hooks: buffered interaction signals (click = primary button or activation, auxclick = other buttons, press/release = any button, enter/leave — a pointer that vanishes (touch end: Bevy despawns it and drops it from the hover map) emits every entered element's leave —, submit = the form's `<button type="submit">` (or a `type`-less `<button>`) clicked or activated — it counts as bound for `click`, so a bound ancestor's click doesn't fire, and the activation is the submit's source — payload `{name: value}` of its named inputs); `source`: `Pointer { pointer, button, position, count }` / `Hover { pointer }` / `Activation(input)`; deepest bound element wins |
 | `PseudoState { hovered, active, focused, focus_visible }` | Component | `:hover`/`:active` (from picking) and `:focus`/`:focus-visible` (from `InputFocus`/`InputFocusVisible`) per element; a change restyles in place; apps may set it |
-| `Focusable { autofocus }` | Component | on focusable elements (`data-on-click` or `tabindex >= 0`, not `tabindex="-1"`) |
+| `Focusable { autofocus, tab_index }` | Component | on focusable elements (`data-on-click`, `<button>`, text `<input>` or `tabindex >= 0`; a negative `tabindex` opts out); `focus.rs` `sync_navigation` gives the ones in scope Bevy's `TabIndex` (`bevy_tab_index()`: 0 → `i32::MAX` so positive values come first, as in HTML; none under `display: none`) and each focus-taking root a `TabGroup` (modal on the active `HtmlModal` only) |
 | `HtmlFocus` | SystemParam | `navigate(CompassOctant)` (shows focus; `FocusEdge` at an edge), `activate(ActivationInput)` (the input the app saw: `Key`, `GamepadButton`, `Synthetic` for harnesses, `Other`), `focused()` — the app binds its own input |
 | `HtmlModal`, `HtmlNoFocus` | Component | on an `HtmlUi` root: confine focus to it while visible / never take focus |
 | `FocusEdge { entity, direction }`, `ActivateElement { entity }` | EntityEvent | no neighbour in that direction / emit the element's click signals |
@@ -128,9 +128,9 @@ examples/
   shared/input.rs  (not an example; `#[path]`-included) ExampleInputPlugin: arrows / D-pad /
                    left stick → HtmlFocus::navigate with hold-to-repeat, Enter / A → activate;
                    left/right on a focused `data-setting` element → `SettingStep` message
-                   instead; `ArrowMode` resource (`Directional` default; `Linear`: ← → step
-                   through `Focusable`s in document order — DFS of top-level `HtmlUi` roots,
-                   sets `InputFocus` + `InputFocusVisible` — and ↑ ↓ are left to the app);
+                   instead; Tab / Shift+Tab → HtmlFocus::tab; `ArrowMode` resource
+                   (`Directional` default; `Linear`: ← → step through Tab order via
+                   `HtmlFocus::tab`, stopping at the ends — and ↑ ↓ are left to the app);
                    `Arrows` SystemParam (held axes from arrows / D-pad / left stick); `Hotkeys`
                    SystemParam (`just_pressed(key, gamepad_button)`)
   shared/harness.rs (not an example; `#[path]`-included; `dev-tools` feature)
@@ -1249,7 +1249,10 @@ known gaps:
     activation, restore by `id` across a rebuild, modal confinement,
     `HtmlNoFocus`; restore and modal spot-checked by ablation) and
     `html_focus_navigates_by_layout_and_reports_edges` (layout harness; it
-    propagates `InheritedVisibility` itself, which Bevy's navigator needs).
+    propagates `InheritedVisibility` itself, which Bevy's navigator needs);
+    `html_focus_tabs_in_html_order` (Tab order with positive/zero/negative
+    `tabindex`, `<button>`, `display: none`, wrapping, modal confinement,
+    removal on rebuild, `<button autofocus>`).
   - [x] Positioning: vector `layout_position` (`absolute` by `top`/`left` and
     by `right: %`/`bottom`, `relative` offset, `static` ignoring insets, plus
     `z-index`/`border-radius`/`border-color` that must not move anything)
@@ -1655,7 +1658,9 @@ Known limits (each skipped/ignored value is logged at `debug`):
   `controls::read_signals`). No built-in reactions. `:hover`/`:active` styling works
   (see the Selectors limit); focus and directional navigation are
   library-side (`focus.rs`), input bindings are the app's. No
-  `:focus-within`, no Tab order (directional navigation only). App
+  `:focus-within`. Tab order is HTML's (`HtmlFocus::tab` / `tab_order`,
+  its own document-order walk: Bevy's `TabNavigation` skips entities whose
+  `InheritedVisibility` hasn't propagated, which headless apps never do). App
   components on elements: `is="<name>"` + `data-*` runs the app's
   `define_html_element` system on every spawn (`custom_elements.rs`); no
   disconnected/attribute-changed callbacks, no autonomous custom tags
