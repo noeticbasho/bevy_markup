@@ -8,6 +8,23 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-29
+
+**Upgrading from 0.7** (details in the entries below):
+
+- Print `data-l10n-args`, `data-with` and `data-tooltip-args` with the new
+  `json` Tera filter: `'{{ {"name": player} | json }}'`. Without it the
+  value isn't JSON and is no longer rewritten: the translation fails (the
+  element shows its fallback content) and `data-with` carries no payload.
+- `Focusable` (`tab_index`) and `HtmlAnchor` (`flip`) have new fields:
+  struct literals need them; prefer `HtmlAnchor::new(…)`.
+- Anchored overlays now flip to the opposite side near a viewport edge;
+  `HtmlAnchor::with_flip(false)` keeps the old clamping.
+- Character references decode as browsers do: legacy names without `;`
+  now decode in text (`&copy2` → "©2").
+- `:nth-child(0)` no longer matches the root element (selectors are now
+  matched by lightningcss's engine).
+
 ### Added
 - **Anchored overlays flip and keep up.** An `HtmlAnchor` overlay that
   doesn't fit on its side of the element moves to the opposite side when
@@ -908,12 +925,13 @@ and that update in place every frame.
   into native Bevy UI entities. Stylesheets, translations and fonts can be
   switched at runtime.
 
-[Unreleased]: https://github.com/nchashch/bevy_markup/compare/v0.7.0...HEAD
-[0.7.0]: https://github.com/nchashch/bevy_markup/compare/v0.6.0...v0.7.0
-[0.6.0]: https://github.com/nchashch/bevy_markup/compare/v0.5.1...v0.6.0
-[0.5.1]: https://github.com/nchashch/bevy_markup/compare/v0.5.0...v0.5.1
-[0.5.0]: https://github.com/nchashch/bevy_markup/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/nchashch/bevy_markup/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/nchashch/bevy_markup/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/nchashch/bevy_markup/releases/tag/v0.2.0
+[Unreleased]: https://github.com/noeticbasho/bevy_markup/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/noeticbasho/bevy_markup/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/noeticbasho/bevy_markup/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/noeticbasho/bevy_markup/compare/v0.5.1...v0.6.0
+[0.5.1]: https://github.com/noeticbasho/bevy_markup/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/noeticbasho/bevy_markup/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/noeticbasho/bevy_markup/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/noeticbasho/bevy_markup/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/noeticbasho/bevy_markup/releases/tag/v0.2.0
 [0.1.0]: https://crates.io/crates/bevy_markup/0.1.0

@@ -1,10 +1,10 @@
 [package]
 name = "bevy_markup"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Markdown+HTML templates (Tera), CSS and Fluent localization as native Bevy UI"
-repository = "https://github.com/nchashch/bevy_markup"
+repository = "https://github.com/noeticbasho/bevy_markup"
 readme = "README.md"
 keywords = ["bevy", "ui", "html", "css", "localization"]
 categories = ["game-development", "gui", "internationalization"]
@@ -16,6 +16,12 @@ exclude = [
     "tests/golden/",
     "examples/screenshots/",
     "AGENTS.md",
+    # AIWG workspace and agent-harness files (project tooling).
+    ".aiwg/",
+    ".claude/",
+    "AIWG.md",
+    "CLAUDE.md",
+    "WORKSPACE.md",
 ]
 
 [features]

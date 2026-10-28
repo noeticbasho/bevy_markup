@@ -273,13 +273,8 @@ remain your app's choice. Optional features:
 
 | bevy_markup | Bevy |
 |---|---|
-| 0.7 | 0.20 |
-| 0.6 | 0.20 |
-| 0.5 | 0.20 |
-| 0.4 | 0.19 |
-| 0.3 | 0.19 |
-| 0.2 | 0.19 |
-| 0.1 | 0.19 |
+| 0.5 to 0.8 | 0.20 |
+| 0.1 to 0.4 | 0.19 |
 
 ### Recommended: patched fluent-syntax
 
