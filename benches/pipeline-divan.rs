@@ -102,6 +102,20 @@ fn rebuilding(bencher: Bencher, size: usize) {
     });
 }
 
+/// Selectors (ADR 0034): a selector-heavy sheet over nested cards, the
+/// whole document re-collected — the matcher's workload.
+#[divan::bench(args = SIZES, max_time = 2)]
+fn selectors(bencher: Bencher, size: usize) {
+    let files = frame_files(size, "selectors");
+    let (mut app, root) = bench_app(&shared::borrowed(&files));
+    let mut n = 0_i64;
+    bencher.bench_local(|| {
+        n += 1;
+        set_n(&mut app, root, n);
+        black_box(app.update());
+    });
+}
+
 /// Localized: every paragraph a `data-l10n-id` message whose arg changes
 /// per frame (the Fluent stage).
 #[divan::bench(args = SIZES, max_time = 2)]

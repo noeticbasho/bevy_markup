@@ -126,6 +126,20 @@ fn frames(c: &mut Criterion) {
                 black_box(app.update())
             })
         });
+
+        // Selectors (ADR 0034): a selector-heavy sheet over nested cards,
+        // the whole document re-collected — the matcher's workload.
+        let selector_files = shared::frame_files(size, "selectors");
+        let files = shared::borrowed(&selector_files);
+        let (mut app, root) = bench_app(&files);
+        let mut n = 0_i64;
+        group.bench_function(BenchmarkId::new("selectors", size), |b| {
+            b.iter(|| {
+                n += 1;
+                set_n(&mut app, root, n);
+                black_box(app.update())
+            })
+        });
     }
 
     // Localized (the Fluent stage) and markdown (the pulldown-cmark

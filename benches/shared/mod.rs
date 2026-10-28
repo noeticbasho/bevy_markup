@@ -289,6 +289,54 @@ pub(crate) fn borrowed(files: &[(String, String)]) -> Vec<(&str, &str)> {
         .collect()
 }
 
+/// The `selectors` workload's stylesheet (ADR 0034's trial): every kind
+/// of selector the cascade supports — descendant and child combinators,
+/// `+`/`~` next to the subject, the structural pseudo-classes, `data-*`
+/// attribute tests, `:not()`, `:hover`, `:focus-within` — plus 40
+/// near-miss rules per card class, so most rules fail part-way the way a
+/// large real sheet's do. Only the grammar both matchers support.
+pub(crate) fn selector_css() -> String {
+    let mut css = String::from(
+        r#"
+html { color: #ffffff; font-size: 16px; padding: 4px }
+.list > li:nth-child(odd) { background-color: #111111 }
+.list > li:nth-child(3n+1) .label { color: #ff0000 }
+.list li:first-child, .list li:last-child { padding: 2px }
+.list li:nth-of-type(2n) > span.value { color: #00ff00 }
+li[data-kind="a"] .label { color: #0000ff }
+li[data-kind] + li .value { color: #eeeeee }
+li.done ~ li.todo { margin: 1px 0 }
+section.card p:not(.muted) { color: #dddddd }
+section.card > header + p { font-size: 18px }
+.card .list li:not(:hover) .label { color: #cccccc }
+.card li:hover > .value { color: #ffff00 }
+main section:nth-child(even) .list > li:last-of-type { padding: 4px }
+span:empty { padding: 1px }
+li:focus-within { background-color: #222222 }
+"#,
+    );
+    for k in 0..40 {
+        css.push_str(&format!(
+            ".card.c{k} .list > li:nth-child({}) .label {{ color: #{:02x}0000 }}
+             .card.c{k} li.todo + li[data-kind=\"b\"] > .value {{ padding: {}px }}\n",
+            k % 5 + 1,
+            k * 6,
+            k % 4
+        ));
+    }
+    css
+}
+
+/// The `selectors` workload's markup: cards of ten-item lists (~43
+/// elements per card, `size / 40` cards), every value templated, so each
+/// frame re-collects the whole document and runs the cascade per element.
+pub(crate) fn selectors_template(size: usize) -> String {
+    let cards = (size / 40).max(1);
+    format!(
+        r#"<main>{{% for s in range(end={cards}) %}}<section class="card c{{{{ s % 40 }}}}"><header>Card {{{{ s }}}}</header><p class="{{% if s % 3 == 0 %}}muted{{% endif %}}">{{{{ n }}}}</p><ul class="list">{{% for i in range(end=10) %}}<li class="{{% if i < 3 %}}done{{% else %}}todo{{% endif %}}" data-kind="{{% if i % 2 == 0 %}}a{{% else %}}b{{% endif %}}"><span class="label">L{{{{ i }}}}</span><span class="value">{{{{ n + i }}}}</span><span></span></li>{{% endfor %}}</ul></section>{{% endfor %}}</main>"#
+    )
+}
+
 /// The frame workloads' file lists: `workload` ∈ idle/changing/
 /// changing-nested/rebuilding —
 /// the same documents at the given size (the `changing` one differs only in
@@ -301,11 +349,17 @@ pub(crate) fn frame_files(size: usize, workload: &str) -> Vec<(String, String)> 
         // reuse (bug_0150: they re-collected — reuse worked only for
         // top-level siblings, which is all `changing` exercised).
         "changing-nested" => format!("<main>{}</main>", shell_template(size, true)),
+        "selectors" => selectors_template(size),
         _ => shell_template(size, false),
+    };
+    let css = if workload == "selectors" {
+        selector_css()
+    } else {
+        CSS.to_owned()
     };
     vec![
         ("page.html".to_owned(), page),
-        ("style.css".to_owned(), CSS.to_owned()),
+        ("style.css".to_owned(), css),
         (
             "locales/en-US/main.ftl.ron".to_owned(),
             r#"(locale: "en-US", resources: ["ui.ftl"])"#.to_owned(),
