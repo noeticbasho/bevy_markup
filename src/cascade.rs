@@ -949,6 +949,17 @@ pub(crate) struct SiblingList {
     list: Vec<Ancestor>,
     /// `prefix[k]`: the hash of `list[..k]` (`prefix[0]` = 0).
     prefix: Vec<u64>,
+    /// `X ~ subject` scans by (selector id, either-way mode): how far the
+    /// list was scanned and the first entry matching `X` (the entries are
+    /// fixed snapshots, so a scan stays valid for the list's life).
+    later: std::cell::RefCell<HashMap<(u64, bool), LaterScan>>,
+}
+
+/// A [`SiblingList::any_before`] scan's progress.
+#[derive(Clone, Copy, Debug, Default)]
+struct LaterScan {
+    scanned: usize,
+    first: Option<usize>,
 }
 
 impl SiblingList {
@@ -962,7 +973,37 @@ impl SiblingList {
                     .wrapping_add(sibling.identity_hash()),
             );
         }
-        std::rc::Rc::new(Self { list, prefix })
+        std::rc::Rc::new(Self {
+            list,
+            prefix,
+            later: Default::default(),
+        })
+    }
+
+    /// Whether an entry before `count` satisfies `matches` (the `X` of an
+    /// `X ~ subject` selector, identified by `key`). The scan only moves
+    /// forward and stops at the first match, so a whole list costs O(n)
+    /// per selector instead of a walk back per element.
+    fn any_before(
+        &self,
+        count: usize,
+        key: (u64, bool),
+        mut matches: impl FnMut(usize) -> bool,
+    ) -> bool {
+        let mut scans = self.later.borrow_mut();
+        let scan = scans.entry(key).or_default();
+        if let Some(first) = scan.first {
+            return first < count;
+        }
+        while scan.scanned < count {
+            let index = scan.scanned;
+            scan.scanned += 1;
+            if matches(index) {
+                scan.first = Some(index);
+                return true;
+            }
+        }
+        false
     }
 
     /// The first `count` entries: the preceding siblings of the element
@@ -4738,6 +4779,36 @@ mod tests {
                 "{css} at {index} with {value:?}"
             );
         }
+    }
+
+    /// `X ~ subject` asks each element "does a preceding sibling match
+    /// `X`"; the list answers from one forward scan, so a whole list costs
+    /// at most one `X` match per entry (the engine's walk back per element
+    /// cost n²/2 — review_0005 I03's scaling test, failing in CI). Both
+    /// answers stay right: none before the match, all after it.
+    #[test]
+    fn later_sibling_scans_each_list_once() {
+        let n = 200;
+        let hot_at = 120;
+        let list = SiblingList::new(
+            (0..n)
+                .map(|i| ancestor("p", if i == hot_at { &["hot"] } else { &[] }))
+                .collect(),
+        );
+        let calls = std::cell::Cell::new(0);
+        let answers: Vec<bool> = (0..n)
+            .map(|count| {
+                list.any_before(count, (7, false), |index| {
+                    calls.set(calls.get() + 1);
+                    list.list[index].classes.iter().any(|class| class == "hot")
+                })
+            })
+            .collect();
+        assert!(answers[..=hot_at].iter().all(|answer| !answer));
+        assert!(answers[hot_at + 1..].iter().all(|answer| *answer));
+        assert_eq!(calls.get(), hot_at + 1, "one scan, stopping at the match");
+        // Another key (selector, either-way mode) scans on its own.
+        assert!(!list.any_before(n, (7, true), |_| false));
     }
 
     /// Unsupported selectors skip the whole rule: sibling combinators,

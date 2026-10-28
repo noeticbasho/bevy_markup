@@ -12,7 +12,10 @@ use std::fmt;
 use lightningcss::selector::{Combinator as CssCombinator, Component, PseudoClass};
 use parcel_selectors::attr::{AttrSelectorOperation, CaseSensitivity, NamespaceConstraint};
 use parcel_selectors::context::{MatchingContext, MatchingMode, QuirksMode};
-use parcel_selectors::matching::{ElementSelectorFlags, matches_selector};
+use parcel_selectors::matching::{
+    CompoundSelectorMatchingResult, ElementSelectorFlags, matches_compound_selector_from,
+    matches_selector,
+};
 use parcel_selectors::parser::{NthType, SelectorImpl};
 use parcel_selectors::{Element, OpaqueElement};
 
@@ -42,7 +45,18 @@ pub(super) struct Selector {
     /// An interaction pseudo-class anywhere (ADR 0029's pseudo rules).
     pseudo: bool,
     reads: SelectorReads,
+    /// `X ~ subject` with an `X` that reads only the sibling itself: the
+    /// match-order offset of `X`. Its sibling test is answered from a scan
+    /// cached on the sibling list ([`SiblingList::any_before`]): parcel
+    /// walks every preceding sibling per element, O(n²) over a list that
+    /// has no match (review_0005 I03's test, failing in CI).
+    later_sibling: Option<usize>,
+    /// Identifies the selector in sibling-list caches.
+    id: u64,
 }
+
+/// Selector ids for [`Selector::id`].
+static NEXT_SELECTOR_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 impl Selector {
     /// `None` for a selector outside the supported grammar: its rule is
@@ -54,8 +68,18 @@ impl Selector {
         let mut pseudo = false;
         let mut subject = true;
         let mut sibling_seen_away = false;
-        for component in parsed.iter_raw_match_order() {
+        // The `X ~ subject` shape: where `X` starts, whether a combinator
+        // follows it, whether it reads context through `:is()` & co.
+        let mut later_sibling = None;
+        let mut beyond_x = false;
+        let mut x_reads_context = false;
+        for (index, component) in parsed.iter_raw_match_order().enumerate() {
             if let Component::Combinator(combinator) = component {
+                if subject && *combinator == CssCombinator::LaterSibling {
+                    later_sibling = Some(index + 1);
+                } else if !subject {
+                    beyond_x = true;
+                }
                 match combinator {
                     CssCombinator::Descendant | CssCombinator::Child => {}
                     CssCombinator::NextSibling | CssCombinator::LaterSibling => {
@@ -85,8 +109,10 @@ impl Selector {
                 }
             }
             reads.context_position |= part.context_structural;
+            x_reads_context |= !subject && part.context_structural;
             pseudo |= part.pseudo;
         }
+        let later_sibling = later_sibling.filter(|_| !beyond_x && !x_reads_context);
         if sibling_seen_away {
             return None;
         }
@@ -96,6 +122,8 @@ impl Selector {
             specificity: (packed >> 20, (packed >> 10) & 0x3ff, packed & 0x3ff),
             pseudo,
             reads,
+            later_sibling,
+            id: NEXT_SELECTOR_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         })
     }
 
@@ -177,6 +205,39 @@ impl Selector {
         };
         let mut context =
             MatchingContext::new(MatchingMode::Normal, None, None, QuirksMode::NoQuirks);
+        if let (Some(offset), Some(siblings)) = (self.later_sibling, &state.previous_siblings) {
+            // The subject's own compound, then "some preceding sibling
+            // matches `X`" from the list's cached scan. Offsets: this one
+            // counts in parse order (the subject's compound starts right
+            // after the `~`, which is match-order index `offset - 1`);
+            // `matches_selector`'s counts in match order.
+            let subject_start = self.parsed.len() - (offset - 1);
+            // The subject's compound is the rightmost, so a match reads
+            // `FullyMatched` (it ends the selector), not `Matched`.
+            if let CompoundSelectorMatchingResult::NotMatched =
+                matches_compound_selector_from(&self.parsed, subject_start, &mut context, &node)
+            {
+                return false;
+            }
+            let list = &siblings.list;
+            return list.any_before(siblings.count, (self.id, wild), |index| {
+                let sibling = node.with(Kind::Listed {
+                    list,
+                    index,
+                    level: 0,
+                });
+                let mut context =
+                    MatchingContext::new(MatchingMode::Normal, None, None, QuirksMode::NoQuirks);
+                matches_selector(
+                    &self.parsed,
+                    offset,
+                    None,
+                    &sibling,
+                    &mut context,
+                    &mut |_, _| {},
+                )
+            });
+        }
         matches_selector(&self.parsed, 0, None, &node, &mut context, &mut |_, _| {})
     }
 }

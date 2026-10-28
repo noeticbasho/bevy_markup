@@ -210,6 +210,7 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0178](bug_0178.md) | pulldown-cmark's offset iterator panicked on a definition-only list item before a blank line | upstream `pulldown-cmark` 0.13.4 (UPSTREAM.md U13) | high | fixed (uncommitted): `pulldown-cmark` ≥ 0.13.5, fixed upstream (#1021) | honggfuzz `html` target |
 | [bug_0179](bug_0179.md) | Nested functions parsed in exponential time stalled the stylesheet load; the css harness skipped the nesting pre-scan | `src/cascade.rs` (`nesting_over_limit`), `src/fuzz.rs`; upstream lightningcss (UPSTREAM.md U14, U15) | high | fixed (uncommitted): paren bound 8 in the pre-scan; the harness applies it | nightly cargo-fuzz `css` timeouts + coverage replay stack overflow |
 | [bug_0180](bug_0180.md) | A structural pseudo-class followed by a non-`(` character panicked `Compound::parse` | `src/cascade.rs` (`Compound::parse`) | high | fixed (uncommitted) | cargo-fuzz `css` target |
+| [bug_0181](bug_0181.md) | `X ~ subject` matched in O(n²) over a sibling list, failing review_0005's scaling test in CI | `src/cascade/selector.rs` (`Selector::run`), `src/cascade.rs` (`SiblingList`) | medium | fixed (branch `fix/later-sibling-scaling`): one forward scan per list and selector | CI (`review_0005::long_sibling_lists_build_linearly`) |
 
 ## Discovery session metadata: bug_0001–0005
 
@@ -442,3 +443,17 @@ settle (rebuild observed) and the resulting dump to match a reference model.
 - **Commit at discovery:** `965d2fc` (fixes uncommitted at filing).
 - **Machine/toolchain:** Arch Linux (kernel 7.2.11), AMD Ryzen 7 9800X3D,
   rustc 1.98.1, `nightly-2026-09-09` for cargo-fuzz 0.13.2, Chromium 156.
+
+## Discovery session metadata: bug_0181 (2026-10-29)
+
+- **Method:** CI failure of `review_0005::long_sibling_lists_build_linearly`
+  on `f8629c2` (9.7× for 4× the siblings; bound 8×), passing narrowly
+  locally (7.6×). A growth curve over 400–6,400 siblings, with and without
+  the sibling rule, isolated the quadratic term to `~` matching.
+- **Discovery and fix agent:** Claude Code session, `claude-opus-5-5`. The
+  deterministic regression test counts scan steps; the model test caught
+  two mistakes in the first version of the fix (seeds recorded).
+- **Commit at discovery:** `0262408` (reproduction); fix on
+  `fix/later-sibling-scaling`.
+- **Machine/toolchain:** Arch Linux (kernel 7.2.11), AMD Ryzen 7 9800X3D,
+  rustc 1.98.1, `nightly-2026-09-09` for cargo-fuzz 0.13.2.

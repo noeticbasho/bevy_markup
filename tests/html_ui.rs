@@ -7506,7 +7506,8 @@ mod review_0005 {
                 .unwrap()
         };
         // Debug builds: 400 → 1600 measured 7.3× (linear costs hide the
-        // quadratic), 800 → 3200 10.9× at `e3646ae`.
+        // quadratic), 800 → 3200 10.9× at `e3646ae`. bug_0181: the `~`
+        // walk itself was quadratic (9.7× on CI at `f8629c2`); 3.1× since.
         let (small, large) = (time(800), time(3200));
         assert!(
             large < small * 8 + Duration::from_millis(50),
