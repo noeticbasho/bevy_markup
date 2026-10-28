@@ -254,7 +254,9 @@ pub use {fluent, lightningcss, tera, tl};
 
 /// Everything needed to build HTML UIs: `use bevy_markup::prelude::*;`.
 pub mod prelude {
-    pub use crate::anchor::{AnchorPlacement, HtmlAnchor, HtmlWorldAnchor, HtmlWorldAnchorView};
+    pub use crate::anchor::{
+        AnchorPlacement, AnchoredSide, HtmlAnchor, HtmlWorldAnchor, HtmlWorldAnchorView,
+    };
     pub use crate::custom_elements::{ElementConnected, HtmlCustomElementsExt};
     pub use crate::focus::{
         ActivateElement, FocusEdge, Focusable, HtmlFocus, HtmlModal, HtmlNoFocus, NavAction,
@@ -392,9 +394,11 @@ impl Plugin for BevyMarkupPlugin {
                     nine_slice::apply_nine_slices.before(UiSystems::Prepare),
                     signals::dispatch_signals.before(HtmlUiSystems::Render),
                     anchor::place_world_anchored.before(UiSystems::Prepare),
+                    // Right after Bevy's layout (like its `Popover`): this
+                    // frame's rects, corrected before clipping and render.
                     anchor::place_anchored
-                        .after(HtmlUiSystems::Build)
-                        .before(UiSystems::Prepare),
+                        .in_set(UiSystems::Layout)
+                        .after(bevy::ui::ui_layout_system),
                     build::size_images
                         .after(HtmlUiSystems::Build)
                         .before(UiSystems::Prepare),

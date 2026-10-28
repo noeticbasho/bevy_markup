@@ -77,7 +77,7 @@ What sinks it:
 
 ## Worth taking from Popover without adopting it
 
-Not done here; candidates if overlays need them:
+Both done after this ADR (same branch, `place_anchored`):
 
 - **Fallback placements**: try the mirror side when the preferred one is
   clipped, instead of only clamping (a tooltip at the right edge flips

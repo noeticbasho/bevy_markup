@@ -15,14 +15,21 @@
 //! # }
 //! ```
 //!
-//! - The overlay's insets are set from the element's laid-out rect (the
-//!   previous frame's layout): `Right`/`Below` set `left`/`top`, `Above`
-//!   sets `left`/`bottom`, `Left` sets `right`/`top`; the other insets are
-//!   `auto`. `Above`/`Left` anchor by `bottom`/`right`, which needs the
-//!   viewport height/width; without a camera they anchor by `top`/`left`
-//!   using the overlay's measured size instead. Its `position_type` is the
-//!   stylesheet's or the app's.
-//! - Once the overlay has a size it's kept inside the element's viewport.
+//! - It's placed in the same frame: right after Bevy's layout, from this
+//!   frame's rects, the overlay and its descendants are moved beside the
+//!   element (as Bevy's `Popover` does), so it never trails a moving
+//!   element. Its insets are written too, so the next layout agrees:
+//!   `Right`/`Below` set `left`/`top`, `Above` sets `left`/`bottom`, `Left`
+//!   sets `right`/`top`; the other insets are `auto`. `Above`/`Left` anchor
+//!   by `bottom`/`right`, which needs the viewport height/width; without a
+//!   camera they anchor by `top`/`left`. Its `position_type` is the
+//!   stylesheet's or the app's; make it a UI root (insets are viewport
+//!   coordinates).
+//! - When it doesn't fit on its side of the element but fits better on the
+//!   opposite one, it flips there ([`HtmlAnchor::with_flip`] turns this
+//!   off); [`AnchoredSide`] says which side it's on. Whatever doesn't fit
+//!   either way is clamped inside the element's viewport, overlapping the
+//!   element rather than leaving the screen.
 //! - It renders on the element's UI camera (`UiTargetCamera`), so it works
 //!   for UIs on render-to-texture cameras too.
 //! - It's despawned with its element.
@@ -44,6 +51,9 @@ pub struct HtmlAnchor {
     pub placement: AnchorPlacement,
     /// Space between the element and the overlay, in logical px.
     pub gap: f32,
+    /// Move to the opposite side when the overlay doesn't fit on
+    /// `placement`'s side but does on the other (default `true`).
+    pub flip: bool,
 }
 
 impl HtmlAnchor {
@@ -52,11 +62,18 @@ impl HtmlAnchor {
             element,
             placement,
             gap: 0.0,
+            flip: true,
         }
     }
 
     pub fn with_gap(mut self, gap: f32) -> Self {
         self.gap = gap;
+        self
+    }
+
+    /// `false`: always `placement`'s side, clamped into the viewport.
+    pub fn with_flip(mut self, flip: bool) -> Self {
+        self.flip = flip;
         self
     }
 }
@@ -73,33 +90,85 @@ pub enum AnchorPlacement {
     Below,
 }
 
-/// An anchored overlay: its anchor, insets, measured size and camera.
+impl AnchorPlacement {
+    /// The opposite side.
+    pub fn mirror(self) -> Self {
+        match self {
+            AnchorPlacement::Right => AnchorPlacement::Left,
+            AnchorPlacement::Left => AnchorPlacement::Right,
+            AnchorPlacement::Above => AnchorPlacement::Below,
+            AnchorPlacement::Below => AnchorPlacement::Above,
+        }
+    }
+}
+
+/// The side an [`HtmlAnchor`]ed overlay is on: its `placement`, or the
+/// mirror side when it flipped. Kept by bevy_markup; read it to style the
+/// overlay (a tooltip's arrow, say).
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+#[reflect(Component)]
+pub struct AnchoredSide(pub AnchorPlacement);
+
+/// An anchored overlay: its anchor, insets, layout, camera and side.
 type Overlay = (
     Entity,
     &'static HtmlAnchor,
     &'static mut Node,
     Option<&'static ComputedNode>,
     Option<&'static UiTargetCamera>,
+    Option<&'static AnchoredSide>,
 );
 
+/// The element an overlay is anchored to: its layout and camera.
+type AnchorElement = (
+    &'static ComputedNode,
+    &'static UiGlobalTransform,
+    Option<&'static ComputedUiTargetCamera>,
+);
+
+/// The overlay's rect (logical px) on `side` of `element`, before any
+/// viewport clamp.
+fn rect_on(side: AnchorPlacement, element: Rect, size: Vec2, gap: f32) -> Rect {
+    let min = match side {
+        AnchorPlacement::Right => Vec2::new(element.max.x + gap, element.min.y),
+        AnchorPlacement::Left => Vec2::new(element.min.x - gap - size.x, element.min.y),
+        AnchorPlacement::Below => Vec2::new(element.min.x, element.max.y + gap),
+        AnchorPlacement::Above => Vec2::new(element.min.x, element.min.y - gap - size.y),
+    };
+    Rect::from_corners(min, min + size)
+}
+
+/// How far `rect` sticks out of `0..viewport` along `side`'s axis (the
+/// axis flipping can fix).
+fn overflow(side: AnchorPlacement, rect: Rect, viewport: Vec2) -> f32 {
+    let (start, end, limit) = match side {
+        AnchorPlacement::Right | AnchorPlacement::Left => (rect.min.x, rect.max.x, viewport.x),
+        AnchorPlacement::Above | AnchorPlacement::Below => (rect.min.y, rect.max.y, viewport.y),
+    };
+    (-start).max(0.0) + (end - limit).max(0.0)
+}
+
 /// Places every [`HtmlAnchor`]ed node beside its element, or despawns it
-/// with its element.
+/// with its element. Runs right after Bevy's layout, from this frame's
+/// rects: the overlay's laid-out position (and its descendants') is
+/// corrected in place, so it renders, clips and picks beside the element
+/// this frame, and its insets are written so the next layout agrees.
 #[hotpath::measure]
 pub(crate) fn place_anchored(
     mut overlays: Query<Overlay>,
-    elements: Query<(
-        &ComputedNode,
-        &UiGlobalTransform,
-        Option<&ComputedUiTargetCamera>,
-    )>,
+    mut layout: ParamSet<(Query<AnchorElement>, Query<&mut UiGlobalTransform>)>,
     cameras: Query<&Camera>,
+    children: Query<&Children>,
     mut commands: Commands,
 ) {
-    for (overlay, anchor, mut node, own, target) in &mut overlays {
+    for (overlay, anchor, mut node, own, target, side) in &mut overlays {
+        let elements = layout.p0();
         let Ok((element, transform, element_camera)) = elements.get(anchor.element) else {
             commands.entity(overlay).try_despawn();
             continue;
         };
+        let (element, transform, element_camera) = (*element, *transform, element_camera.cloned());
+        let element_camera = element_camera.as_ref();
         let camera = element_camera.and_then(ComputedUiTargetCamera::get);
         if let Some(camera) = camera
             && target.map(|target| target.entity()) != Some(camera)
@@ -111,81 +180,73 @@ pub(crate) fn place_anchored(
         let scale = element.inverse_scale_factor;
         let size = element.size() * scale;
         let min = transform.translation * scale - size / 2.0;
-        let max = min + size;
+        let element_rect = Rect::from_corners(min, min + size);
         let viewport = camera
             .and_then(|camera| cameras.get(camera).ok())
             .and_then(Camera::physical_viewport_size)
             .map(|size| size.as_vec2() * scale);
-        let own = own
+        let own_size = own
             .map(|own| own.size() * own.inverse_scale_factor)
             .filter(|own| own.cmpgt(Vec2::ZERO).all());
-        // Keeps `start..start + extent` inside `0..limit` once both are known.
-        let clamp = |start: f32, extent: Option<f32>, limit: Option<f32>| match (extent, limit) {
-            (Some(extent), Some(limit)) => start.min(limit - extent).max(0.0),
-            _ => start,
+
+        // The side: `placement`'s, unless it doesn't fit and the mirror
+        // side fits better (needs the overlay's size and the viewport).
+        let chosen = match (own_size, viewport) {
+            (Some(own_size), Some(viewport)) if anchor.flip => {
+                let preferred = anchor.placement;
+                let mirror = preferred.mirror();
+                let cost = |side| {
+                    overflow(
+                        side,
+                        rect_on(side, element_rect, own_size, anchor.gap),
+                        viewport,
+                    )
+                };
+                if cost(preferred) > 0.0 && cost(mirror) < cost(preferred) {
+                    mirror
+                } else {
+                    preferred
+                }
+            }
+            _ => anchor.placement,
         };
-        // The `right`/`bottom` form: the inset is measured from the far
-        // edge, so the overlay's near edge sits at `limit - inset` and
-        // its far edge at `limit - inset - extent`; keeping the whole
-        // overlay inside the viewport means `inset <= limit - extent`
-        // (and `>= 0`, which flips the overlay inside when the anchor
-        // element is beyond the far edge). Without the overlay's extent
-        // (first frame) the inset is bounded alone; the next frame
-        // clamps exactly.
-        let clamp_from_far =
-            |start: f32, extent: Option<f32>, limit: Option<f32>| match (extent, limit) {
-                (Some(extent), Some(limit)) => start.min(limit - extent).max(0.0),
-                (_, Some(limit)) => start.min(limit).max(0.0),
-                _ => start,
-            };
-        let (width, height) = (own.map(|own| own.x), own.map(|own| own.y));
-        let (view_w, view_h) = (viewport.map(|v| v.x), viewport.map(|v| v.y));
-        let gap = anchor.gap;
-        let [left, top, right, bottom] = match anchor.placement {
-            AnchorPlacement::Right => [
-                Some(clamp(max.x + gap, width, view_w)),
-                Some(clamp(min.y, height, view_h)),
+        if side.map(|side| side.0) != Some(chosen) {
+            commands.entity(overlay).try_insert(AnchoredSide(chosen));
+        }
+
+        // The rect, clamped into the viewport once both sizes are known
+        // (the overlay overlaps its element rather than leave the screen).
+        let unclamped = rect_on(
+            chosen,
+            element_rect,
+            own_size.unwrap_or(Vec2::ZERO),
+            anchor.gap,
+        );
+        let placed_min = match (own_size, viewport) {
+            (Some(own_size), Some(viewport)) => {
+                unclamped.min.min(viewport - own_size).max(Vec2::ZERO)
+            }
+            _ => unclamped.min,
+        };
+
+        // Insets. `Above`/`Left` anchor by `bottom`/`right` (the far edge)
+        // when there's a viewport, so the overlay's own size doesn't
+        // depend on where it starts (an auto-width overlay near an edge).
+        let extent = own_size.unwrap_or(Vec2::ZERO);
+        let [left, top, right, bottom] = match (chosen, viewport) {
+            (AnchorPlacement::Above, Some(viewport)) => [
+                Some(placed_min.x),
                 None,
+                None,
+                Some(viewport.y - placed_min.y - extent.y),
+            ],
+            (AnchorPlacement::Left, Some(viewport)) => [
+                None,
+                Some(placed_min.y),
+                Some(viewport.x - placed_min.x - extent.x),
                 None,
             ],
-            AnchorPlacement::Below => [
-                Some(clamp(min.x, width, view_w)),
-                Some(clamp(max.y + gap, height, view_h)),
-                None,
-                None,
-            ],
-            // Bottom-anchored: right without knowing the overlay's height
-            // (top-anchored by its measured height without a viewport).
-            // Clamped to the viewport once the overlay's height (width) is
-            // known — a tooltip at the screen's top edge stays on screen.
-            AnchorPlacement::Above => match view_h {
-                Some(view_h) => [
-                    Some(clamp(min.x, width, view_w)),
-                    None,
-                    None,
-                    Some(clamp_from_far(view_h - min.y + gap, height, Some(view_h))),
-                ],
-                None => [
-                    Some(min.x),
-                    Some(min.y - gap - height.unwrap_or(0.0)),
-                    None,
-                    None,
-                ],
-            },
-            AnchorPlacement::Left => match view_w {
-                Some(view_w) => [
-                    None,
-                    Some(clamp(min.y, height, view_h)),
-                    Some(clamp_from_far(view_w - min.x + gap, width, Some(view_w))),
-                    None,
-                ],
-                None => [
-                    Some(min.x - gap - width.unwrap_or(0.0)),
-                    Some(min.y),
-                    None,
-                    None,
-                ],
-            },
+            _ => [Some(placed_min.x), Some(placed_min.y), None, None],
         };
         let inset = |value: Option<f32>| value.map_or(Val::Auto, Val::Px);
         let (left, top, right, bottom) = (inset(left), inset(top), inset(right), inset(bottom));
@@ -194,6 +255,42 @@ pub(crate) fn place_anchored(
             node.top = top;
             node.right = right;
             node.bottom = bottom;
+        }
+
+        // This frame: move the laid-out overlay (and everything under it)
+        // to the placed rect. Without its size it has no layout yet.
+        let (Some(own), Some(own_size)) = (own, own_size) else {
+            continue;
+        };
+        let mut transforms = layout.p1();
+        let Ok(current) = transforms.get(overlay) else {
+            continue;
+        };
+        let current_min = current.translation * own.inverse_scale_factor - own_size / 2.0;
+        let delta = (placed_min - current_min) / own.inverse_scale_factor;
+        if delta.abs().cmpgt(Vec2::splat(0.01)).any() {
+            translate_subtree(overlay, delta, &children, &mut transforms);
+        }
+    }
+}
+
+/// Moves `entity`'s and its descendants' laid-out transforms by `delta`
+/// physical px (what Bevy's `Popover` does after layout).
+fn translate_subtree(
+    entity: Entity,
+    delta: Vec2,
+    children: &Query<&Children>,
+    transforms: &mut Query<&mut UiGlobalTransform>,
+) {
+    let mut stack = vec![entity];
+    while let Some(entity) = stack.pop() {
+        if let Ok(mut transform) = transforms.get_mut(entity) {
+            let mut affine = transform.affine();
+            affine.translation += delta;
+            *transform = affine.into();
+        }
+        if let Ok(children) = children.get(entity) {
+            stack.extend(children.iter());
         }
     }
 }

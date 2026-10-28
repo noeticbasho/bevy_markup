@@ -9,6 +9,14 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Anchored overlays flip and keep up.** An `HtmlAnchor` overlay that
+  doesn't fit on its side of the element moves to the opposite side when
+  that fits better (instead of being clamped over the element); turn it
+  off with `HtmlAnchor::with_flip(false)`. The new `AnchoredSide`
+  component says which side it's on, and tooltip templates get it as
+  `side` (next to the requested `placement`) to point an arrow. Overlays
+  are also placed in the same frame, right after layout (as Bevy's
+  `Popover` does), so they no longer trail a moving element by a frame.
 - **Tab order**: `HtmlFocus::tab(NavAction)` moves focus in HTML's Tab
   order (positive `tabindex` ascending, then document order; skips
   `display: none`; wraps; an open `HtmlModal` keeps it inside), and
@@ -125,6 +133,9 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   Previously `auto` scrolled always.
 
 ### Changed
+- **Breaking:** `HtmlAnchor` has a `flip` field (default `true`, so
+  struct literals need it), and flipping is on by default: an overlay that
+  used to be clamped over its element near a viewport edge now flips.
 - **Character references decode by the HTML spec's rules** (ADR 0036),
   through the `htmlize` crate instead of the crate's own decoder and
   generated WHATWG table (both removed, with

@@ -252,11 +252,7 @@ fn anchored(bencher: Bencher, size: usize) {
     for (element, placement) in anchors {
         app.world_mut().spawn((
             Node::default(),
-            HtmlAnchor {
-                element,
-                placement,
-                gap: 8.0,
-            },
+            HtmlAnchor::new(element, placement).with_gap(8.0),
         ));
     }
     bencher.bench_local(|| black_box(app.update()));

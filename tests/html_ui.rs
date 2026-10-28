@@ -2303,10 +2303,11 @@ fn root_rule_styles_the_html_ui_entity() {
 }
 
 /// `HtmlAnchor` keeps an overlay beside its element on the requested side,
-/// follows the element when it moves, stays inside the viewport once it has
-/// a size, and is despawned with the element.
+/// flips to the opposite side when it doesn't fit (reported by
+/// `AnchoredSide`), follows the element when it moves, clamps inside the
+/// viewport with flipping off, and is despawned with the element.
 #[test]
-fn anchored_overlay_follows_clamps_and_despawns() {
+fn anchored_overlay_follows_flips_clamps_and_despawns() {
     let mut ui = TestUi::with_layout(
         "anchor",
         &[
@@ -2357,21 +2358,40 @@ fn anchored_overlay_follows_clamps_and_despawns() {
         "right of it, tops aligned"
     );
 
-    for (placement, min) in [
-        (AnchorPlacement::Below, Vec2::new(20.0, 154.0)),
-        (AnchorPlacement::Above, Vec2::new(20.0, 96.0)),
-        // Clamped inside the left edge (`inset <= view_w - width`): the
-        // overlay overlaps the element instead of going off screen (the
-        // same trade the far-edge Right/Below clamps make; the docs
-        // promise clamping, not flipping).
-        (AnchorPlacement::Left, Vec2::new(0.0, 120.0)),
+    let side = |ui: &mut TestUi| ui.world_mut().get::<AnchoredSide>(overlay).copied();
+    assert_eq!(side(&mut ui), Some(AnchoredSide(AnchorPlacement::Right)));
+    for (placement, min, on) in [
+        (
+            AnchorPlacement::Below,
+            Vec2::new(20.0, 154.0),
+            AnchorPlacement::Below,
+        ),
+        (
+            AnchorPlacement::Above,
+            Vec2::new(20.0, 96.0),
+            AnchorPlacement::Above,
+        ),
+        // 60px doesn't fit in the 16px left of the element: it flips
+        // right instead of covering the element.
+        (
+            AnchorPlacement::Left,
+            Vec2::new(124.0, 120.0),
+            AnchorPlacement::Right,
+        ),
     ] {
         ui.world_mut()
             .get_mut::<HtmlAnchor>(overlay)
             .unwrap()
             .placement = placement;
         assert_eq!(rects(&mut ui).1.min, min, "{placement:?}");
+        assert_eq!(side(&mut ui), Some(AnchoredSide(on)), "{placement:?}");
     }
+    // Flipping off: clamped inside the left edge (`inset <= view_w -
+    // width`), overlapping the element instead of going off screen.
+    ui.world_mut().get_mut::<HtmlAnchor>(overlay).unwrap().flip = false;
+    assert_eq!(rects(&mut ui).1.min, Vec2::new(0.0, 120.0), "clamped");
+    assert_eq!(side(&mut ui), Some(AnchoredSide(AnchorPlacement::Left)));
+    ui.world_mut().get_mut::<HtmlAnchor>(overlay).unwrap().flip = true;
 
     // The element moves to the right edge (a restyle keeps its entity): the
     // overlay follows, clamped to the 320px viewport.
@@ -2384,7 +2404,17 @@ fn anchored_overlay_follows_clamps_and_despawns() {
     ui.settle();
     let (element, placed) = rects(&mut ui);
     assert_eq!(element.min.x, 270.0);
-    assert_eq!(placed.min, Vec2::new(260.0, 120.0), "clamped to 320 - 60");
+    assert_eq!(
+        placed.min,
+        Vec2::new(206.0, 120.0),
+        "flipped left: 270 - 4 - 60"
+    );
+    ui.world_mut().get_mut::<HtmlAnchor>(overlay).unwrap().flip = false;
+    assert_eq!(
+        rects(&mut ui).1.min,
+        Vec2::new(260.0, 120.0),
+        "clamped to 320 - 60"
+    );
 
     ui.world_mut().entity_mut(root).despawn();
     ui.update(2);
@@ -2392,6 +2422,86 @@ fn anchored_overlay_follows_clamps_and_despawns() {
         ui.world_mut().get_entity(overlay).is_err(),
         "despawned with its element"
     );
+}
+
+/// `HtmlAnchor` places in the same frame (ADR 0037's follow-up, as Bevy's
+/// `Popover` does): it runs after layout and moves the overlay and its
+/// children to this frame's rect, so one update after a spawn — and after
+/// the element moves — the overlay is already beside the element, not a
+/// frame behind.
+#[test]
+fn anchored_overlay_is_placed_in_the_same_frame() {
+    let mut ui = TestUi::with_layout(
+        "anchor-same-frame",
+        &[
+            ("page.html", r#"<div id="a"></div>"#),
+            ("style.css", "html { flex-direction: column; padding: 20px } #a { width: 100px; height: 30px; margin-top: 100px }"),
+            ("moved.css", "html { flex-direction: column; padding: 20px } #a { width: 100px; height: 30px; margin-top: 40px; margin-left: 60px }"),
+        ],
+        UVec2::new(320, 240),
+    )
+    .stylesheet("style.css")
+    .spawn("page.html", TemplateContext::new(), Node::default());
+    ui.settle();
+    let root = ui.root();
+    let world = ui.world_mut();
+    let a = element_by_id(world, root, "a");
+    let overlay = world
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Px(60.0),
+                height: Val::Px(20.0),
+                ..default()
+            },
+            HtmlAnchor::new(a, AnchorPlacement::Below).with_gap(4.0),
+        ))
+        .id();
+    let child = world
+        .spawn((
+            Node {
+                width: Val::Px(10.0),
+                height: Val::Px(10.0),
+                ..default()
+            },
+            ChildOf(overlay),
+        ))
+        .id();
+    ui.update(1);
+    let world = ui.world_mut();
+    assert_eq!(node_rect(world, a).unwrap().min, Vec2::new(20.0, 120.0));
+    assert_eq!(
+        node_rect(world, overlay).unwrap().min,
+        Vec2::new(20.0, 154.0),
+        "placed on the first frame"
+    );
+    assert_eq!(
+        node_rect(world, child).unwrap().min,
+        Vec2::new(20.0, 154.0),
+        "its children move with it"
+    );
+
+    // The element moves (a restyle keeps its entity); the frame that lays
+    // it out at the new place also places the overlay there.
+    let moved = ui.load::<Stylesheet>("moved.css");
+    ui.world_mut().resource_mut::<DefaultStylesheet>().0 = Some(moved);
+    let mut frames = 0;
+    loop {
+        ui.update(1);
+        frames += 1;
+        let world = ui.world_mut();
+        let element = node_rect(world, a).unwrap();
+        if element.min != Vec2::new(20.0, 120.0) {
+            assert_eq!(element.min, Vec2::new(80.0, 60.0));
+            assert_eq!(
+                node_rect(world, overlay).unwrap().min,
+                Vec2::new(80.0, 94.0),
+                "follows in the same frame"
+            );
+            break;
+        }
+        assert!(frames < 20, "the restyle never landed");
+    }
 }
 
 /// An anchored overlay whose element has no camera (no viewport to clamp
@@ -6124,7 +6234,11 @@ fn anchored_overlay_above_left_clamp_to_the_viewport() {
                 height: Val::Px(20.0),
                 ..default()
             },
-            HtmlAnchor::new(a, AnchorPlacement::Above).with_gap(4.0),
+            // Flipping off: this is the clamp's test (with it on, an
+            // overlay that doesn't fit above flips below instead).
+            HtmlAnchor::new(a, AnchorPlacement::Above)
+                .with_gap(4.0)
+                .with_flip(false),
         ))
         .id();
     let placed = |ui: &mut TestUi| {

@@ -15,7 +15,10 @@
 //! - `args`: `data-tooltip-args` parsed as JSON (an object; `{}` when absent
 //!   or invalid),
 //! - `placement`: `data-tooltip-placement` — `right` (default), `left`,
-//!   `above` or `below`; it also picks the side.
+//!   `above` or `below`; it also picks the side,
+//! - `side`: the side the tooltip is on — `placement`, or the opposite one
+//!   when it didn't fit there and flipped ([`AnchoredSide`]); style an
+//!   arrow by it.
 //!
 //! ```html
 //! <html class="tooltip"><p data-l10n-id="{{ key }}" data-l10n-args='{{ args | json }}'>{{ key }}</p></html>
@@ -32,7 +35,7 @@ use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use serde_json::Value;
 
-use crate::anchor::{AnchorPlacement, HtmlAnchor};
+use crate::anchor::{AnchorPlacement, AnchoredSide, HtmlAnchor};
 use crate::html::{HtmlElement, HtmlUi, TemplateContext};
 use crate::template::HtmlTemplate;
 
@@ -69,17 +72,28 @@ fn tooltip_of(element: &HtmlElement) -> Option<(TemplateContext, AnchorPlacement
         .and_then(|json| crate::template::parse_attribute_json(json).ok())
         .filter(Value::is_object)
         .unwrap_or_else(|| Value::Object(Default::default()));
-    let (placement, name) = match element.data("tooltip-placement") {
-        Some("left") => (AnchorPlacement::Left, "left"),
-        Some("above") => (AnchorPlacement::Above, "above"),
-        Some("below") => (AnchorPlacement::Below, "below"),
-        _ => (AnchorPlacement::Right, "right"),
+    let placement = match element.data("tooltip-placement") {
+        Some("left") => AnchorPlacement::Left,
+        Some("above") => AnchorPlacement::Above,
+        Some("below") => AnchorPlacement::Below,
+        _ => AnchorPlacement::Right,
     };
     let context = TemplateContext::new()
         .with("key", key)
         .with("args", &args)
-        .with("placement", name);
+        .with("placement", side_name(placement))
+        .with("side", side_name(placement));
     Some((context, placement))
+}
+
+/// The template name of a side.
+fn side_name(side: AnchorPlacement) -> &'static str {
+    match side {
+        AnchorPlacement::Right => "right",
+        AnchorPlacement::Left => "left",
+        AnchorPlacement::Above => "above",
+        AnchorPlacement::Below => "below",
+    }
 }
 
 /// Shows a tooltip for every element with `data-tooltip` under a pointer
@@ -93,7 +107,13 @@ pub(crate) fn show_tooltips(
     elements: Query<&HtmlElement>,
     nodes: Query<&ComputedNode>,
     parents: Query<&ChildOf>,
-    mut tooltips: Query<(Entity, &HtmlTooltip, &mut TemplateContext, &mut HtmlAnchor)>,
+    mut tooltips: Query<(
+        Entity,
+        &HtmlTooltip,
+        &mut TemplateContext,
+        &mut HtmlAnchor,
+        Option<&AnchoredSide>,
+    )>,
     mut commands: Commands,
 ) {
     let (Some(config), Some(hover_map)) = (config, hover_map) else {
@@ -121,10 +141,14 @@ pub(crate) fn show_tooltips(
             }
         }
     }
-    for (tooltip, &HtmlTooltip { element }, mut context, mut anchor) in &mut tooltips {
+    for (tooltip, &HtmlTooltip { element }, mut context, mut anchor, side) in &mut tooltips {
         match wanted.remove(&element) {
             // Still wanted: refresh (an identical render changes nothing).
-            Some((new_context, placement, anchor_target)) => {
+            Some((mut new_context, placement, anchor_target)) => {
+                // Where it is, once placed (a flip shows the next frame).
+                if let Some(side) = side.filter(|_| anchor.placement == placement) {
+                    new_context.insert("side", side_name(side.0));
+                }
                 if **context != *new_context {
                     *context = new_context;
                 }

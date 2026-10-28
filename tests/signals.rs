@@ -201,6 +201,66 @@ fn signals_route_to_registered_systems() {
     assert!(take(&mut ui).is_empty(), "nothing re-delivered");
 }
 
+/// A tooltip that doesn't fit on its `data-tooltip-placement` side flips
+/// to the opposite one, and its template learns where it ended up: `side`
+/// is `below` for an `above` tooltip on an element at the top edge, while
+/// `placement` keeps what the markup asked for.
+#[test]
+fn a_tooltip_that_does_not_fit_flips_and_reports_its_side() {
+    let page =
+        r#"<div id="top" data-tooltip="tip" data-tooltip-placement="above"><p>Top</p></div>"#;
+    let mut ui = TestUi::with_pointer(
+        "tooltip-flip",
+        &[
+            ("page.html", page),
+            (
+                "tooltip.html",
+                r#"<html style="position: absolute; width: 80px; height: 20px"><p>{{ side }}</p></html>"#,
+            ),
+        ],
+        VIEWPORT,
+    )
+    .spawn(
+        "page.html",
+        TemplateContext::new(),
+        Node {
+            flex_direction: FlexDirection::Column,
+            ..default()
+        },
+    );
+    let template = ui.load::<HtmlTemplate>("tooltip.html");
+    ui.world_mut().insert_resource(HtmlTooltips::new(template));
+    ui.settle();
+    ui.update(1);
+    let root = ui.root();
+    let world = ui.world_mut();
+    let element = element_by_id(world, root, "top");
+    let element_rect = node_rect(world, element).unwrap();
+    assert_eq!(element_rect.min.y, 0.0, "flush with the top edge");
+    let (_, at) = center(world, root, "top");
+    ui.move_pointer(at).update(4);
+    let world = ui.world_mut();
+    let mut query = world.query::<(Entity, &HtmlTooltip, &TemplateContext, &AnchoredSide)>();
+    let (tooltip, _, context, side) = query.single(world).expect("one tooltip");
+    let word = |key: &str| {
+        context
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_owned()
+    };
+    assert_eq!(side.0, AnchorPlacement::Below);
+    assert_eq!(
+        (word("placement"), word("side")),
+        ("above".to_owned(), "below".to_owned())
+    );
+    let placed = node_rect(world, tooltip).unwrap();
+    assert!(
+        placed.min.y >= element_rect.max.y,
+        "below the element: {placed:?} vs {element_rect:?}"
+    );
+}
+
 /// `data-tooltip` shows an `HtmlTooltips` template beside the hovered
 /// element: the nearest element with the attribute wins, `key`/`args`/
 /// `placement` reach the template, an update refreshes the open tooltip in

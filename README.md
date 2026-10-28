@@ -180,7 +180,8 @@ bevy_markup implements a useful subset of the web, not all of it:
   `data-*` attributes whenever it's built — attach materials, images or
   markers without looking elements up by id.
 - **Anchored overlays:** `HtmlAnchor` keeps a tooltip or popover beside an
-  element — following it, kept on screen, gone when the element goes — and
+  element — following it in the same frame, flipping to the other side
+  when it doesn't fit, kept on screen, gone when the element goes — and
   `HtmlWorldAnchor` keeps one over a 3D entity (nameplates, markers), with
   distance fade.
 - **Template composition:** `{% extends %}`, `{% include %}` and Tera 2
