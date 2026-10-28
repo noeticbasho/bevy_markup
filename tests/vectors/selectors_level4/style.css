@@ -1,0 +1,24 @@
+html { color: #ffffff }
+/* :is() takes its most specific argument; :where() counts nothing. */
+:is(.a, #nothing) { color: #ff0000 }
+p.a { color: #00ff00 }
+:where(.b) { color: #0000ff }
+p { padding: 1px }
+.list p:where(.b) { padding: 2px }
+/* :not() with a list and with a complex argument. */
+p:not(.a, .b, .c) { background-color: #202020 }
+p:not(.list > p) { padding: 4px }
+/* The positional forms counted from the end, and the only-* ones. */
+.list p:nth-last-child(2) { color: #ffff00 }
+.list p:nth-last-of-type(2) { background-color: #303030 }
+.solo p:only-child { color: #ff00ff }
+section p:only-of-type { color: #00ffff }
+section p:only-child { color: #123456 }
+/* Attribute operators on data-* attributes. */
+[data-kind^="alpha"] { background-color: #404040 }
+[data-kind$="beta"] { color: #808080 }
+[data-tags~="y"] { background-color: #505050 }
+[data-lang|="en"] { color: #a0a0a0 }
+[data-kind*="HA-B" i] { padding: 5px }
+/* :is() with a combinator inside, in an ancestor position. */
+:is(#deep .x) > p { color: #c0c0c0 }

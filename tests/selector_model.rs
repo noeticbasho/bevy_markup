@@ -88,8 +88,16 @@ struct Compound {
     hover: bool,
     not_hover: bool,
     not_class: Option<&'static str>,
-    /// `first-child`, `last-child`, `nth-child(2)` or `first-of-type`.
+    /// `first-child`, `last-child`, `nth-child(2)`, `first-of-type`, and
+    /// ADR 0034's `last-of-type`, `only-child`, `only-of-type`,
+    /// `nth-last-child(2)`, `nth-last-of-type(1)`.
     structural: Option<&'static str>,
+    /// ADR 0034: `:is(.a, .b)`, `:where(p)`, `:not(.a, [data-m])`, and the
+    /// `^=`/`$=` attribute operators.
+    is_ab: bool,
+    where_p: bool,
+    not_list: bool,
+    attr_op: Option<&'static str>,
 }
 
 impl Compound {
@@ -113,7 +121,16 @@ impl Compound {
             Some("last-child"),
             Some("nth-child(2)"),
             Some("first-of-type"),
-        ][rng.below(6)];
+            Some("last-of-type"),
+            Some("only-child"),
+            Some("only-of-type"),
+            Some("nth-last-child(2)"),
+            Some("nth-last-of-type(1)"),
+        ][rng.below(11)];
+        compound.is_ab = rng.below(5) == 0;
+        compound.where_p = rng.below(6) == 0;
+        compound.not_list = rng.below(5) == 0;
+        compound.attr_op = [None, None, None, Some("^=\"da\""), Some("$=\"ht\"")][rng.below(5)];
         compound
     }
 
@@ -139,12 +156,24 @@ impl Compound {
         if let Some(structural) = self.structural {
             out += &format!(":{structural}");
         }
+        if self.is_ab {
+            out += ":is(.a, .b)";
+        }
+        if self.where_p {
+            out += ":where(p)";
+        }
+        if self.not_list {
+            out += ":not(.a, [data-m])";
+        }
+        if let Some(op) = self.attr_op {
+            out += &format!("[data-m{op}]");
+        }
         if out.is_empty() { "*".to_owned() } else { out }
     }
 
     /// `index`/`count`: the 1-based position among the parent's elements;
-    /// `type_index`: among the same tag.
-    fn matches(&self, el: &El, (index, count, type_index): (usize, usize, usize)) -> bool {
+    /// `type_index`/`type_count`: among the same tag.
+    fn matches(&self, el: &El, (index, count, type_index, type_count): Pos) -> bool {
         self.tag.is_none_or(|tag| tag == el.tag)
             && self.class.is_none_or(|class| el.classes.contains(&class))
             && match self.attr {
@@ -161,7 +190,19 @@ impl Compound {
                 Some("first-child") => index == 1,
                 Some("last-child") => index == count,
                 Some("first-of-type") => type_index == 1,
+                Some("last-of-type") | Some("nth-last-of-type(1)") => type_index == type_count,
+                Some("only-child") => count == 1,
+                Some("only-of-type") => type_count == 1,
+                Some("nth-last-child(2)") => count + 1 - index == 2,
                 Some(_) => index == 2,
+            }
+            && (!self.is_ab || el.classes.contains(&"a") || el.classes.contains(&"b"))
+            && (!self.where_p || el.tag == "p")
+            && (!self.not_list || !(el.classes.contains(&"a") || el.data_m.is_some()))
+            && match self.attr_op {
+                None => true,
+                Some(op) if op.starts_with('^') => el.data_m.is_some_and(|m| m.starts_with("da")),
+                Some(_) => el.data_m.is_some_and(|m| m.ends_with("ht")),
             }
     }
 }
@@ -197,22 +238,21 @@ impl Selector {
     }
 }
 
-/// (index, count, type index) of each of `children`.
-fn positions(children: &[El]) -> Vec<(usize, usize, usize)> {
+/// (index, count, type index, type count) of each of `children`.
+fn positions(children: &[El]) -> Vec<Pos> {
     children
         .iter()
         .enumerate()
         .map(|(position, child)| {
-            let type_index = children[..=position]
-                .iter()
-                .filter(|other| other.tag == child.tag)
-                .count();
-            (position + 1, children.len(), type_index)
+            let same = |other: &&El| other.tag == child.tag;
+            let type_index = children[..=position].iter().filter(same).count();
+            let type_count = children.iter().filter(same).count();
+            (position + 1, children.len(), type_index, type_count)
         })
         .collect()
 }
 
-type Pos = (usize, usize, usize);
+type Pos = (usize, usize, usize, usize);
 
 /// The model's answer per element, in document order (pre-order).
 fn expected(root: &El, selector: &Selector) -> Vec<(&'static str, bool)> {
@@ -258,7 +298,7 @@ fn expected(root: &El, selector: &Selector) -> Vec<(&'static str, bool)> {
         ancestors.pop();
     }
     // The root `div` is the document's only top-level element.
-    walk(root, (1, 1, 1), &mut Vec::new(), &[], selector, &mut out);
+    walk(root, (1, 1, 1, 1), &mut Vec::new(), &[], selector, &mut out);
     out
 }
 

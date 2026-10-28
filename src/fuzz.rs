@@ -222,6 +222,7 @@ pub fn cascade(css: &str) -> Result<String, String> {
             tag_count: 2,
             ..Default::default()
         },
+        ..Default::default()
     };
     let states = [
         crate::cascade::ElementState::default(),

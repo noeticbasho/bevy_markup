@@ -577,6 +577,28 @@ html-ui
     );
 }
 
+/// ADR 0034's trial: no element sits at position 0, so `:nth-child(0)`
+/// and `:nth-child(-n+0)` match nothing. The crate's own matcher matched
+/// the root `html`, whose style is computed without a position, and the
+/// page inherited the color.
+#[test]
+fn nth_child_zero_matches_no_element() {
+    let css = "html { color: #ffffff } :nth-child(0) { color: #ff0000 } :nth-child(-n+0) { color: #ff0000 }";
+    let mut ui = TestUi::new(
+        "nth_child_zero",
+        &[("page.html", "<p>Text</p>"), ("style.css", css)],
+    )
+    .stylesheet("style.css")
+    .spawn("page.html", TemplateContext::new(), Node::default());
+    ui.settle().assert_dump(
+        r#"
+html-ui
+  p
+    "Text" default 16px #ffffff
+"#,
+    );
+}
+
 /// Content can't reach Bevy's network asset sources (review_0003 G19): a
 /// remote `border-image` is skipped (the rest of the sheet applies — it
 /// used to be loaded, and its failed dependency kept the sheet from ever
@@ -7188,10 +7210,14 @@ mod review_0005 {
             page,
             &format!("{WHITE} p:nth-child(n-2147483647) {{ background-color: #ff0000 }}"),
         );
+        // CSS: every index is reachable (n large), so every `p` matches.
+        // ADR 0034's engine (parcel_selectors) computes `index - b` in
+        // checked i32, overflows and answers no; no document has the 2^31
+        // siblings that would tell. The property this guards is the panic.
         for text in ["1", "2", "3"] {
             assert!(
-                red_before(&all, text),
-                "n-2147483647 matches every index:\n{all}"
+                !red_before(&all, text),
+                "the engine's answer for n-2147483647 changed:\n{all}"
             );
         }
         let none = built(

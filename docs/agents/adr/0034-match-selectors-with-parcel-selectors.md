@@ -7,7 +7,7 @@
 | `Date` | 2026-10-28 18:35 +0400 |
 | `Author` | Claude Opus 5.5 (Anthropic), via Claude Code |
 | `Commit` | `cfab1ec Fix bug 179 and 180` |
-| `Status` | Proposed |
+| `Status` | Accepted (2026-10-28, after the trial; decision 2 as amended by the trial: no arena) |
 | `Related` | ADR 0006, 0028, 0029, 0030; bug_0002, bug_0180; review_0005 (I03, I05–I08, I13); UPSTREAM.md U14, U15 |
 
 ## Context
@@ -239,3 +239,25 @@ string round-trip and the hand-written parser and matcher.
 **Unchanged.** The bug_0179 nesting pre-scan (UPSTREAM.md U14, U15) is
 still needed: lightningcss parses before any of this runs. Unsupported
 selectors still skip their rule, and the public API does not change.
+
+**Trial (2026-10-28).** Run on `spike/adr-0034-parcel-selectors`; full
+results in `docs/agents/performance/adr-0034-trial.md`.
+
+- Correctness: all tests and Chrome oracle vectors pass; the selector
+  model property passes 5000 cases; a differential run over 28 237 css
+  corpus inputs found one difference, an old-matcher bug
+  (`:nth-child(0)` matched the root). A new `selectors_level4` vector
+  agrees with Chrome and fails on `main`. 300 s of css fuzzing: no crash.
+- Performance: the new `selectors` benchmark is 8.4 % faster at 120
+  elements and 1.6 % at 600; nothing regressed beyond noise.
+- Decision 2 changed: no arena. `Ancestor` carries a `SiblingLink` into
+  its parent's `SiblingList`, and stand-in siblings from `Position` cover
+  nodes without a list.
+- Open question 1 answered: a pseudo-class answers
+  `!context.in_negation()` in reactivity mode, exact while no `:not()`
+  nests in another (rejected by the allowlist). Question 2: no key
+  change was needed for the forms turned on. Question 3: no regression.
+- Found: parcel's checked `i32` `An+B` arithmetic answers no for
+  `:nth-child(n-2147483647)` (CSS: every element).
+- Not done: sibling combinators away from the subject (needs restyle
+  invalidation beyond ADR 0029), non-`data-*` attributes, `:root`.

@@ -19,9 +19,9 @@ use lightningcss::values::easing::{EasingFunction, StepPosition};
 use crate::cascade::{
     self, Ancestor, CalcBasis, CalcExpr, CalcProp, CssPosition, DecorationDecl, ElementState,
     GridNames, HtmlStyles, InlineStyle, LayoutDecl, LetterSpacingSpec, LineHeightSpec,
-    ListStyleSpec, OutlineDecl, OverflowAxisDecl, Position, Pseudo, SelectorReads, SiblingList,
-    SliceValue, TextAlignSpec, TextTransformSpec, TransitionDecl, TransitionProp, WhiteSpaceSpec,
-    node_field_mut,
+    ListStyleSpec, OutlineDecl, OverflowAxisDecl, Position, Pseudo, SelectorReads, SiblingLink,
+    SiblingList, SliceValue, TextAlignSpec, TextTransformSpec, TransitionDecl, TransitionProp,
+    WhiteSpaceSpec, node_field_mut,
 };
 use crate::custom_elements::{self, ConnectedAs, CustomElement, ElementConnected};
 use crate::focus::{self, Focusable};
@@ -5725,6 +5725,7 @@ fn ancestor_from(element: HtmlElement, pseudo: Pseudo, position: Position) -> An
         pseudo,
         dataset: (!element.dataset.is_empty()).then(|| Rc::new(element.dataset)),
         position,
+        link: SiblingLink::default(),
     }
 }
 
@@ -6148,8 +6149,19 @@ fn collect_node(
                 ctx.inline_vars.borrow_mut().insert(name);
             }
         }
-        // This element becomes the nearest ancestor for everything inside it.
-        let own = ancestor_from(element.clone(), state, position);
+        // ADR 0028: the parent's siblings list, up to this element (the
+        // sibling combinators' input; the parent's task state carries it)
+        // — a view, not a copy (review_0005 I03).
+        let previous_siblings = siblings
+            .as_ref()
+            .map(|list| list.preceding(position.tag_index.saturating_sub(1)));
+        // This element becomes the nearest ancestor for everything inside
+        // it, with its place in the sibling list (ADR 0034: the selector
+        // engine counts an ancestor's siblings for its positions).
+        let own = Ancestor {
+            link: SiblingLink(previous_siblings.clone()),
+            ..ancestor_from(element.clone(), state, position)
+        };
         // The child chain is shared with every child task (an Rc clone is
         // O(1); a per-child Vec copy made attribute-heavy pages cost
         // O(children x depth) memory, review_0003 G05). `own`'s fields
@@ -6163,12 +6175,7 @@ fn collect_node(
         // The `<html>` element is what the root style was computed from:
         // re-applying it would square its `opacity`.
         let element_state = ElementState {
-            // ADR 0028: the parent's siblings list, up to this element
-            // (the sibling combinators' input; the parent's task state
-            // carries it) — a view, not a copy (review_0005 I03).
-            previous_siblings: siblings
-                .as_ref()
-                .map(|list| list.preceding(position.tag_index.saturating_sub(1))),
+            previous_siblings,
             ..ElementState::at(position)
         };
         let style = if element.tag == "html" {
@@ -6883,10 +6890,14 @@ fn run_walk<'a>(
                     let owned = element.clone();
                     let mut child_chain = Vec::with_capacity(chain.len() + 1);
                     child_chain.push(match owned {
-                        Some(owned) => ancestor_from(owned, state, element_state.position()),
+                        Some(owned) => Ancestor {
+                            link: SiblingLink(element_state.previous_siblings.clone()),
+                            ..ancestor_from(owned, state, element_state.position())
+                        },
                         None => Ancestor {
                             pseudo: state,
                             position: element_state.position(),
+                            link: SiblingLink(element_state.previous_siblings.clone()),
                             ..Ancestor::default()
                         },
                     });

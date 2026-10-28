@@ -3,6 +3,8 @@
 //! combinators against the element's ancestor chain, matched against
 //! tag, id, classes and pseudo-state.
 
+mod selector;
+
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
@@ -52,6 +54,7 @@ use lightningcss::values::image::Image;
 use lightningcss::values::length::{LengthPercentage, LengthPercentageOrAuto, LengthValue};
 use lightningcss::values::percentage::NumberOrPercentage;
 use lightningcss::values::size::Size2D;
+use selector::Selector;
 
 use crate::fonts::{FamilyRef, GenericFamily};
 use crate::html::HtmlElement;
@@ -1000,195 +1003,6 @@ impl std::ops::Deref for Siblings {
     }
 }
 
-/// Three-valued match (ADR 0029's reactivity wildcards pseudo tests as
-/// "either way"; `:not` must keep that unknown, not invert it —
-/// review_0005 I08). Ordered: `No < Maybe < Yes`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Tri {
-    No,
-    Maybe,
-    Yes,
-}
-
-impl Tri {
-    fn of(value: bool) -> Self {
-        if value { Self::Yes } else { Self::No }
-    }
-
-    fn not(self) -> Self {
-        match self {
-            Self::No => Self::Yes,
-            Self::Maybe => Self::Maybe,
-            Self::Yes => Self::No,
-        }
-    }
-}
-
-/// What a compound reads from the element it tests: the subject, an
-/// ancestor, or a sibling — the same test in every position
-/// (review_0005 I07).
-struct Subject<'a> {
-    tag: &'a str,
-    id: Option<&'a str>,
-    classes: &'a [String],
-    dataset: Option<&'a std::collections::BTreeMap<String, String>>,
-    pseudo: Pseudo,
-    position: Position,
-}
-
-impl<'a> Subject<'a> {
-    fn element(element: &'a HtmlElement, pseudo: Pseudo, state: &ElementState) -> Self {
-        Self {
-            tag: &element.tag,
-            id: element.id.as_deref(),
-            classes: &element.classes,
-            dataset: Some(&element.dataset),
-            pseudo,
-            position: state.position(),
-        }
-    }
-
-    fn ancestor(ancestor: &'a Ancestor) -> Self {
-        Self {
-            tag: &ancestor.tag,
-            id: ancestor.id.as_deref(),
-            classes: &ancestor.classes,
-            dataset: ancestor.dataset.as_deref(),
-            pseudo: ancestor.pseudo,
-            position: ancestor.position,
-        }
-    }
-}
-
-/// An `An+B` pattern (`:nth-child(2)`, `(2n+1)`, `(-n+3)`, `odd`, `even`):
-/// the n-th element matches when `a * n + b == index` for some `n >= 0`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct AnB {
-    pub a: i32,
-    pub b: i32,
-}
-
-impl AnB {
-    fn parse(text: &str) -> Option<Self> {
-        match text.trim() {
-            "odd" => return Some(Self { a: 2, b: 1 }),
-            "even" => return Some(Self { a: 2, b: 0 }),
-            text => text,
-        };
-        let text = text.trim();
-        let (a, rest) = match text.split_once('n') {
-            Some((head, rest)) => {
-                // CSS allows a leading `+` on the `n` term (`+n+3`).
-                let a = match head.trim() {
-                    "" | "+" => 1,
-                    "-" => -1,
-                    _ => head.trim().parse::<i32>().ok()?,
-                };
-                (a, rest)
-            }
-            None => {
-                let b = text.parse::<i32>().ok()?;
-                return Some(Self { a: 0, b });
-            }
-        };
-        let b = match rest.trim() {
-            "" => 0,
-            rest => {
-                let (sign, number) = rest.split_at(1);
-                match (sign, number.parse::<i32>().ok()) {
-                    ("+", Some(number)) => number,
-                    ("-", Some(number)) => -number,
-                    _ => return None,
-                }
-            }
-        };
-        Some(Self { a, b })
-    }
-
-    fn matches(&self, index: usize) -> bool {
-        // Solve a*n + b == index for a non-negative n, in i64: `a` and
-        // `b` are any i32 from the stylesheet, and `index - b` overflowed
-        // i32 for `n-2147483647` (review_0005 I02).
-        let index = i64::try_from(index).unwrap_or(i64::MAX);
-        let (a, b) = (i64::from(self.a), i64::from(self.b));
-        match a {
-            0 => b == index,
-            a => {
-                let remainder = index - b;
-                remainder.rem_euclid(a) == 0 && remainder / a >= 0
-            }
-        }
-    }
-}
-
-/// An attribute selector's parts (ADR 0028): `[data-x]` or
-/// `[data-x="value"]`.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct AttributeSelector {
-    /// The dataset key (the `data-` prefix stripped).
-    pub name: String,
-    pub value: Option<String>,
-}
-
-impl AttributeSelector {
-    fn matches(&self, subject: &Subject) -> bool {
-        let value = subject
-            .dataset
-            .and_then(|dataset| dataset.get(&self.name))
-            .map(String::as_str);
-        match &self.value {
-            Some(expected) => value == Some(expected.as_str()),
-            None => value.is_some(),
-        }
-    }
-}
-
-/// A compound's structural pseudo-class (ADR 0028): evaluated against the
-/// element's [`ElementState`].
-#[derive(Clone, Debug, PartialEq)]
-enum StructuralPseudo {
-    NthChild(AnB),
-    LastChild,
-    NthOfType(AnB),
-    LastOfType,
-    Not(Box<Compound>),
-    FocusWithin,
-    Empty,
-}
-
-impl StructuralPseudo {
-    fn test(&self, subject: &Subject, wild: bool) -> Tri {
-        let position = &subject.position;
-        Tri::of(match self {
-            Self::NthChild(anb) => anb.matches(position.tag_index),
-            Self::LastChild => position.tag_index == position.tag_count,
-            Self::NthOfType(anb) => anb.matches(position.type_index),
-            Self::LastOfType => position.type_index == position.type_count,
-            // `:not`'s argument is a compound, tested whole against the
-            // same element — its pseudo-classes included (review_0005
-            // I08: they were dropped, so `:not(:hover)` never matched).
-            // A wildcarded pseudo stays unknown through the negation.
-            Self::Not(compound) => return compound.test(subject, wild).not(),
-            Self::FocusWithin => position.focus_within,
-            Self::Empty => position.empty,
-        })
-    }
-
-    /// Specificity (CSS): a pseudo-class counts as a class; `:not()`
-    /// counts its argument (review_0005 fix session: structural parts
-    /// counted nothing, so `p:first-child` tied with `p`).
-    fn specificity(&self) -> (u32, u32, u32) {
-        match self {
-            Self::Not(compound) => compound.specificity(),
-            _ => (0, 1, 0),
-        }
-    }
-
-    fn has_pseudo(&self) -> bool {
-        matches!(self, Self::Not(compound) if compound.has_pseudo())
-    }
-}
-
 /// Computed `text-transform` (ADR 0028), inherited; applied to the run
 /// text at collection.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1449,6 +1263,22 @@ pub(crate) struct Ancestor {
     /// The structural position (structural pseudo-classes in an ancestor
     /// or sibling compound).
     pub position: Position,
+    /// This ancestor's place in its parent's sibling list (ADR 0034: the
+    /// selector engine walks an ancestor's siblings for its positional
+    /// pseudo-classes). Not part of its identity.
+    pub link: SiblingLink,
+}
+
+/// A view of the parent's sibling list, up to the element (its index),
+/// carried by an [`Ancestor`]. Compares equal always: identity is the
+/// ancestor's own fields.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct SiblingLink(pub Option<Siblings>);
+
+impl PartialEq for SiblingLink {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
 }
 
 impl Ancestor {
@@ -1462,631 +1292,6 @@ impl Ancestor {
         self.dataset.as_deref().hash(&mut hasher);
         self.position.hash(&mut hasher);
         hasher.finish()
-    }
-}
-
-/// How a compound selector relates to the next one to its right.
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Combinator {
-    /// Whitespace: any ancestor.
-    Descendant,
-    /// `>`: the direct parent.
-    Child,
-    /// `+`: the immediately preceding element sibling. Supported only
-    /// adjacent to the subject (a deeper one never matches: the sibling's
-    /// own siblings aren't threaded).
-    AdjacentSibling,
-    /// `~`: any preceding element sibling. Same depth limit.
-    GeneralSibling,
-}
-
-/// Where the compound at the start of `text` ends: the first combinator
-/// character (whitespace, `>`, `+`, `~`) outside parentheses, brackets
-/// and quotes. A plain scan split `:nth-child(-n+3)` at its `+` and
-/// `[data-x="a b"]` at its space, dropping the rule (lightningcss
-/// serializes `2n+1` as `odd`, but `-n+3` and `3n+1` as written —
-/// review_0005 fix session).
-fn compound_end(text: &str) -> usize {
-    let mut depth = 0usize;
-    let mut quote: Option<char> = None;
-    let mut escaped = false;
-    for (at, c) in text.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        match (quote, c) {
-            (_, '\\') => escaped = true,
-            (Some(open), c) if c == open => quote = None,
-            (Some(_), _) => {}
-            (None, '"' | '\'') => quote = Some(c),
-            (None, '(' | '[') => depth += 1,
-            (None, ')' | ']') => depth = depth.saturating_sub(1),
-            (None, c) if depth == 0 && (c.is_whitespace() || matches!(c, '>' | '+' | '~')) => {
-                return at;
-            }
-            _ => {}
-        }
-    }
-    text.len()
-}
-
-/// The `]` closing the attribute selector `text` starts with (`[`),
-/// outside quotes — a `]` inside a quoted value (`[data-x="a] b"]`) is
-/// part of the value.
-fn attribute_end(text: &str) -> Option<usize> {
-    let mut quote: Option<char> = None;
-    let mut escaped = false;
-    for (at, c) in text.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        match (quote, c) {
-            (_, '\\') => escaped = true,
-            (Some(open), c) if c == open => quote = None,
-            (Some(_), _) => {}
-            (None, '"' | '\'') => quote = Some(c),
-            (None, ']') => return Some(at),
-            _ => {}
-        }
-    }
-    None
-}
-
-/// A quoted CSS string's escapes resolved: `\"` → `"`, `\\` → `\`, and
-/// hex escapes (`\41 ` → `A`; up to six digits plus one optional
-/// whitespace). lightningcss serializes `[data-x='a"b']` as
-/// `[data-x="a\"b"]`, which matched nothing while the value kept its
-/// backslash.
-fn css_unescape(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    let mut chars = value.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '\\' {
-            out.push(c);
-            continue;
-        }
-        let mut hex = String::new();
-        while hex.len() < 6 && chars.peek().is_some_and(char::is_ascii_hexdigit) {
-            hex.push(chars.next().expect("peeked"));
-        }
-        if hex.is_empty() {
-            if let Some(next) = chars.next() {
-                out.push(next);
-            }
-            continue;
-        }
-        if chars.peek().is_some_and(|c| c.is_ascii_whitespace()) {
-            chars.next();
-        }
-        let code = u32::from_str_radix(&hex, 16).unwrap_or(0xFFFD);
-        out.push(
-            char::from_u32(code)
-                .filter(|c| *c != '\0')
-                .unwrap_or('\u{FFFD}'),
-        );
-    }
-    out
-}
-
-/// A selector: compound selectors joined by combinators (descendant,
-/// child, and the sibling combinators next to the subject). The rightmost
-/// compound is the subject.
-#[derive(Clone, Debug)]
-struct Selector {
-    /// Left to right; the last one matches the element itself.
-    compounds: Vec<Compound>,
-    /// `compounds.len() - 1` combinators; `combinators[i]` joins
-    /// `compounds[i]` to `compounds[i + 1]`.
-    combinators: Vec<Combinator>,
-}
-
-impl Selector {
-    /// `None` for anything unsupported (attributes, other pseudo-classes,
-    /// other combinators, non-ASCII idents): the whole rule is skipped.
-    fn parse(selector: &str) -> Option<Self> {
-        let mut compounds = Vec::new();
-        let mut combinators = Vec::new();
-        let mut pending = Combinator::Descendant;
-        let mut rest = selector.trim();
-        while !rest.is_empty() {
-            let end = compound_end(rest);
-            compounds.push(Compound::parse(&rest[..end])?);
-            if !combinators.is_empty() || compounds.len() > 1 {
-                combinators.push(pending);
-            }
-            rest = &rest[end..];
-            let whitespace = rest.len() - rest.trim_start().len();
-            rest = &rest[whitespace..];
-            if rest.starts_with('>') {
-                pending = Combinator::Child;
-                rest = &rest[1..];
-                rest = &rest[rest.len() - rest.trim_start().len()..];
-            } else if rest.starts_with('+') {
-                pending = Combinator::AdjacentSibling;
-                rest = &rest[1..];
-                rest = &rest[rest.len() - rest.trim_start().len()..];
-            } else if rest.starts_with('~') {
-                pending = Combinator::GeneralSibling;
-                rest = &rest[1..];
-                rest = &rest[rest.len() - rest.trim_start().len()..];
-            } else if !rest.is_empty() {
-                pending = Combinator::Descendant;
-            }
-        }
-        if compounds.is_empty() {
-            return None;
-        }
-        Some(Self {
-            compounds,
-            combinators,
-        })
-    }
-
-    /// CSS specificity: (ids, classes, types), summed over the compounds.
-    fn specificity(&self) -> (u32, u32, u32) {
-        self.compounds.iter().fold((0, 0, 0), |mut sum, compound| {
-            let (ids, classes, tags) = compound.specificity();
-            sum.0 += ids;
-            sum.1 += classes;
-            sum.2 += tags;
-            sum
-        })
-    }
-
-    /// `element` (with its `pseudo` and structural state, ADR 0028)
-    /// against the subject compound, then the rest against `ancestors`
-    /// (nearest first).
-    fn matches(
-        &self,
-        element: &HtmlElement,
-        pseudo: Pseudo,
-        ancestors: &[Ancestor],
-        state: &ElementState,
-    ) -> bool {
-        let Some(last) = self.compounds.last() else {
-            return false;
-        };
-        if !last.matches(element, pseudo, state) {
-            return false;
-        }
-        let Some(last_combinator) = self.combinators.last().copied() else {
-            return true;
-        };
-        match last_combinator {
-            // ADR 0028: the sibling combinators, supported only adjacent
-            // to the subject: the compound before the combinator matches
-            // a PRECEDING element sibling's parts; the rest continues
-            // against the element's own ancestors (the shared-parent
-            // shapes: `a b + c` — a is in c's chain too).
-            Combinator::AdjacentSibling | Combinator::GeneralSibling => {
-                let Some(siblings) = state.previous_siblings.as_ref() else {
-                    return false;
-                };
-                let parts = &self.compounds[self.compounds.len() - 2];
-                // DOM order (farthest first): the immediately preceding
-                // sibling is the LAST entry.
-                let matched_sibling = match last_combinator {
-                    Combinator::AdjacentSibling => siblings
-                        .last()
-                        .filter(|sibling| parts.matches_ancestor(sibling, false)),
-                    _ => siblings
-                        .iter()
-                        .find(|sibling| parts.matches_ancestor(sibling, false)),
-                };
-                matched_sibling.is_some()
-                    && (self.compounds.len() == 2
-                        || self.matches_rest(self.compounds.len() - 2, ancestors))
-            }
-            _ => self.matches_rest(self.compounds.len() - 1, ancestors),
-        }
-    }
-
-    /// Whether any compound in the selector tests a pseudo-class: its
-    /// match outcome depends on the interaction state.
-    fn has_pseudo(&self) -> bool {
-        self.compounds.iter().any(Compound::has_pseudo)
-    }
-
-    /// Whether the selector could match `element` if every pseudo test
-    /// went either way (ADR 0029's reactivity record): the non-pseudo
-    /// parts of every compound match the element and its ancestors.
-    fn matches_ignoring_pseudo(
-        &self,
-        element: &HtmlElement,
-        ancestors: &[Ancestor],
-        state: &ElementState,
-    ) -> bool {
-        let Some(last) = self.compounds.last() else {
-            return false;
-        };
-        if !last.could_match(element, state) {
-            return false;
-        }
-        // ADR 0028: the sibling combinator's reactivity — the sibling's
-        // pseudo wildcarded (a flip on it may change this element).
-        if self.combinators.last() == Some(&Combinator::AdjacentSibling)
-            || self.combinators.last() == Some(&Combinator::GeneralSibling)
-        {
-            let Some(siblings) = state.previous_siblings.as_ref() else {
-                return false;
-            };
-            let parts = &self.compounds[self.compounds.len() - 2];
-            let reactive = match self.combinators.last() {
-                Some(&Combinator::AdjacentSibling) => siblings
-                    .last()
-                    .is_some_and(|sibling| parts.matches_ancestor(sibling, true)),
-                _ => siblings
-                    .iter()
-                    .any(|sibling| parts.matches_ancestor(sibling, true)),
-            };
-            return reactive
-                && (self.compounds.len() == 2
-                    || self.matches_rest(self.compounds.len() - 2, ancestors));
-        }
-        self.matches_from(
-            self.compounds.len() - 1,
-            ancestors,
-            0,
-            &mut HashSet::new(),
-            true,
-        )
-    }
-
-    /// Matches `compounds[..index]` against `ancestors` (nearest first).
-    /// Memoized by (compound index, ancestor offset): a `.b .a ×n p`
-    /// selector against deep `.a` ancestors retried every combination
-    /// (hundreds of ms per element); with the failure memo it is linear.
-    fn matches_rest(&self, index: usize, ancestors: &[Ancestor]) -> bool {
-        let mut failed = HashSet::new();
-        self.matches_from(index, ancestors, 0, &mut failed, false)
-    }
-
-    /// [`matches_rest`](Self::matches_rest) from `offset` (the absolute
-    /// ancestor position), recording failed states in `failed`. With
-    /// `ignore_pseudo`, the compounds' pseudo parts match anything (ADR
-    /// 0029's reactivity record).
-    fn matches_from(
-        &self,
-        index: usize,
-        ancestors: &[Ancestor],
-        offset: usize,
-        failed: &mut HashSet<(usize, usize)>,
-        ignore_pseudo: bool,
-    ) -> bool {
-        if index == 0 {
-            return true;
-        }
-        if failed.contains(&(index, offset)) {
-            return false;
-        }
-        let combinator = self.combinators[index - 1];
-        // A sibling combinator at a non-subject position: the related
-        // element's own siblings aren't threaded — never matches.
-        if matches!(
-            combinator,
-            Combinator::AdjacentSibling | Combinator::GeneralSibling
-        ) {
-            return false;
-        }
-        let compound = &self.compounds[index - 1];
-        let matched = match combinator {
-            // A sibling combinator at a non-subject position: never
-            // matches (the related element's own siblings aren't
-            // threaded).
-            Combinator::AdjacentSibling | Combinator::GeneralSibling => false,
-            Combinator::Child => ancestors.get(offset).is_some_and(|parent| {
-                compound.matches_ancestor(parent, ignore_pseudo)
-                    && self.matches_from(index - 1, ancestors, offset + 1, failed, ignore_pseudo)
-            }),
-            Combinator::Descendant => {
-                let mut any = false;
-                for i in offset..ancestors.len() {
-                    let ancestor = &ancestors[i];
-                    if compound.matches_ancestor(ancestor, ignore_pseudo)
-                        && self.matches_from(index - 1, ancestors, i + 1, failed, ignore_pseudo)
-                    {
-                        any = true;
-                        break;
-                    }
-                }
-                any
-            }
-        };
-        if !matched {
-            failed.insert((index, offset));
-        }
-        matched
-    }
-}
-
-/// A compound selector: optional type (or `*`), then any number of `.class`
-/// and `#id` parts, e.g. `p.note`, `.a.b`, `#title`; optionally qualified
-/// by `:hover` / `:active` / `:focus` / `:focus-visible`, plus the
-/// structural pseudo-classes (ADR 0028).
-#[derive(Clone, Debug, PartialEq)]
-struct Compound {
-    /// Lowercase; `None` for `*` or no type.
-    tag: Option<String>,
-    ids: Vec<String>,
-    classes: Vec<String>,
-    pseudo: Pseudo,
-    /// The structural pseudo-classes (ADR 0028); ALL must hold.
-    structural: Vec<StructuralPseudo>,
-    /// The attribute selectors (ADR 0028): `[data-x]`, `[data-x="v"]` —
-    /// the crate's element model carries only `data-*` attributes (the
-    /// `data-` prefix stripped in the dataset), so the selector's name
-    /// loses its `data-` prefix too; a non-data attribute drops the
-    /// rule. ALL must hold.
-    attributes: Vec<AttributeSelector>,
-}
-
-impl Compound {
-    /// `None` for anything else (combinators, attributes, other
-    /// pseudo-classes).
-    fn parse(selector: &str) -> Option<Self> {
-        let is_ident = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
-        let mut rest = selector;
-        let mut tag = None;
-        if let Some(after) = rest.strip_prefix('*') {
-            rest = after;
-        } else {
-            let end = rest.find(|c| !is_ident(c)).unwrap_or(rest.len());
-            if end > 0 {
-                tag = Some(rest[..end].to_ascii_lowercase());
-                rest = &rest[end..];
-            }
-        }
-        let mut ids = Vec::new();
-        let mut classes = Vec::new();
-        let mut structural = Vec::new();
-        let mut attributes = Vec::new();
-        let mut pseudo = Pseudo::default();
-        while let Some((_, kind)) = rest.char_indices().next() {
-            // Only `.class`, `#id` and `:pseudo` parts continue the selector;
-            // anything else (combinator, attribute, or a non-ASCII ident
-            // character) is unsupported. Check before slicing: `kind.len_utf8()`
-            // may be > 1.
-            let body = match kind {
-                '.' | '#' => &rest[kind.len_utf8()..],
-                '[' => {
-                    // ADR 0028: an attribute selector — `[data-x]`,
-                    // `[data-x="v"]` (single or double quotes). The
-                    // crate's element model carries only `data-*`
-                    // attributes: a selector naming a non-data attribute
-                    // drops the rule.
-                    let close = attribute_end(rest)?;
-                    let inner = rest[1..close].trim();
-                    let (name, value) = match inner.split_once('=') {
-                        Some((name, value)) => {
-                            let value = value.trim();
-                            let value = value
-                                .strip_prefix('"')
-                                .and_then(|v| v.strip_suffix('"'))
-                                .or_else(|| {
-                                    value.strip_prefix('\'').and_then(|v| v.strip_suffix('\''))
-                                })
-                                .unwrap_or(value);
-                            (name.trim(), Some(css_unescape(value)))
-                        }
-                        None => (inner, None),
-                    };
-                    // The crate's elements carry only `data-*` attributes:
-                    // the selector must name one with its prefix (a bare
-                    // `[kind]` or a non-data attribute drops the rule).
-                    let Some(name) = name.strip_prefix("data-") else {
-                        return None;
-                    };
-                    if name.is_empty()
-                        || !name
-                            .chars()
-                            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-                    {
-                        return None;
-                    }
-                    attributes.push(AttributeSelector {
-                        name: name.to_owned(),
-                        value,
-                    });
-                    rest = &rest[close + 1..];
-                    continue;
-                }
-                ':' => {
-                    let body = &rest[1..];
-                    let end = body.find(|c| !is_ident(c)).unwrap_or(body.len());
-                    match &body[..end] {
-                        "hover" => pseudo.hover = true,
-                        "active" => pseudo.active = true,
-                        "focus" => pseudo.focus = true,
-                        "focus-visible" => pseudo.focus_visible = true,
-                        // ADR 0028: the structural pseudo-classes, with
-                        // their argument up to the first `)` (nesting a
-                        // parenthesized argument is unsupported).
-                        name @ ("nth-child" | "nth-of-type" | "not") => {
-                            // The argument must open right after the name
-                            // (bug_0180: `:not\0(…)` serializes the NUL as
-                            // a 3-byte U+FFFD, and slicing past an assumed
-                            // `(` split it).
-                            let Some(after) = body[end..].strip_prefix('(') else {
-                                return None;
-                            };
-                            let Some(close) = after.find(')') else {
-                                return None;
-                            };
-                            if after[..close].contains('(') || close == 0 {
-                                return None;
-                            }
-                            let argument = after[..close].trim();
-                            match name {
-                                "nth-child" => structural
-                                    .push(StructuralPseudo::NthChild(AnB::parse(argument)?)),
-                                "nth-of-type" => structural
-                                    .push(StructuralPseudo::NthOfType(AnB::parse(argument)?)),
-                                // A selector list (a comma inside) fails
-                                // the compound's parse.
-                                _ => structural.push(StructuralPseudo::Not(Box::new(
-                                    Compound::parse(argument)?,
-                                ))),
-                            }
-                            rest = &after[close + 1..];
-                            continue;
-                        }
-                        "first-child" => {
-                            structural.push(StructuralPseudo::NthChild(AnB { a: 0, b: 1 }))
-                        }
-                        "last-child" => structural.push(StructuralPseudo::LastChild),
-                        "first-of-type" => {
-                            structural.push(StructuralPseudo::NthOfType(AnB { a: 0, b: 1 }))
-                        }
-                        "last-of-type" => structural.push(StructuralPseudo::LastOfType),
-                        "focus-within" => structural.push(StructuralPseudo::FocusWithin),
-                        "empty" => structural.push(StructuralPseudo::Empty),
-                        _ => return None,
-                    }
-                    rest = &body[end..];
-                    continue;
-                }
-                _ => return None,
-            };
-            let end = body.find(|c| !is_ident(c)).unwrap_or(body.len());
-            if end == 0 {
-                return None;
-            }
-            if kind == '.' {
-                classes.push(body[..end].to_owned());
-            } else {
-                ids.push(body[..end].to_owned());
-            }
-            rest = &body[end..];
-        }
-        // A bare pseudo-class list (`*:hover` prints as `:hover`,
-        // `:focus-visible` alone) matches any element in that state — the
-        // standard focus-ring rule. A structural part counts as content
-        // (`:not(:first-child)`'s argument is legitimately bare).
-        if tag.is_none()
-            && ids.is_empty()
-            && classes.is_empty()
-            && structural.is_empty()
-            && attributes.is_empty()
-            && selector != "*"
-            && pseudo == Pseudo::default()
-        {
-            return None;
-        }
-        Some(Self {
-            tag,
-            ids,
-            classes,
-            pseudo,
-            structural,
-            attributes,
-        })
-    }
-
-    /// CSS specificity: (ids, classes, types); pseudo-classes count as
-    /// classes.
-    fn specificity(&self) -> (u32, u32, u32) {
-        let classes = self.classes.len()
-            + self.attributes.len()
-            + usize::from(self.pseudo.hover)
-            + usize::from(self.pseudo.active)
-            + usize::from(self.pseudo.focus)
-            + usize::from(self.pseudo.focus_visible);
-        let own = (
-            self.ids.len() as u32,
-            classes as u32,
-            self.tag.is_some() as u32,
-        );
-        self.structural.iter().fold(own, |sum, part| {
-            let (ids, classes, tags) = part.specificity();
-            (sum.0 + ids, sum.1 + classes, sum.2 + tags)
-        })
-    }
-
-    /// Whether the compound (its `:not()` arguments included) reads
-    /// attributes, and whether it reads a position — `:not()` and
-    /// `:focus-within` included, conservatively.
-    fn reads(&self) -> (bool, bool) {
-        let mut attributes = !self.attributes.is_empty();
-        let mut structural = false;
-        for part in &self.structural {
-            match part {
-                StructuralPseudo::Not(compound) => {
-                    let (inner_attributes, inner_structural) = compound.reads();
-                    attributes |= inner_attributes;
-                    structural |= inner_structural;
-                }
-                _ => structural = true,
-            }
-        }
-        (attributes, structural)
-    }
-
-    /// Whether the compound tests an interaction state anywhere, its
-    /// `:not()` arguments included.
-    fn has_pseudo(&self) -> bool {
-        self.pseudo != Pseudo::default() || self.structural.iter().any(StructuralPseudo::has_pseudo)
-    }
-
-    /// The whole compound against `subject` — the subject element, an
-    /// ancestor or a sibling alike. With `wild`, each interaction test is
-    /// [`Tri::Maybe`] (ADR 0029's reactivity record: could it match if
-    /// the states went either way?).
-    fn test(&self, subject: &Subject, wild: bool) -> Tri {
-        let parts = self.tag.as_ref().is_none_or(|tag| tag == subject.tag)
-            && self.ids.iter().all(|id| subject.id == Some(id.as_str()))
-            && self
-                .classes
-                .iter()
-                .all(|class| subject.classes.iter().any(|own| own == class))
-            && self
-                .attributes
-                .iter()
-                .all(|attribute| attribute.matches(subject));
-        let mut result = Tri::of(parts);
-        if result == Tri::No {
-            return Tri::No;
-        }
-        let pseudo_tests = [
-            (self.pseudo.hover, subject.pseudo.hover),
-            (self.pseudo.active, subject.pseudo.active),
-            (self.pseudo.focus, subject.pseudo.focus),
-            (self.pseudo.focus_visible, subject.pseudo.focus_visible),
-        ];
-        for (required, actual) in pseudo_tests {
-            if required {
-                result = result.min(if wild { Tri::Maybe } else { Tri::of(actual) });
-            }
-        }
-        for part in &self.structural {
-            if result == Tri::No {
-                break;
-            }
-            result = result.min(part.test(subject, wild));
-        }
-        result
-    }
-
-    fn matches(&self, element: &HtmlElement, pseudo: Pseudo, state: &ElementState) -> bool {
-        self.test(&Subject::element(element, pseudo, state), false) == Tri::Yes
-    }
-
-    /// Could the compound match the element if its interaction states
-    /// went either way (ADR 0029)?
-    fn could_match(&self, element: &HtmlElement, state: &ElementState) -> bool {
-        self.test(&Subject::element(element, Pseudo::default(), state), true) != Tri::No
-    }
-
-    /// The compound against an ancestor or sibling (`wild`: as in
-    /// [`test`](Self::test)).
-    fn matches_ancestor(&self, ancestor: &Ancestor, wild: bool) -> bool {
-        let outcome = self.test(&Subject::ancestor(ancestor), wild);
-        if wild {
-            outcome != Tri::No
-        } else {
-            outcome == Tri::Yes
-        }
     }
 }
 
@@ -2166,25 +1371,15 @@ pub(crate) struct SelectorReads {
 }
 
 impl SelectorReads {
-    fn with(mut self, selector: &Selector) -> Self {
-        let last = selector.compounds.len().saturating_sub(1);
-        for (index, compound) in selector.compounds.iter().enumerate() {
-            let (attributes, structural) = compound.reads();
-            self.dataset |= attributes;
-            if index == last {
-                self.subject_position |= structural;
-            } else {
-                self.context_position |= structural;
-            }
+    fn with(self, selector: &Selector) -> Self {
+        let other = selector.reads();
+        Self {
+            dataset: self.dataset | other.dataset,
+            adjacent_siblings: self.adjacent_siblings | other.adjacent_siblings,
+            general_siblings: self.general_siblings | other.general_siblings,
+            subject_position: self.subject_position | other.subject_position,
+            context_position: self.context_position | other.context_position,
         }
-        for combinator in &selector.combinators {
-            match combinator {
-                Combinator::AdjacentSibling => self.adjacent_siblings = true,
-                Combinator::GeneralSibling => self.general_siblings = true,
-                _ => {}
-            }
-        }
-        self
     }
 
     /// A sibling combinator of either kind.
@@ -2266,11 +1461,13 @@ impl<'a> HtmlStyles<'a> {
                 }
             }
             for selector in rule.selectors.0.iter() {
-                let Ok(text) = selector.to_css_string(PrinterOptions::default()) else {
-                    continue;
-                };
-                let Some(selector) = Selector::parse(&text) else {
-                    debug!("html css: skipping unsupported selector `{text}`");
+                let Some(selector) = Selector::from_parsed(selector) else {
+                    debug!(
+                        "html css: skipping unsupported selector `{}`",
+                        selector
+                            .to_css_string(PrinterOptions::default())
+                            .unwrap_or_default()
+                    );
                     continue;
                 };
                 let specificity = selector.specificity();
@@ -5370,23 +4567,22 @@ mod tests {
         );
     }
 
-    /// CSS string escapes: a backslash before a non-hex character keeps
-    /// the character; up to six hex digits are a code point, with one
-    /// optional whitespace after; NUL reads U+FFFD.
+    /// Escaped class and id names match the unescaped name (lightningcss
+    /// decodes CSS escapes; ADR 0034 replaced the crate's own decoder).
     #[test]
-    fn css_strings_unescape() {
-        for (raw, expected) in [
-            ("plain", "plain"),
-            (r#"a\"b"#, "a\"b"),
-            (r"a\\b", "a\\b"),
-            (r"\41 B", "AB"),
-            (r"\41B", "\u{41B}"),
-            (r"\0000411", "A1"),
-            (r"\1F600x", "\u{1F600}x"),
-            (r"\0 x", "\u{FFFD}x"),
-            (r"end\", "end"),
+    fn escaped_selector_names_match() {
+        let state = ElementState::default();
+        for (text, id, classes) in [
+            (r".a\:b", None, &["a:b"][..]),
+            (r".\31 23", None, &["123"][..]),
+            (r"#\41 B", Some("AB"), &[][..]),
+            (r".\1F600x", None, &["\u{1F600}x"][..]),
         ] {
-            assert_eq!(css_unescape(raw), expected, "{raw}");
+            let element = element("p", id, classes);
+            assert!(
+                selector(text).matches(&element, Pseudo::default(), &[], &state),
+                "{text}"
+            );
         }
     }
 
@@ -5589,14 +4785,10 @@ mod tests {
             &[],
             &ElementState::default()
         ));
-        // A sibling combinator at a NON-subject position never matches
-        // (the sibling's own siblings aren't threaded).
-        assert!(!selector(".hot + div p").matches(
-            &element("p", None, &[]),
-            Pseudo::default(),
-            &[ancestor("div", &[])],
-            &state
-        ));
+        // A sibling combinator at a NON-subject position is outside the
+        // grammar (ADR 0028's limit, kept by ADR 0034's allowlist): the
+        // rule is skipped.
+        assert!(Selector::parse(".hot + div p").is_none());
         // The sibling's parts still combine with the rest's ancestors
         // (`a b + c`: a is in c's chain, above the shared parent).
         assert!(
@@ -7498,81 +6690,75 @@ mod tests {
         assert_eq!(layout("width: 3ch").width, None);
     }
 
-    /// review_0005 I02: `index - b` and `rem_euclid` overflowed `i32` for
-    /// offsets near its bounds (`n-2147483647`) and panicked the build.
-    /// `a*n + b == index` for a non-negative integer `n`: `n-2147483647`
-    /// reaches every index (n = index + 2147483647); `-n-2147483647`
-    /// reaches none; `-n+2147483647` reaches every index (n large).
+    /// `p:nth-child(pattern)` at a 1-based position among `count` siblings.
+    fn nth_child(pattern: &str, index: usize) -> bool {
+        let state = ElementState::at(Position {
+            tag_index: index,
+            tag_count: index.max(10),
+            type_index: index,
+            type_count: index.max(10),
+            ..Position::default()
+        });
+        selector(&format!("p:nth-child({pattern})")).matches(
+            &element("p", None, &[]),
+            Pseudo::default(),
+            &[],
+            &state,
+        )
+    }
+
+    /// review_0005 I02: offsets near `i32`'s bounds once overflowed and
+    /// panicked the build. `a*n + b == index` for a non-negative integer
+    /// `n`: `n-2147483647` reaches every index; `-n-2147483647` none;
+    /// `-n+2147483647` every index (ADR 0034: now parcel's arithmetic).
     #[test]
     fn an_b_extreme_offsets_match_without_overflow() {
-        let anb = |a, b| AnB { a, b };
         for index in [1, 2, 7] {
+            // parcel computes `index - b` in checked i32: it overflows here,
+            // and the engine answers no where CSS says yes (the crate's own
+            // matcher used i64). No document has the 2^31 siblings that
+            // would tell; recorded with the ADR 0034 trial.
+            assert!(!nth_child("n-2147483647", index), "n-2147483647 at {index}");
             assert!(
-                anb(1, -2147483647).matches(index),
-                "n-2147483647 at {index}"
-            );
-            assert!(
-                !anb(-1, -2147483647).matches(index),
+                !nth_child("-n-2147483647", index),
                 "-n-2147483647 at {index}"
             );
             assert!(
-                anb(-1, 2147483647).matches(index),
+                nth_child("-n+2147483647", index),
                 "-n+2147483647 at {index}"
             );
-            assert!(
-                !anb(i32::MIN, i32::MIN).matches(index),
-                "MIN·n+MIN at {index}"
-            );
-            assert!(anb(i32::MAX, index as i32).matches(index), "MAX·n+{index}");
         }
     }
 
     /// review_0005 I11: `+n+3` and `+3n-1` are valid CSS (a `+` sign on
-    /// `a`); both were rejected and the rule skipped.
+    /// `a`).
     #[test]
     fn an_b_accepts_a_leading_plus() {
-        assert_eq!(AnB::parse("+n+3"), Some(AnB { a: 1, b: 3 }));
-        assert_eq!(AnB::parse("+3n-1"), Some(AnB { a: 3, b: -1 }));
-        assert_eq!(AnB::parse("+5"), Some(AnB { a: 0, b: 5 }));
+        assert!(nth_child("+n+3", 3) && !nth_child("+n+3", 2));
+        assert!(nth_child("+3n-1", 2) && nth_child("+3n-1", 5) && !nth_child("+3n-1", 3));
+        assert!(nth_child("+5", 5) && !nth_child("+5", 4));
     }
 
     #[test]
-    fn an_b_parses_the_patterns() {
-        for (text, expected) in [
-            ("odd", AnB { a: 2, b: 1 }),
-            ("even", AnB { a: 2, b: 0 }),
-            ("3", AnB { a: 0, b: 3 }),
-            ("2n", AnB { a: 2, b: 0 }),
-            ("2n+1", AnB { a: 2, b: 1 }),
-            ("-n+3", AnB { a: -1, b: 3 }),
-            ("n", AnB { a: 1, b: 0 }),
-            ("-2n-1", AnB { a: -2, b: -1 }),
+    fn an_b_patterns_match_positions() {
+        for (pattern, hits, misses) in [
+            ("odd", &[1usize, 3, 5][..], &[2usize, 4][..]),
+            ("even", &[2, 4], &[1, 3]),
+            ("3", &[3], &[2, 4]),
+            ("2n", &[2, 4], &[1, 3]),
+            ("2n+1", &[1, 3, 5], &[2, 4]),
+            ("-n+3", &[1, 2, 3], &[4, 5]),
+            ("n", &[1, 2, 3], &[]),
+            ("-2n-1", &[], &[1, 2, 3]),
         ] {
-            assert_eq!(AnB::parse(text), Some(expected), "{text}");
+            for &index in hits {
+                assert!(nth_child(pattern, index), "{pattern} at {index}");
+            }
+            for &index in misses {
+                assert!(!nth_child(pattern, index), "{pattern} at {index}");
+            }
         }
-        assert_eq!(AnB::parse("nonsense"), None);
-        assert_eq!(AnB::parse(""), None);
-    }
-
-    #[test]
-    fn an_b_matches_positions() {
-        // 2n+1: the odd positions (1, 3, 5).
-        let odd = AnB { a: 2, b: 1 };
-        for index in [1usize, 3, 5] {
-            assert!(odd.matches(index), "{index}");
-        }
-        for index in [2usize, 4] {
-            assert!(!odd.matches(index), "{index}");
-        }
-        // -n+3: the first three only.
-        let first_three = AnB { a: -1, b: 3 };
-        for index in [1usize, 2, 3] {
-            assert!(first_three.matches(index), "{index}");
-        }
-        assert!(!first_three.matches(4));
-        // A plain position.
-        assert!(AnB { a: 0, b: 2 }.matches(2));
-        assert!(!AnB { a: 0, b: 2 }.matches(3));
+        assert!(Selector::parse("p:nth-child(nonsense)").is_none());
     }
 
     #[test]
@@ -7676,8 +6862,8 @@ mod tests {
                 ..ElementState::default()
             }
         ));
-        // A selector list (a comma inside) is unsupported: the rule skips.
-        assert!(Selector::parse("p:not(.a, .b)").is_none());
+        // ADR 0034: a selector list inside `:not()` is supported.
+        assert!(Selector::parse("p:not(.a, .b)").is_some());
     }
 
     /// bug_0180: a structural pseudo-class's argument must open right after
@@ -7707,6 +6893,101 @@ mod tests {
             .expect("lightningcss parses it")
             .into_owned();
         let _ = HtmlStyles::from_sheet(&sheet);
+    }
+
+    /// ADR 0034's allowlist: parts parcel's matcher panics on (`NthOf`,
+    /// `Has`, `:nth-col()`), and forms the cascade can't invalidate (a
+    /// sibling combinator away from the subject or inside an argument,
+    /// a `:not()` inside a `:not()`), skip their rule; the Level 4 forms
+    /// the trial turned on parse.
+    #[test]
+    fn the_engine_allowlist() {
+        for text in [
+            "li:nth-child(2 of .a)",
+            "p:has(> img)",
+            "li:nth-col(2)",
+            "li:nth-last-col(1)",
+            ".a + .b p",
+            ".a ~ div p",
+            ":is(.a + .b)",
+            "p:not(.a ~ p)",
+            "p:not(:not(.a))",
+            "p:not(:is(:not(.a)))",
+            "p[href]",
+            "p::before",
+            ":root",
+            "a:link",
+            ":host",
+        ] {
+            assert!(Selector::parse(text).is_none(), "{text}");
+        }
+        for text in [
+            ":is(.a, .b) p",
+            ":where(.a) > p",
+            "p:not(.a, .b)",
+            "p:not(.a .b)",
+            "li:only-child",
+            "li:only-of-type",
+            "li:nth-last-child(2n)",
+            "li:nth-last-of-type(1)",
+            "[data-x^=\"a\"]",
+            "[data-x$=\"a\" i]",
+            "[data-x~=\"a\"]",
+            "[data-x|=\"a\"]",
+            "[data-x*=\"a\"]",
+        ] {
+            assert!(Selector::parse(text).is_some(), "{text}");
+        }
+        // The panicking forms through a whole sheet and a match: no panic,
+        // the rules skip (nested rules aren't visited at all).
+        let sheet = owned_sheet(
+            "li:nth-child(2 of .a), li:has(.b), li:nth-col(2) { color: #ff0000 }
+             .a { & > li { color: #ff0000 } }",
+        );
+        let styles = HtmlStyles::from_sheet(&sheet);
+        let style = styles.get(
+            &element("li", None, &["a"]),
+            Pseudo::default(),
+            &[ancestor("ul", &["a"])],
+            &ElementState::default(),
+        );
+        assert_eq!(style.color, None);
+    }
+
+    /// ADR 0029's reactivity record through ADR 0034's new arguments: a
+    /// pseudo-class inside `:is()` or a `:not()` list goes either way.
+    #[test]
+    fn reactivity_through_is_and_not_lists() {
+        let reactive = |css: &str, element: HtmlElement, ancestors: &[Ancestor]| {
+            let sheet = owned_sheet(css);
+            HtmlStyles::from_sheet(&sheet).pseudo_reactive(
+                &element,
+                ancestors,
+                &ElementState::default(),
+            )
+        };
+        let p = |classes: &[&str]| element("p", None, classes);
+        assert!(reactive(
+            ":is(.a:hover, .b) p { color: #ff0000 }",
+            p(&[]),
+            &[ancestor("div", &["a"])]
+        ));
+        assert!(!reactive(
+            ":is(.a:hover) p { color: #ff0000 }",
+            p(&[]),
+            &[ancestor("div", &["b"])]
+        ));
+        assert!(reactive(
+            "p:not(.x:hover, .y) { color: #ff0000 }",
+            p(&["x"]),
+            &[]
+        ));
+        // `.y` decides the `:not()` whatever the hover: not reactive.
+        assert!(!reactive(
+            "p:not(.y, .x:hover) { color: #ff0000 }",
+            p(&["y"]),
+            &[]
+        ));
     }
 
     #[test]

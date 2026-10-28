@@ -917,6 +917,7 @@ dependencies = [
  "fluent-syntax",
  "hotpath",
  "lightningcss",
+ "parcel_selectors",
  "pulldown-cmark",
  "ron",
  "serde",

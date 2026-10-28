@@ -92,6 +92,7 @@ src/
                    marker would land in a link destination convert per value) (ADR 0020)
   style.rs         Stylesheet asset + loader, DefaultStylesheet, HtmlStylesheet; CSS subset docs
   cascade.rs       (internal) stylesheet → declared style per element (+ unit tests)
+  cascade/selector.rs (internal) selector allowlist + parcel_selectors matching (ADR 0034)
   fonts.rs         FontFamilies, FontFaces, GenericFamily
   build.rs         (internal) DOM + styles → Bevy UI children; HtmlUiBuilt trigger
   rebuild.rs       (internal) pure rebuild decision: Frame (load phases + change signals) → Build/Skip/Wait
@@ -636,15 +637,14 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
   sanitizing (nested markup, `class`/`id`, any element kept), string args
   HTML-escaped, fluent-rs number formatting (no grouping). CJK paragraphs go
   on one line (a wrapped line becomes a stray space).
-- CSS subset (`style.rs` docs): compound selectors (type or `*` + `.class` /
-  `#id` parts, comma lists, joined by descendant/child combinators —
-  `.panel p`, `.panel > p`; ancestors match with their own pseudo-state,
-  specificity sums over the compounds, and the per-element match cache folds
-  the ancestor chain into its key and memoizes failed (compound, offset)
-  states, so a deep `.b .a×7 p` chain is linear; `data-*` attribute
-  selectors, `+`/`~` next to the subject and the structural
-  pseudo-classes per the Selectors limit below; other pseudo-classes
-  skipped at `debug`), plus
+- CSS subset (`style.rs` docs): selectors as lightningcss parses them,
+  matched by its engine (parcel_selectors, ADR 0034) within an allowlist
+  (`cascade/selector.rs`): types, classes, ids, comma lists, descendant/child
+  combinators, `data-*` attribute selectors, `+`/`~` next to the subject,
+  `:is()`/`:where()`/`:not()` and the structural pseudo-classes per the
+  Selectors limit below; anything else skips its rule at `debug`. Spec
+  specificity; the per-element style cache folds the ancestor chain into its
+  key. Plus
   `:hover`/`:active`/`:focus`/`:focus-visible`,
   matched per element (`HtmlElement`
   tag/id/classes + `PseudoState`, cached per combination) with CSS
@@ -1555,29 +1555,35 @@ Known limits (each skipped/ignored value is logged at `debug`):
   indent is CSS-overridable per side. A nested list inside an `li`
   renders as inline content (containers inside blocks are inline — the
   mixed-content rule).
-- **Selectors:** compound selectors (type/`*` + `.class` + `#id` +
-  `[data-x]`/`[data-x="v"]` — the element model carries only `data-*`
-  attributes, so a non-data attribute selector drops the rule) joined by
-  descendant/child combinators (`.panel p`, `.panel > p` — matched against
-  the ancestor chain the walk threads through the cascade; the
-  per-element style cache folds a chain hash into its key; specificity
-  sums over the compounds), plus the interaction pseudo-classes
-  (`:hover`/`:active`/`:focus`/`:focus-visible`, on ancestors too) and
-  the sibling combinators (`+`/`~`, ADR 0028: adjacent to the subject; a
-  sibling's interaction flip restyles its following siblings' matches)
-  and the structural pseudo-classes (`:nth-*`, `:first-/last-child`,
-  `-of-type`, `:empty`, `:focus-within`, `:not(compound)` incl.
-  `:not(:hover)`). Every compound matches whole in every position
-  (ADR 0030): ancestors and siblings carry their `data-*` dataset (shared
-  `Rc`), pseudo-state and `Position`, so `[data-m] p`, `li:first-child >
-  span` and `.a:hover + p` read them. The style cache keys on what the
+- **Selectors:** lightningcss parses them and its engine,
+  parcel_selectors, matches them (ADR 0034) over `cascade/selector.rs`
+  `Node`: an `Element` implementation on the walk's own structures — the
+  element, its ancestor chain (nearest first; each `Ancestor` carries a
+  `SiblingLink` into its parent's `SiblingList`) and stand-in siblings from
+  `Position` where no list is threaded (tests, image runs, the root).
+  `Selector::from_parsed`'s allowlist admits: types/`*`, classes, ids;
+  `data-*` attribute selectors with every operator and the `i` flag (the
+  element model carries only `data-*` attributes, so another attribute
+  drops the rule); descendant/child combinators; `+`/`~` adjacent to the
+  subject (ADR 0028; a sibling's interaction flip restyles its following
+  siblings' matches); `:hover`/`:active`/`:focus`/`:focus-visible`,
+  `:focus-within`; `:nth-child()`, `:nth-last-child()`, `:nth-of-type()`,
+  `:nth-last-of-type()`, `:first-/last-/only-child`, `:first-/last-/only-of-type`,
+  `:empty`; `:is()`/`:where()`/`:not()` with lists and descendant/child
+  combinators inside, but no `:not()` within a `:not()` (ADR 0029's
+  reactivity answers a pseudo-class by `!in_negation()`, exact only at one
+  level). The allowlist also keeps out what parcel's matcher panics on
+  (`:nth-child(… of S)`, `:has()`, `&` nesting, `:nth-col()`).
+  parcel's `An+B` arithmetic is checked `i32`: `:nth-child(n-2147483647)`
+  matches nothing (CSS: everything); no page can tell. The style cache keys on what the
   sheet's selectors read (`SelectorReads`). For the skeleton, a sibling
   list whose shape changes (length, node kind, tag) un-cleans its children
   when the sheet is sibling-dependent; an attribute-only change un-cleans
   the following siblings under `~`, the next one under `+`, nothing under
   a position-only sheet (`SiblingChange`). No other pseudo-classes or pseudo-elements, no
-  sibling combinator away from the subject (a selector with one skips
-  the rule).
+  `:root`, no sibling combinator away from the subject or inside an
+  argument (a selector with one skips the rule: it would need restyle
+  invalidation across a sibling's subtree, ADR 0034).
 - **Properties:** `text-align`/`line-height`/`letter-spacing` and
   `list-style-type` work (ADR 0027); `text-decoration`'s
   `overline`/`blink`/`-thickness`/`-style` are skipped (underline,

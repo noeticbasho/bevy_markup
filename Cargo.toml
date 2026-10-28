@@ -77,6 +77,10 @@ fluent = "0.16.0"
 unic-langid = { version = "0.9", features = ["serde"] }
 # CSS. `into_owned`: parsed StyleSheet<'i> → StyleSheet<'static> for storing as an asset.
 lightningcss = { version = "1.0.0-alpha.72", features = ["into_owned"] }
+# Selector matching (ADR 0034): lightningcss's own selector engine. Pinned
+# to the version lightningcss requires so the selector types unify; bump
+# the two together.
+parcel_selectors = "=0.28.3"
 # Markdown as a source syntax (ADR 0014): `.md` templates and Markdown in
 # Fluent values convert to the HTML the pipeline already parses. `html`
 # renders to HTML; no CLI parser (`getopts`).

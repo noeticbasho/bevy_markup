@@ -1406,6 +1406,7 @@ dependencies = [
  "fluent-syntax",
  "hotpath",
  "lightningcss",
+ "parcel_selectors",
  "proptest",
  "proptest-stateful",
  "pulldown-cmark",

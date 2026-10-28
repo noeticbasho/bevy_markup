@@ -9,6 +9,13 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
 ## [Unreleased]
 
 ### Added
+- **More selectors** (ADR 0034: selectors are now matched by
+  lightningcss's own engine): `:is()` and `:where()`, `:not()` with a
+  selector list or descendant/child combinators inside,
+  `:nth-last-child()`, `:nth-last-of-type()`, `:only-child`,
+  `:only-of-type`, and every attribute operator (`^=`, `$=`, `*=`, `~=`,
+  `|=`, the `i` flag) on `data-*` attributes. Specificity follows the spec
+  (`:where()` counts nothing, `:is()` its most specific argument).
 - **`text-transform`** (`none`/`uppercase`/`lowercase`/`capitalize`,
   inherited): applied to the run text at collection (Unicode-aware
   upper/lowercase; `capitalize` uppercases the first typographic letter
@@ -122,6 +129,9 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   changed.
 
 ### Fixed
+- **`:nth-child(0)` (and other patterns no position satisfies) styled the
+  root element**, so the whole page inherited the rule; they now match
+  nothing, as in browsers.
 - **A few hundred bytes of nested CSS functions could stall a
   stylesheet's load for minutes** (30 nested `light-dark(`, or `calc(`
   around a `var()` — lightningcss parses them in exponential time).
