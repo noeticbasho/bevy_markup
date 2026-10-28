@@ -1,0 +1,14 @@
+{
+  "schema_version": "aiwg.fortemi.index.export.v2",
+  "generated_at": "2026-10-28T13:01:35.190Z",
+  "source": {
+    "repo": "bevy_markup",
+    "privacy": "private",
+    "graph": "codebase"
+  },
+  "compatibility": {
+    "previous_schema_version": "aiwg.fortemi.index.export.v1",
+    "strategy": "supported"
+  },
+  "items": []
+}

@@ -1,0 +1,480 @@
+{
+  "version": "1.0.0",
+  "extractorVersion": "2026.08.24.1",
+  "builtAt": "2026-10-28T13:01:35.184Z",
+  "buildTimeMs": 28,
+  "entries": {
+    ".aiwg/AIWG.md": {
+      "path": ".aiwg/AIWG.md",
+      "type": "document",
+      "phase": "other",
+      "title": "AIWG.md",
+      "tags": [],
+      "created": "2026-10-28T12:56:05.658Z",
+      "updated": "2026-10-28T12:56:05.658Z",
+      "checksum": "4bc5ea9d622d2869",
+      "summary": "<!-- aiwg-managed --> <!-- Normalized project-local AIWG context. Operator notes may live outside AIWG-managed blocks. --> This file is the stable `.aiwg/AIWG.md` entry point for AIWG skills, rules, and generated provider context. <!-- aiwg-context-finalization:START --> This section is synthesized after template emission from the current workspace state. Preserve operator-authored content outside AIWG-managed blocks; rerun `aiwg regenerate` to refresh this section after provider, framework, or",
+      "dependencies": [
+        "github.com"
+      ],
+      "markdownLinks": [
+        "./aiwg.config"
+      ],
+      "dependents": [
+        "AIWG.md"
+      ]
+    },
+    ".aiwg/architecture/README.md": {
+      "path": ".aiwg/architecture/README.md",
+      "type": "document",
+      "phase": "architecture",
+      "title": "Architecture",
+      "tags": [],
+      "created": "2026-10-28T13:01:16.886Z",
+      "updated": "2026-10-28T13:01:16.886Z",
+      "checksum": "56155a923bf38c4d",
+      "summary": "Kept outside `.aiwg/` and not copied here: - **Current state:** @AGENTS.md (\"Public API\", \"Layout\", \"Pipeline\", \"Gotchas\"). - **Decisions:** @docs/agents/adr/README.md (ADRs 0001–0033; roadmap: 0028). - **User guide:** the crate docs (`cargo doc --open`) and @README.md. Record new decisions as ADRs in `docs/agents/adr/` (format: @docs/agents/skills/adr.md).",
+      "dependencies": [
+        "AGENTS.md",
+        "docs/agents/adr/README.md",
+        "README.md",
+        "docs/agents/skills/adr.md"
+      ],
+      "dependents": []
+    },
+    ".aiwg/cli-extensions.json": {
+      "path": ".aiwg/cli-extensions.json",
+      "type": "document",
+      "phase": "other",
+      "title": "Untitled",
+      "tags": [],
+      "created": "2026-10-28T12:56:02.839Z",
+      "updated": "2026-10-28T12:56:03.810Z",
+      "checksum": "19b7383b57404131",
+      "summary": "{   \"century-readiness\": {     \"source\": \"/home/a/.local/lib/node_modules/aiwg/agentic/code/addons/century-readiness/commands\",     \"description\": \"Review long-horizon obligations, dependencies, replacement paths, and meaning packages\",     \"subcommands\": {",
+      "dependencies": [],
+      "dependents": []
+    },
+    ".aiwg/frameworks/forensics-complete/chain-of-custody.md": {
+      "path": ".aiwg/frameworks/forensics-complete/chain-of-custody.md",
+      "type": "document",
+      "phase": "other",
+      "title": "Chain of Custody Log",
+      "tags": [],
+      "created": "2026-10-28T12:56:02.469Z",
+      "updated": "2026-10-28T12:56:02.469Z",
+      "checksum": "e6ca03fc979114fc",
+      "summary": "> This document records the collection, transfer, and storage of all evidence for the referenced case. > Every person who handles evidence MUST log a transfer entry. Gaps in custody chain may compromise > the admissibility of evidence. Complete all fields — do not leave entries blank. --- | Field | Value |",
+      "dependencies": [],
+      "dependents": []
+    },
+    ".aiwg/frameworks/knowledge-base/index.md": {
+      "path": ".aiwg/frameworks/knowledge-base/index.md",
+      "type": "document",
+      "phase": "other",
+      "title": "Index",
+      "tags": [],
+      "created": "2026-10-28T12:56:02.469Z",
+      "updated": "2026-10-28T12:56:02.469Z",
+      "checksum": "0a3745f5a0c5c39e",
+      "summary": "",
+      "dependencies": [],
+      "dependents": []
+    },
+    ".aiwg/frameworks/registry.json": {
+      "path": ".aiwg/frameworks/registry.json",
+      "type": "document",
+      "phase": "other",
+      "title": "Untitled",
+      "tags": [],
+      "created": "2026-10-28T12:56:02.470Z",
+      "updated": "2026-10-28T12:56:02.470Z",
+      "checksum": "431681c6f66a1249",
+      "summary": "{   \"version\": \"1.0.0\",   \"created\": \"2026-10-28T12:56:02.470Z\",   \"frameworks\": [     {",
+      "dependencies": [],
+      "dependents": []
+    },
+    ".aiwg/index.md": {
+      "path": ".aiwg/index.md",
+      "type": "document",
+      "phase": "other",
+      "title": "SDLC Index — bevy_markup",
+      "tags": [],
+      "created": "2026-10-28T13:01:16.886Z",
+      "updated": "2026-10-28T13:01:16.886Z",
+      "checksum": "36d5204bbeb4349f",
+      "summary": "_Generated: 2026-10-28 — 9 pages · consumer `sdlc-complete` · workspace `noetic-basho-technologies` (root: `../aiwg`)_ Derived pages cite their sources with `@path` mentions; provenance records are in `.aiwg/research/provenance/records/`. Authoritative: `AGENTS.md`, `docs/agents/adr/`, `docs/agents/bugs/`, `docs/agents/reviews/`, `docs/agents/skills/`. - [Project intake](intake/project-intake.md) — HTML/Tera + CSS + Fluent → Bevy UI library; 0.7.0 on crates.io; UI layer of prototype_19 and vtube",
+      "dependencies": [],
+      "dependents": []
+    },
+    ".aiwg/intake/option-matrix.md": {
+      "path": ".aiwg/intake/option-matrix.md",
+      "type": "document",
+      "phase": "intake",
+      "title": "Option Matrix (Project Context and Priorities)",
+      "tags": [],
+      "created": "2026-10-28T12:59:30.168Z",
+      "updated": "2026-10-28T12:59:30.169Z",
+      "checksum": "1a4d2c6eb2f51ee3",
+      "summary": "| Field | Value | |---|---| | Derived from | `AGENTS.md`, ADRs 0001, 0002, 0004, 0028 | | Source state | `f6a2d6a`, 2026-10-28 | - A library, not an app: its users are Bevy developers and template authors; its end users are the players of those games.",
+      "dependencies": [
+        "AGENTS.md",
+        "docs/agents/adr/0001-html-tera-fluent-css-onto-bevy-ui.md",
+        "docs/agents/adr/0002-library-shape-and-public-api.md",
+        "docs/agents/adr/0004-verification-strategy.md",
+        "docs/agents/adr/0008-focus-and-navigation-in-the-library.md",
+        "docs/agents/adr/0028-modern-authoring-gaps-roadmap.md"
+      ],
+      "dependents": [
+        ".aiwg/intake/project-intake.md"
+      ]
+    },
+    ".aiwg/intake/project-intake.md": {
+      "path": ".aiwg/intake/project-intake.md",
+      "type": "document",
+      "phase": "intake",
+      "title": "Project Intake Form (Existing System)",
+      "tags": [],
+      "created": "2026-10-28T12:59:30.167Z",
+      "updated": "2026-10-28T12:59:30.168Z",
+      "checksum": "bba5f4879fd0c12b",
+      "summary": "| Field | Value | |---|---| | Project | bevy_markup (crate `bevy_markup`, called `p23` until 2026-10-05) | | Repository | `github.com/nchashch/bevy_markup` (branch `main`; 313 commits since 2026-10-04); published on crates.io, 0.7.0 (2026-10-15) | | Intake type | Existing system (brownfield), generated by `intake-from-codebase` |",
+      "dependencies": [
+        "AGENTS.md",
+        ".aiwg/intake/solution-profile.md",
+        ".aiwg/intake/option-matrix.md",
+        ".aiwg/requirements/use-cases.md",
+        ".aiwg/requirements/supplementary-spec.md",
+        ".aiwg/risks/risk-list.md",
+        ".aiwg/testing/test-strategy.md",
+        ".aiwg/testing/defect-register.md",
+        "CHANGELOG.md",
+        "docs/agents/adr/README.md",
+        "docs/agents/adr/0001-html-tera-fluent-css-onto-bevy-ui.md",
+        "docs/agents/adr/0002-library-shape-and-public-api.md",
+        "docs/agents/adr/0004-verification-strategy.md",
+        "docs/agents/adr/0021-per-element-dirty-tracking.md",
+        "docs/agents/adr/0028-modern-authoring-gaps-roadmap.md",
+        "docs/agents/bugs/INDEX.md",
+        "docs/agents/bugs/UPSTREAM.md"
+      ],
+      "dependents": []
+    },
+    ".aiwg/intake/solution-profile.md": {
+      "path": ".aiwg/intake/solution-profile.md",
+      "type": "document",
+      "phase": "intake",
+      "title": "Solution Profile (Current System)",
+      "tags": [],
+      "created": "2026-10-28T12:59:30.168Z",
+      "updated": "2026-10-28T12:59:30.168Z",
+      "checksum": "bbd52d62eaf3ac6e",
+      "summary": "| Field | Value | |---|---| | Derived from | `AGENTS.md`, ADRs 0004, 0018, 0019, 0021, 0028, bug ledger, `UPSTREAM.md`, CI history | | Source state | `f6a2d6a`, 2026-10-28 | **Published library, early versions (0.x), used by the studio's own projects.** Verification is far above the norm for its size: reference oracles (Chromium styles and layout, `@fluent/dom`), golden images, property, stateful and model-based tests, five fuzzing drivers, mutation testing, coverage per testing layer, benchmark",
+      "dependencies": [
+        "AGENTS.md",
+        "docs/agents/adr/0004-verification-strategy.md",
+        "docs/agents/adr/0021-per-element-dirty-tracking.md",
+        "docs/agents/adr/0028-modern-authoring-gaps-roadmap.md",
+        "docs/agents/bugs/INDEX.md",
+        "docs/agents/bugs/UPSTREAM.md"
+      ],
+      "dependents": [
+        ".aiwg/intake/project-intake.md"
+      ]
+    },
+    ".aiwg/receipts/providers/claude.project.evidence.json": {
+      "path": ".aiwg/receipts/providers/claude.project.evidence.json",
+      "type": "document",
+      "phase": "other",
+      "title": "Untitled",
+      "tags": [],
+      "created": "2026-10-28T12:56:05.667Z",
+      "updated": "2026-10-28T12:56:05.667Z",
+      "checksum": "c9fa847635299de4",
+      "summary": "{   \"schemaVersion\": \"aiwg.provider-transformation-evidence-state.v1\",   \"recordedAt\": \"2026-10-28T12:56:05.668Z\",   \"provider\": \"claude\",   \"scope\": \"project\",",
+      "dependencies": [],
+      "dependents": []
+    },
+    ".aiwg/requirements/supplementary-spec.md": {
+      "path": ".aiwg/requirements/supplementary-spec.md",
+      "type": "document",
+      "phase": "requirements",
+      "title": "Supplementary Specification (Non-Functional Requirements)",
+      "tags": [],
+      "created": "2026-10-28T13:00:39.812Z",
+      "updated": "2026-10-28T13:00:39.812Z",
+      "checksum": "0322c09a8415c4c5",
+      "summary": "| Field | Value | |---|---| | Template | `requirements/supplementary-spec-template.md` | | Derived from | `AGENTS.md` (\"Conventions\", \"Testing\", \"Verification\", \"Limits and next steps\"), ADRs 0002, 0004, 0021, bug ledger, `UPSTREAM.md` | | Source state | `f6a2d6a`, 2026-10-28 |",
+      "dependencies": [
+        "AGENTS.md",
+        "docs/agents/adr/0002-library-shape-and-public-api.md",
+        "docs/agents/adr/0004-verification-strategy.md",
+        "docs/agents/adr/0005-update-decisions-as-a-pure-state-machine.md",
+        "docs/agents/adr/0009-in-place-update-model.md",
+        "docs/agents/adr/0021-per-element-dirty-tracking.md",
+        "docs/agents/adr/0031-windowed-build-spec-level-culling.md",
+        "docs/agents/bugs/bug_0001.md",
+        "docs/agents/bugs/bug_0170.md",
+        "docs/agents/bugs/UPSTREAM.md"
+      ],
+      "dependents": [
+        ".aiwg/intake/project-intake.md",
+        ".aiwg/testing/test-strategy.md"
+      ]
+    },
+    ".aiwg/requirements/use-cases.md": {
+      "path": ".aiwg/requirements/use-cases.md",
+      "type": "use-case",
+      "phase": "requirements",
+      "title": "Use-Case Briefs",
+      "tags": [],
+      "created": "2026-10-28T13:00:39.810Z",
+      "updated": "2026-10-28T13:00:39.812Z",
+      "checksum": "ad3643f56f699c97",
+      "summary": "| Field | Value | |---|---| | Template | `requirements/use-case-brief-template.md` (one brief per section) | | Derived from | `AGENTS.md` (\"Public API\", \"Limits and next steps\", \"Verification\"), ADRs 0001–0033, examples | | Source state | `f6a2d6a`, 2026-10-28 |",
+      "dependencies": [
+        "AGENTS.md",
+        "docs/agents/adr/README.md",
+        "docs/agents/adr/0001-html-tera-fluent-css-onto-bevy-ui.md",
+        "docs/agents/adr/0006-declarative-interaction-signals-and-pseudo-classes.md",
+        "docs/agents/adr/0008-focus-and-navigation-in-the-library.md",
+        "docs/agents/adr/0009-in-place-update-model.md",
+        "docs/agents/adr/0010-overlays-anchors-and-tooltips.md",
+        "docs/agents/adr/0012-template-composition-and-examples.md",
+        "docs/agents/adr/0013-own-the-fluent-bundle-asset.md",
+        "docs/agents/adr/0016-text-input.md",
+        "docs/agents/adr/0021-per-element-dirty-tracking.md",
+        "docs/agents/adr/0028-modern-authoring-gaps-roadmap.md",
+        "docs/agents/adr/0032-windowed-build-revised.md",
+        "examples/README.md"
+      ],
+      "dependents": [
+        ".aiwg/intake/project-intake.md"
+      ]
+    },
+    ".aiwg/research/provenance/records/README.prov.yaml": {
+      "path": ".aiwg/research/provenance/records/README.prov.yaml",
+      "type": "document",
+      "phase": "other",
+      "title": "Untitled",
+      "tags": [],
+      "created": "2026-10-28T13:01:16.905Z",
+      "updated": "2026-10-28T13:01:16.905Z",
+      "checksum": "daa95173125dd3b4",
+      "summary": "metadata:   schema_version: \"1.0.0\"   created_at: \"2026-10-28T13:01:16Z\"   description: \"Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)\" entity:",
+      "dependencies": [],
+      "dependents": []
+    },
+    ".aiwg/research/provenance/records/defect-register.prov.yaml": {
+      "path": ".aiwg/research/provenance/records/defect-register.prov.yaml",
+      "type": "document",
+      "phase": "other",
+      "title": "Untitled",
+      "tags": [],
+      "created": "2026-10-28T13:01:16.905Z",
+      "updated": "2026-10-28T13:01:16.905Z",
+      "checksum": "91b7b330bb31423a",
+      "summary": "metadata:   schema_version: \"1.0.0\"   created_at: \"2026-10-28T13:01:16Z\"   description: \"Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)\" entity:",
+      "dependencies": [],
+      "dependents": []
+    },
+    ".aiwg/research/provenance/records/option-matrix.prov.yaml": {
+      "path": ".aiwg/research/provenance/records/option-matrix.prov.yaml",
+      "type": "document",
+      "phase": "other",
+      "title": "Untitled",
+      "tags": [],
+      "created": "2026-10-28T13:01:16.905Z",
+      "updated": "2026-10-28T13:01:16.905Z",
+      "checksum": "655d79fb40ee34cf",
+      "summary": "metadata:   schema_version: \"1.0.0\"   created_at: \"2026-10-28T13:01:16Z\"   description: \"Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)\" entity:",
+      "dependencies": [],
+      "dependents": []
+    },
+    ".aiwg/research/provenance/records/project-intake.prov.yaml": {
+      "path": ".aiwg/research/provenance/records/project-intake.prov.yaml",
+      "type": "document",
+      "phase": "other",
+      "title": "Untitled",
+      "tags": [],
+      "created": "2026-10-28T13:01:16.904Z",
+      "updated": "2026-10-28T13:01:16.905Z",
+      "checksum": "4e478fdd2cddb69a",
+      "summary": "metadata:   schema_version: \"1.0.0\"   created_at: \"2026-10-28T13:01:16Z\"   description: \"Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)\" entity:",
+      "dependencies": [],
+      "dependents": []
+    },
+    ".aiwg/research/provenance/records/risk-list.prov.yaml": {
+      "path": ".aiwg/research/provenance/records/risk-list.prov.yaml",
+      "type": "risk",
+      "phase": "other",
+      "title": "Untitled",
+      "tags": [],
+      "created": "2026-10-28T13:01:16.905Z",
+      "updated": "2026-10-28T13:01:16.905Z",
+      "checksum": "16b07173dcd0abc2",
+      "summary": "metadata:   schema_version: \"1.0.0\"   created_at: \"2026-10-28T13:01:16Z\"   description: \"Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)\" entity:",
+      "dependencies": [],
+      "dependents": []
+    },
+    ".aiwg/research/provenance/records/solution-profile.prov.yaml": {
+      "path": ".aiwg/research/provenance/records/solution-profile.prov.yaml",
+      "type": "document",
+      "phase": "other",
+      "title": "Untitled",
+      "tags": [],
+      "created": "2026-10-28T13:01:16.905Z",
+      "updated": "2026-10-28T13:01:16.905Z",
+      "checksum": "8e649a0ed1ca31e3",
+      "summary": "metadata:   schema_version: \"1.0.0\"   created_at: \"2026-10-28T13:01:16Z\"   description: \"Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)\" entity:",
+      "dependencies": [],
+      "dependents": []
+    },
+    ".aiwg/research/provenance/records/supplementary-spec.prov.yaml": {
+      "path": ".aiwg/research/provenance/records/supplementary-spec.prov.yaml",
+      "type": "document",
+      "phase": "other",
+      "title": "Untitled",
+      "tags": [],
+      "created": "2026-10-28T13:01:16.905Z",
+      "updated": "2026-10-28T13:01:16.905Z",
+      "checksum": "106a63abfa591ba0",
+      "summary": "metadata:   schema_version: \"1.0.0\"   created_at: \"2026-10-28T13:01:16Z\"   description: \"Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)\" entity:",
+      "dependencies": [],
+      "dependents": []
+    },
+    ".aiwg/research/provenance/records/test-strategy.prov.yaml": {
+      "path": ".aiwg/research/provenance/records/test-strategy.prov.yaml",
+      "type": "document",
+      "phase": "other",
+      "title": "Untitled",
+      "tags": [],
+      "created": "2026-10-28T13:01:16.905Z",
+      "updated": "2026-10-28T13:01:16.905Z",
+      "checksum": "8e673bf04f1e5145",
+      "summary": "metadata:   schema_version: \"1.0.0\"   created_at: \"2026-10-28T13:01:16Z\"   description: \"Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)\" entity:",
+      "dependencies": [],
+      "dependents": []
+    },
+    ".aiwg/research/provenance/records/use-cases.prov.yaml": {
+      "path": ".aiwg/research/provenance/records/use-cases.prov.yaml",
+      "type": "use-case",
+      "phase": "other",
+      "title": "Untitled",
+      "tags": [],
+      "created": "2026-10-28T13:01:16.905Z",
+      "updated": "2026-10-28T13:01:16.905Z",
+      "checksum": "83d03cd98dc94c48",
+      "summary": "metadata:   schema_version: \"1.0.0\"   created_at: \"2026-10-28T13:01:16Z\"   description: \"Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)\" entity:",
+      "dependencies": [],
+      "dependents": []
+    },
+    ".aiwg/risks/risk-list.md": {
+      "path": ".aiwg/risks/risk-list.md",
+      "type": "risk",
+      "phase": "risks",
+      "title": "Risk List",
+      "tags": [],
+      "created": "2026-10-28T13:00:39.812Z",
+      "updated": "2026-10-28T13:00:39.812Z",
+      "checksum": "79165a20bd26887f",
+      "summary": "| Field | Value | |---|---| | Template | `management/risk-list-template.md` | | Derived from | `AGENTS.md`, ADRs 0028, bug ledger, `UPSTREAM.md`, `CHANGELOG.md`, CI history (GitHub Actions, 2026-10-28) | | Source state | `f6a2d6a`, 2026-10-28 |",
+      "dependencies": [
+        "AGENTS.md",
+        "CHANGELOG.md",
+        "docs/agents/adr/0028-modern-authoring-gaps-roadmap.md",
+        "docs/agents/bugs/bug_0028.md",
+        "docs/agents/bugs/UPSTREAM.md",
+        "docs/agents/skills/testing.md"
+      ],
+      "dependents": [
+        ".aiwg/intake/project-intake.md"
+      ]
+    },
+    ".aiwg/testing/defect-register.md": {
+      "path": ".aiwg/testing/defect-register.md",
+      "type": "document",
+      "phase": "testing",
+      "title": "Defect Register",
+      "tags": [],
+      "created": "2026-10-28T13:01:16.885Z",
+      "updated": "2026-10-28T13:01:16.886Z",
+      "checksum": "0566882b38896b7a",
+      "summary": "| Field | Value | |---|---| | Derived from | `docs/agents/bugs/INDEX.md`, `UPSTREAM.md`, `docs/agents/reviews/`, CI history | | Source state | `f6a2d6a`, 2026-10-28 | An index; the bug reports are authoritative. 178 reports, bug_0001–0178 (2026-10-04 to 2026-10-26).",
+      "dependencies": [
+        "docs/agents/bugs/INDEX.md",
+        "docs/agents/bugs/UPSTREAM.md",
+        "docs/agents/bugs/bug_0026.md",
+        "docs/agents/bugs/bug_0170.md",
+        "docs/agents/reviews/review_0006.md"
+      ],
+      "dependents": [
+        ".aiwg/intake/project-intake.md"
+      ]
+    },
+    ".aiwg/testing/test-strategy.md": {
+      "path": ".aiwg/testing/test-strategy.md",
+      "type": "document",
+      "phase": "testing",
+      "title": "Test Strategy",
+      "tags": [],
+      "created": "2026-10-28T13:01:16.884Z",
+      "updated": "2026-10-28T13:01:16.885Z",
+      "checksum": "a1a184fd27711212",
+      "summary": "| Field | Value | |---|---| | Template | `test/test-strategy-template.md` (condensed) | | Derived from | `AGENTS.md` (\"Testing\", \"Verification\"), `docs/agents/skills/testing.md`, ADRs 0004, 0018, 0019 | | Source state | `f6a2d6a`, 2026-10-28 |",
+      "dependencies": [
+        "docs/agents/skills/testing.md",
+        ".aiwg/testing/defect-register.md.",
+        ".aiwg/requirements/supplementary-spec.md",
+        "AGENTS.md",
+        "docs/agents/adr/0004-verification-strategy.md",
+        "docs/agents/adr/0018-benchmarks-with-criterion.md",
+        "docs/agents/adr/0019-benchmarks-with-divan.md"
+      ],
+      "dependents": [
+        ".aiwg/intake/project-intake.md"
+      ]
+    },
+    "WORKSPACE.md": {
+      "path": "WORKSPACE.md",
+      "type": "document",
+      "phase": "other",
+      "title": "WORKSPACE.md",
+      "tags": [],
+      "created": "2026-10-28T12:56:05.655Z",
+      "updated": "2026-10-28T13:01:34.697Z",
+      "checksum": "5c2f54741c490846",
+      "summary": "<!-- aiwg-managed --> <!-- Generated structure by AIWG; operator content is protected by markers. --> <!-- AIWG:workspace-context:start --> This file is the canonical provider-neutral home for project and operator context. Provider startup files are generated adapters: they direct the harness here first,",
+      "dependencies": [
+        "AGENTS.md"
+      ],
+      "markdownLinks": [
+        "./AIWG.md",
+        ".aiwg/aiwg.config",
+        ".aiwg/quickref.json"
+      ],
+      "dependents": []
+    },
+    "AIWG.md": {
+      "path": "AIWG.md",
+      "type": "document",
+      "phase": "other",
+      "title": "AIWG.md",
+      "tags": [],
+      "created": "2026-10-28T12:56:05.659Z",
+      "updated": "2026-10-28T12:56:05.659Z",
+      "checksum": "2f78a952a5ed68b6",
+      "summary": "<!-- aiwg-managed --> <!-- CLAUDE.md companion for non-Claude providers. --> CLAUDE.md was not found at project root. AIWG.md normally mirrors that content. See [.aiwg/AIWG.md](.aiwg/AIWG.md) for the project framework context. <!-- AIWG-PARALLELISM-CAP:START -->",
+      "dependencies": [
+        "github.com"
+      ],
+      "markdownLinks": [
+        ".aiwg/AIWG.md",
+        "./.aiwg/aiwg.config"
+      ],
+      "dependents": [
+        "WORKSPACE.md"
+      ]
+    }
+  }
+}

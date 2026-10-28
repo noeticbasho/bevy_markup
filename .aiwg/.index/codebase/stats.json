@@ -1,0 +1,17 @@
+{
+  "version": "1.0.0",
+  "extractorVersion": "2026.08.24.1",
+  "builtAt": "2026-10-28T13:01:35.185Z",
+  "buildTimeMs": 0,
+  "totalArtifacts": 0,
+  "byPhase": {},
+  "byType": {},
+  "tagDistribution": {},
+  "graphMetrics": {
+    "backend": "json",
+    "totalEdges": 0,
+    "markdownLinkEdges": 0,
+    "orphanedArtifacts": 0,
+    "mostReferenced": null
+  }
+}

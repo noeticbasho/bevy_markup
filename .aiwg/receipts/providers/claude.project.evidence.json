@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "aiwg.provider-transformation-evidence-state.v1",
+  "recordedAt": "2026-10-28T12:56:05.668Z",
+  "provider": "claude",
+  "scope": "project",
+  "disposition": "source-unavailable"
+}

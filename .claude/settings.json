@@ -1,0 +1,46 @@
+{
+  "version": "1.0",
+  "created": "2026-10-28T12:56:02.471Z",
+  "aiwg": {
+    "enabled": true,
+    "mode": "all"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/aiwg-session.cjs",
+            "_aiwg_managed": true,
+            "_aiwg_id": "aiwg-session"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/aiwg-trace.cjs start",
+            "_aiwg_managed": true,
+            "_aiwg_id": "aiwg-trace"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/aiwg-trace.cjs stop",
+            "_aiwg_managed": true,
+            "_aiwg_id": "aiwg-trace"
+          }
+        ]
+      }
+    ]
+  }
+}

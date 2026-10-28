@@ -1,0 +1,203 @@
+{
+  ".aiwg/AIWG.md": {
+    "upstream": [],
+    "downstream": [
+      {
+        "path": "AIWG.md",
+        "type": "markdown-link"
+      }
+    ]
+  },
+  ".aiwg/architecture/README.md": {
+    "upstream": [],
+    "downstream": []
+  },
+  ".aiwg/cli-extensions.json": {
+    "upstream": [],
+    "downstream": []
+  },
+  ".aiwg/frameworks/forensics-complete/chain-of-custody.md": {
+    "upstream": [],
+    "downstream": []
+  },
+  ".aiwg/frameworks/knowledge-base/index.md": {
+    "upstream": [],
+    "downstream": []
+  },
+  ".aiwg/frameworks/registry.json": {
+    "upstream": [],
+    "downstream": []
+  },
+  ".aiwg/index.md": {
+    "upstream": [],
+    "downstream": []
+  },
+  ".aiwg/intake/option-matrix.md": {
+    "upstream": [],
+    "downstream": [
+      {
+        "path": ".aiwg/intake/project-intake.md",
+        "type": "depends-on"
+      }
+    ]
+  },
+  ".aiwg/intake/project-intake.md": {
+    "upstream": [
+      {
+        "path": ".aiwg/intake/solution-profile.md",
+        "type": "depends-on"
+      },
+      {
+        "path": ".aiwg/intake/option-matrix.md",
+        "type": "depends-on"
+      },
+      {
+        "path": ".aiwg/requirements/use-cases.md",
+        "type": "depends-on"
+      },
+      {
+        "path": ".aiwg/requirements/supplementary-spec.md",
+        "type": "depends-on"
+      },
+      {
+        "path": ".aiwg/risks/risk-list.md",
+        "type": "depends-on"
+      },
+      {
+        "path": ".aiwg/testing/test-strategy.md",
+        "type": "depends-on"
+      },
+      {
+        "path": ".aiwg/testing/defect-register.md",
+        "type": "depends-on"
+      }
+    ],
+    "downstream": []
+  },
+  ".aiwg/intake/solution-profile.md": {
+    "upstream": [],
+    "downstream": [
+      {
+        "path": ".aiwg/intake/project-intake.md",
+        "type": "depends-on"
+      }
+    ]
+  },
+  ".aiwg/requirements/use-cases.md": {
+    "upstream": [],
+    "downstream": [
+      {
+        "path": ".aiwg/intake/project-intake.md",
+        "type": "depends-on"
+      }
+    ]
+  },
+  ".aiwg/requirements/supplementary-spec.md": {
+    "upstream": [],
+    "downstream": [
+      {
+        "path": ".aiwg/intake/project-intake.md",
+        "type": "depends-on"
+      },
+      {
+        "path": ".aiwg/testing/test-strategy.md",
+        "type": "depends-on"
+      }
+    ]
+  },
+  ".aiwg/risks/risk-list.md": {
+    "upstream": [],
+    "downstream": [
+      {
+        "path": ".aiwg/intake/project-intake.md",
+        "type": "depends-on"
+      }
+    ]
+  },
+  ".aiwg/testing/test-strategy.md": {
+    "upstream": [
+      {
+        "path": ".aiwg/requirements/supplementary-spec.md",
+        "type": "depends-on"
+      }
+    ],
+    "downstream": [
+      {
+        "path": ".aiwg/intake/project-intake.md",
+        "type": "depends-on"
+      }
+    ]
+  },
+  ".aiwg/testing/defect-register.md": {
+    "upstream": [],
+    "downstream": [
+      {
+        "path": ".aiwg/intake/project-intake.md",
+        "type": "depends-on"
+      }
+    ]
+  },
+  ".aiwg/receipts/providers/claude.project.evidence.json": {
+    "upstream": [],
+    "downstream": []
+  },
+  ".aiwg/research/provenance/records/README.prov.yaml": {
+    "upstream": [],
+    "downstream": []
+  },
+  ".aiwg/research/provenance/records/defect-register.prov.yaml": {
+    "upstream": [],
+    "downstream": []
+  },
+  ".aiwg/research/provenance/records/option-matrix.prov.yaml": {
+    "upstream": [],
+    "downstream": []
+  },
+  ".aiwg/research/provenance/records/project-intake.prov.yaml": {
+    "upstream": [],
+    "downstream": []
+  },
+  ".aiwg/research/provenance/records/risk-list.prov.yaml": {
+    "upstream": [],
+    "downstream": []
+  },
+  ".aiwg/research/provenance/records/solution-profile.prov.yaml": {
+    "upstream": [],
+    "downstream": []
+  },
+  ".aiwg/research/provenance/records/supplementary-spec.prov.yaml": {
+    "upstream": [],
+    "downstream": []
+  },
+  ".aiwg/research/provenance/records/test-strategy.prov.yaml": {
+    "upstream": [],
+    "downstream": []
+  },
+  ".aiwg/research/provenance/records/use-cases.prov.yaml": {
+    "upstream": [],
+    "downstream": []
+  },
+  "WORKSPACE.md": {
+    "upstream": [
+      {
+        "path": "AIWG.md",
+        "type": "markdown-link"
+      }
+    ],
+    "downstream": []
+  },
+  "AIWG.md": {
+    "upstream": [
+      {
+        "path": ".aiwg/AIWG.md",
+        "type": "markdown-link"
+      }
+    ],
+    "downstream": [
+      {
+        "path": "WORKSPACE.md",
+        "type": "markdown-link"
+      }
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+---
+namespace: aiwg
+name: aiwg-regenerate-legacy
+platforms: [claude-code]
+kernel: true
+description: Regenerate provider startup context using the legacy inline compatibility branch
+commandHint:
+  argumentHint: "[--provider <name>] [--dry-run]"
+  allowedTools: Bash, Read
+  model: haiku
+  category: maintenance
+  modelRole: efficiency
+  modelTier: economy
+model: haiku
+---
+
+# Regenerate Legacy Inline Context
+
+Use this branch only for compatibility with a provider or project that still requires AIWG context embedded directly in its startup file.
+
+The deterministic command is:
+
+```bash
+aiwg regenerate --full-inject [--provider <name>] [--dry-run]
+```
+
+The CLI writes `<!-- BEGIN AIWG -->` / `<!-- END AIWG -->` markers, preserves operator prose outside managed blocks, backs up changed existing files, and does not create `WORKSPACE.md`. Preview first for established projects.
+
+Return to the canonical graph with [aiwg-regenerate-workspace](../aiwg-regenerate-workspace/SKILL.md).

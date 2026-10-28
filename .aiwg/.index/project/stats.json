@@ -1,0 +1,31 @@
+{
+  "version": "1.0.0",
+  "extractorVersion": "2026.08.24.1",
+  "builtAt": "2026-10-28T13:01:35.185Z",
+  "buildTimeMs": 28,
+  "totalArtifacts": 27,
+  "byPhase": {
+    "other": 18,
+    "architecture": 1,
+    "intake": 3,
+    "requirements": 2,
+    "risks": 1,
+    "testing": 2
+  },
+  "byType": {
+    "document": 23,
+    "use-case": 2,
+    "risk": 2
+  },
+  "tagDistribution": {},
+  "graphMetrics": {
+    "backend": "json",
+    "totalEdges": 10,
+    "markdownLinkEdges": 2,
+    "orphanedArtifacts": 16,
+    "mostReferenced": {
+      "path": ".aiwg/requirements/supplementary-spec.md",
+      "count": 2
+    }
+  }
+}

@@ -1,0 +1,4 @@
+## [2026-10-28 12:56] deploy | aiwg use all --provider claude
+## [2026-10-28 13:01] update | aiwg index build
+## [2026-10-28 13:01] update | aiwg index sync
+## [2026-10-28 13:01] ingest | intake-from-codebase + memory-ingest (sdlc-complete): +intake/{project-intake,solution-profile,option-matrix}, +requirements/{use-cases,supplementary-spec}, +risks/risk-list, +testing/{test-strategy,defect-register}, +architecture/README, +index; 9 provenance records; from AGENTS.md, ADRs 0001-0033, bug ledger 0001-0178, UPSTREAM.md, CI history

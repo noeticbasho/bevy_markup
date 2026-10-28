@@ -7,3 +7,9 @@
 /honggfuzz/target
 /scripts/fluent-oracle/node_modules
 /mcp_harness
+
+# AIWG runtime output from the Claude Code hooks (.claude/hooks) and scratch space
+.aiwg/traces/
+.aiwg/logs/
+.aiwg/sessions.json
+.aiwg/working/
