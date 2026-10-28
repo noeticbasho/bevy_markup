@@ -27,6 +27,8 @@ the issue may already be fixed or reported.
 | U11 | tl | A value-less attribute eats the next attribute's first character ([bug_0019](bug_0019.md)) | `autofocus data-on-click` lost the click hook and focusability | switched to `astral-tl` 0.8.0 (astral-sh's maintained fork, fixed there) | fixed in astral-tl; y21/tl 0.7.8 affected |
 | U12 | bevy_picking / bevy_ui | Text-section hits resolve `Pickable` on the span entity, not the text node ([bug_0020](bug_0020.md)) | `pointer-events: none` on a text-bearing element leaked clicks | `Pickable::IGNORE` on the spans too (`src/build.rs`) | unreported |
 | U13 | pulldown-cmark | The offset iterator panics on a list item holding only a link reference definition before a whitespace-only line ([bug_0178](bug_0178.md)) | panic from any `.md` template | minimum version raised to 0.13.5 (`Cargo.toml`) | fixed upstream (0.13.5, #1021); a residual un-hardened `unwrap()` in `OffsetIter` is latent only (not reachable in 0.13.5 per ~18M fuzz execs + instrumented replay), left unreported |
+| U14 | lightningcss | Nested `light-dark(` and `calc(` around a `var()` parse in exponential time ([bug_0179](bug_0179.md)) | a few hundred bytes of CSS stall the load for minutes to hours | nesting pre-scan bounds `(…)` at 8 (`MAX_CSS_PAREN_NESTING`) | reported upstream by others (#1382, #1389); PR #1383 open for #1382 |
+| U15 | lightningcss | The parser recurses once per block with no bound ([bug_0092](bug_0092.md), [bug_0179](bug_0179.md)) | stack overflow (abort) from a few KB of nested blocks | nesting pre-scan bounds all blocks at 32 (`MAX_CSS_NESTING`) | reported upstream by others (#1297, #1155, #1092) |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -303,6 +305,45 @@ CI clippy command and workspace tests pass on both.
   If a future upstream change reopens this, the fix is to make
   `OffsetIter::next` match the plain iterator's `if let Some(..)` guard;
   left unreported because it is not reachable today.
+
+## U14 — lightningcss: nested `light-dark(` and `calc(var(…))` parse in exponential time
+
+- **Project:** [parcel-bundler/lightningcss](https://github.com/parcel-bundler/lightningcss).
+  Affected: 1.0.0-alpha.72 (bevy_markup's lock; the latest release,
+  checked 2026-10-28) and `master`.
+- **Problem:** parse time doubles per nesting level. `light-dark()`
+  arguments are parsed as a color first; without a comma that fails after
+  the full parse, and the generic function path parses them again
+  (#1382). A typed property with nested `calc()` around a `var()` does the
+  same (#1389). Measurements: bug_0179 (depth 18: 36 ms / 554 ms).
+- **Reproduction:** `StyleSheet::parse(&format!("a{{color:{}", "light-dark(".repeat(24)), ParserOptions::default())`
+  takes ~2 s in release; `.x{width:` + 22 nested `calc(… - 1px)` around
+  `var(--x)` ~19 s (#1389).
+- **Upstream:** issue [#1382](https://github.com/parcel-bundler/lightningcss/issues/1382)
+  with fix PR [#1383](https://github.com/parcel-bundler/lightningcss/pull/1383)
+  (open, mergeable, 2026-10-22); issue [#1389](https://github.com/parcel-bundler/lightningcss/issues/1389)
+  (open, no PR). Both filed by others from fuzzing.
+- **Local workaround:** `nesting_over_limit` rejects text nesting `(…)`
+  deeper than 8 before lightningcss sees it (sheets fail their load,
+  `style=` attributes and substituted values are dropped). Revisit the
+  bound (not the block bound, U15) once both are fixed in a release.
+
+## U15 — lightningcss: unbounded parser recursion
+
+- **Project:** [parcel-bundler/lightningcss](https://github.com/parcel-bundler/lightningcss).
+  Affected: 1.0.0-alpha.72 and `master`.
+- **Problem:** the parser recurses once per block (`(`, `[`, `{`, nested
+  rules) with no depth limit. ~500 nested blocks overflow a 2 MB thread in
+  a debug build, ~3000 nested `calc(` or `light-dark(` in release
+  (bug_0179); nested rules too (bug_0106).
+- **Upstream:** issues [#1297](https://github.com/parcel-bundler/lightningcss/issues/1297)
+  (selector, math-function and rule-nesting recursion),
+  [#1155](https://github.com/parcel-bundler/lightningcss/issues/1155),
+  [#1092](https://github.com/parcel-bundler/lightningcss/issues/1092); all
+  open, no PR (checked 2026-10-28).
+- **Local workaround:** `nesting_over_limit` bounds all blocks at 32
+  (bug_0092, bug_0106). The css fuzz harness applies it too (bug_0179),
+  so fuzzing doesn't spend time on inputs every app rejects.
 
 ## Not upstream bugs (recorded so they aren't re-filed)
 

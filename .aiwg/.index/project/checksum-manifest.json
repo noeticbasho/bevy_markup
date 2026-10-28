@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-28T13:01:35.184Z",
+  "generated": "2026-10-28T14:24:31.320Z",
   "entries": {
     ".aiwg/AIWG.md": {
       "checksum": "4bc5ea9d622d2869",
@@ -33,9 +33,9 @@
       "size": 1141
     },
     ".aiwg/index.md": {
-      "checksum": "36d5204bbeb4349f",
-      "mtime": "2026-10-28T13:01:16.886Z",
-      "size": 1836
+      "checksum": "3daff0205c1ce31b",
+      "mtime": "2026-10-28T14:24:30.649Z",
+      "size": 1861
     },
     ".aiwg/intake/option-matrix.md": {
       "checksum": "1a4d2c6eb2f51ee3",
@@ -73,9 +73,9 @@
       "size": 2591
     },
     ".aiwg/research/provenance/records/defect-register.prov.yaml": {
-      "checksum": "91b7b330bb31423a",
-      "mtime": "2026-10-28T13:01:16.905Z",
-      "size": 3202
+      "checksum": "a21f144b9e71e45b",
+      "mtime": "2026-10-28T14:24:30.671Z",
+      "size": 3980
     },
     ".aiwg/research/provenance/records/option-matrix.prov.yaml": {
       "checksum": "655d79fb40ee34cf",
@@ -88,9 +88,9 @@
       "size": 5244
     },
     ".aiwg/research/provenance/records/risk-list.prov.yaml": {
-      "checksum": "16b07173dcd0abc2",
-      "mtime": "2026-10-28T13:01:16.905Z",
-      "size": 3405
+      "checksum": "e00f75624f51c1a0",
+      "mtime": "2026-10-28T14:24:30.672Z",
+      "size": 3774
     },
     ".aiwg/research/provenance/records/solution-profile.prov.yaml": {
       "checksum": "8e649a0ed1ca31e3",
@@ -113,14 +113,14 @@
       "size": 6972
     },
     ".aiwg/risks/risk-list.md": {
-      "checksum": "79165a20bd26887f",
-      "mtime": "2026-10-28T13:00:39.812Z",
-      "size": 3607
+      "checksum": "159164e6dbee3435",
+      "mtime": "2026-10-28T14:24:30.649Z",
+      "size": 3638
     },
     ".aiwg/testing/defect-register.md": {
-      "checksum": "0566882b38896b7a",
-      "mtime": "2026-10-28T13:01:16.886Z",
-      "size": 1996
+      "checksum": "bfccc08199811ee9",
+      "mtime": "2026-10-28T14:24:30.648Z",
+      "size": 2500
     },
     ".aiwg/testing/test-strategy.md": {
       "checksum": "a1a184fd27711212",

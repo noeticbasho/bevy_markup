@@ -12,7 +12,9 @@ use bevy::image::Image;
 use bevy::prelude::*;
 
 use crate::build::{BoxStyle, Styler, element_tag, root_style};
-use crate::cascade::{HtmlStyles, Pseudo, custom_image_urls, image_urls, var_names};
+use crate::cascade::{
+    HtmlStyles, Pseudo, custom_image_urls, image_urls, nesting_over_limit, var_names,
+};
 use crate::fonts::FontFamilies;
 use crate::html::HtmlElement;
 use crate::l10n::LocalizedText;
@@ -78,6 +80,13 @@ pub fn cascade(css: &str) -> Result<String, String> {
     use lightningcss::stylesheet::{ParserOptions, StyleSheet};
     use lightningcss::traits::IntoOwned;
 
+    // The loader's pre-scan, so the harness parses what an app would
+    // (bug_0179: without it, corpus inputs nested ~500 deep overflowed
+    // the 2 MB replay threads and nested functions timed the fuzzer out,
+    // on inputs every app rejects).
+    if nesting_over_limit(css) {
+        return Err("stylesheet nests too deeply".into());
+    }
     let parsed = StyleSheet::parse(css, ParserOptions::default()).map_err(|err| err.to_string())?;
     let sheet = parsed.into_owned();
     // The load-time scans: untrusted CSS, must not panic or hang. The
@@ -416,5 +425,34 @@ mod tests {
         let bytes = b"+\t[<]:\xda\n\x0b";
         let text = String::from_utf8_lossy(bytes);
         let _ = render_html(&text, "{}");
+    }
+
+    /// bug_0179: the harness applies the loader's nesting pre-scan. The
+    /// nightly coverage replay aborted on a CI corpus input nested 505
+    /// deep (the 2 MB test thread overflowed inside lightningcss), and the
+    /// css target timed out on nested `light-dark(` (seeds in fuzz/seeds/css).
+    /// Runs on the test harness's ordinary 2 MB thread, as the replay does.
+    #[test]
+    fn deep_and_exponential_css_is_rejected_like_the_loader_does() {
+        let start = std::time::Instant::now();
+        for css in [
+            format!("a{{width:{}1px{}}}", "calc(".repeat(3000), ")".repeat(3000)),
+            format!("a{{x:{}", "[".repeat(505)),
+            format!("a{{color:{}", "light-dark(".repeat(30)),
+        ] {
+            assert!(cascade(&css).is_err(), "rejected: {}", &css[..20]);
+        }
+        assert!(start.elapsed().as_secs() < 5);
+        assert!(cascade("a{width:calc(min(100%, max(10px, 2em)) - 4px)}").is_ok());
+    }
+
+    /// bug_0180: the css target's crash (2026-10-28, a 3-minute local run
+    /// once the light-dark timeouts stopped masking it), minimized with
+    /// `cargo fuzz tmin` to these 8 bytes (also a seed in fuzz/seeds/css).
+    /// `Compound::parse` sliced a U+FFFD apart; this must never panic.
+    #[test]
+    fn a_structural_pseudo_crash_from_cargo_fuzz_does_not_panic() {
+        let bytes = b":not\0(){";
+        let _ = cascade(&String::from_utf8_lossy(bytes));
     }
 }

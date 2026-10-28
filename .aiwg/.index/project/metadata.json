@@ -1,8 +1,8 @@
 {
   "version": "1.0.0",
   "extractorVersion": "2026.08.24.1",
-  "builtAt": "2026-10-28T13:01:35.184Z",
-  "buildTimeMs": 28,
+  "builtAt": "2026-10-28T14:24:31.318Z",
+  "buildTimeMs": 23,
   "entries": {
     ".aiwg/AIWG.md": {
       "path": ".aiwg/AIWG.md",
@@ -101,8 +101,8 @@
       "title": "SDLC Index — bevy_markup",
       "tags": [],
       "created": "2026-10-28T13:01:16.886Z",
-      "updated": "2026-10-28T13:01:16.886Z",
-      "checksum": "36d5204bbeb4349f",
+      "updated": "2026-10-28T14:24:30.649Z",
+      "checksum": "3daff0205c1ce31b",
       "summary": "_Generated: 2026-10-28 — 9 pages · consumer `sdlc-complete` · workspace `noetic-basho-technologies` (root: `../aiwg`)_ Derived pages cite their sources with `@path` mentions; provenance records are in `.aiwg/research/provenance/records/`. Authoritative: `AGENTS.md`, `docs/agents/adr/`, `docs/agents/bugs/`, `docs/agents/reviews/`, `docs/agents/skills/`. - [Project intake](intake/project-intake.md) — HTML/Tera + CSS + Fluent → Bevy UI library; 0.7.0 on crates.io; UI layer of prototype_19 and vtube",
       "dependencies": [],
       "dependents": []
@@ -272,9 +272,9 @@
       "title": "Untitled",
       "tags": [],
       "created": "2026-10-28T13:01:16.905Z",
-      "updated": "2026-10-28T13:01:16.905Z",
-      "checksum": "91b7b330bb31423a",
-      "summary": "metadata:   schema_version: \"1.0.0\"   created_at: \"2026-10-28T13:01:16Z\"   description: \"Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)\" entity:",
+      "updated": "2026-10-28T14:24:30.671Z",
+      "checksum": "a21f144b9e71e45b",
+      "summary": "metadata:   schema_version: \"1.0.0\"   created_at: \"2026-10-28T14:24:30Z\"   description: \"Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)\" entity:",
       "dependencies": [],
       "dependents": []
     },
@@ -311,9 +311,9 @@
       "title": "Untitled",
       "tags": [],
       "created": "2026-10-28T13:01:16.905Z",
-      "updated": "2026-10-28T13:01:16.905Z",
-      "checksum": "16b07173dcd0abc2",
-      "summary": "metadata:   schema_version: \"1.0.0\"   created_at: \"2026-10-28T13:01:16Z\"   description: \"Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)\" entity:",
+      "updated": "2026-10-28T14:24:30.672Z",
+      "checksum": "e00f75624f51c1a0",
+      "summary": "metadata:   schema_version: \"1.0.0\"   created_at: \"2026-10-28T14:24:30Z\"   description: \"Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)\" entity:",
       "dependencies": [],
       "dependents": []
     },
@@ -375,9 +375,9 @@
       "phase": "risks",
       "title": "Risk List",
       "tags": [],
-      "created": "2026-10-28T13:00:39.812Z",
-      "updated": "2026-10-28T13:00:39.812Z",
-      "checksum": "79165a20bd26887f",
+      "created": "2026-10-28T13:16:58.635Z",
+      "updated": "2026-10-28T14:24:30.649Z",
+      "checksum": "159164e6dbee3435",
       "summary": "| Field | Value | |---|---| | Template | `management/risk-list-template.md` | | Derived from | `AGENTS.md`, ADRs 0028, bug ledger, `UPSTREAM.md`, `CHANGELOG.md`, CI history (GitHub Actions, 2026-10-28) | | Source state | `f6a2d6a`, 2026-10-28 |",
       "dependencies": [
         "AGENTS.md",
@@ -385,6 +385,7 @@
         "docs/agents/adr/0028-modern-authoring-gaps-roadmap.md",
         "docs/agents/bugs/bug_0028.md",
         "docs/agents/bugs/UPSTREAM.md",
+        "docs/agents/bugs/bug_0179.md",
         "docs/agents/skills/testing.md"
       ],
       "dependents": [
@@ -398,14 +399,16 @@
       "title": "Defect Register",
       "tags": [],
       "created": "2026-10-28T13:01:16.885Z",
-      "updated": "2026-10-28T13:01:16.886Z",
-      "checksum": "0566882b38896b7a",
-      "summary": "| Field | Value | |---|---| | Derived from | `docs/agents/bugs/INDEX.md`, `UPSTREAM.md`, `docs/agents/reviews/`, CI history | | Source state | `f6a2d6a`, 2026-10-28 | An index; the bug reports are authoritative. 178 reports, bug_0001–0178 (2026-10-04 to 2026-10-26).",
+      "updated": "2026-10-28T14:24:30.648Z",
+      "checksum": "bfccc08199811ee9",
+      "summary": "| Field | Value | |---|---| | Derived from | `docs/agents/bugs/INDEX.md`, `UPSTREAM.md`, `docs/agents/reviews/`, CI history | | Source state | `f6a2d6a`, 2026-10-28 | An index; the bug reports are authoritative. 180 reports, bug_0001–0180 (2026-10-04 to 2026-10-28).",
       "dependencies": [
         "docs/agents/bugs/INDEX.md",
         "docs/agents/bugs/UPSTREAM.md",
         "docs/agents/bugs/bug_0026.md",
         "docs/agents/bugs/bug_0170.md",
+        "docs/agents/bugs/bug_0179.md",
+        "docs/agents/bugs/bug_0180.md",
         "docs/agents/reviews/review_0006.md"
       ],
       "dependents": [

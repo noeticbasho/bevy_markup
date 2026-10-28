@@ -1,8 +1,8 @@
 {
   "version": "1.0.0",
   "extractorVersion": "2026.08.24.1",
-  "builtAt": "2026-10-28T13:01:35.185Z",
-  "buildTimeMs": 28,
+  "builtAt": "2026-10-28T14:24:31.320Z",
+  "buildTimeMs": 23,
   "totalArtifacts": 27,
   "byPhase": {
     "other": 18,

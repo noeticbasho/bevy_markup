@@ -208,6 +208,8 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0176](bug_0176.md) | Spacers drifted by the layout's per-node rounding | `src/build.rs` | low | fixed (uncommitted) | the windowing mutation run (review_0006 follow-up) |
 | [bug_0177](bug_0177.md) | Reversed containers and non-column roots were culled as columns | `src/build.rs` | high | fixed (uncommitted) | the windowing mutation rerun (review_0006 follow-up) |
 | [bug_0178](bug_0178.md) | pulldown-cmark's offset iterator panicked on a definition-only list item before a blank line | upstream `pulldown-cmark` 0.13.4 (UPSTREAM.md U13) | high | fixed (uncommitted): `pulldown-cmark` ≥ 0.13.5, fixed upstream (#1021) | honggfuzz `html` target |
+| [bug_0179](bug_0179.md) | Nested functions parsed in exponential time stalled the stylesheet load; the css harness skipped the nesting pre-scan | `src/cascade.rs` (`nesting_over_limit`), `src/fuzz.rs`; upstream lightningcss (UPSTREAM.md U14, U15) | high | fixed (uncommitted): paren bound 8 in the pre-scan; the harness applies it | nightly cargo-fuzz `css` timeouts + coverage replay stack overflow |
+| [bug_0180](bug_0180.md) | A structural pseudo-class followed by a non-`(` character panicked `Compound::parse` | `src/cascade.rs` (`Compound::parse`) | high | fixed (uncommitted) | cargo-fuzz `css` target |
 
 ## Discovery session metadata: bug_0001–0005
 
@@ -422,3 +424,21 @@ settle (rebuild observed) and the resulting dump to match a reference model.
 - **Commit at discovery:** `875bec7` (fix uncommitted at filing).
 - **Machine/toolchain:** Arch Linux (kernel 7.2.11), AMD Ryzen 7 9800X3D,
   rustc 1.98.1, nightly for the fuzz drivers.
+
+## Discovery session metadata: bug_0179–0180 (2026-10-28)
+
+- **Method:** triage of the nightly workflow, red every night since
+  2026-10-14. The 2026-10-28 run's `fuzz-artifacts-css` (two timeouts)
+  and `fuzz-corpus-css` artifacts were replayed against lightningcss alone
+  and through the harness; upstream issues were found for both
+  lightningcss defects. After bug_0179's fix a 180 s local cargo-fuzz run
+  of `css` found bug_0180, which the timeouts had masked. The same triage
+  found the nightly browser-oracle failure (since 2026-10-15): not a
+  library defect — `tests/vectors/text_props` had no committed
+  `browser.json`, and `scripts/browser_oracle.py` recorded text without
+  `text-transform`; the script now reads the rendered text.
+- **Discovery and fix agent:** Claude Code session, `claude-opus-5-5`.
+  Each regression test was checked to fail (or hang) without its fix.
+- **Commit at discovery:** `965d2fc` (fixes uncommitted at filing).
+- **Machine/toolchain:** Arch Linux (kernel 7.2.11), AMD Ryzen 7 9800X3D,
+  rustc 1.98.1, `nightly-2026-09-09` for cargo-fuzz 0.13.2, Chromium 156.

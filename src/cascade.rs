@@ -1904,14 +1904,20 @@ impl Compound {
                         // their argument up to the first `)` (nesting a
                         // parenthesized argument is unsupported).
                         name @ ("nth-child" | "nth-of-type" | "not") => {
-                            let after = &body[end..];
+                            // The argument must open right after the name
+                            // (bug_0180: `:not\0(…)` serializes the NUL as
+                            // a 3-byte U+FFFD, and slicing past an assumed
+                            // `(` split it).
+                            let Some(after) = body[end..].strip_prefix('(') else {
+                                return None;
+                            };
                             let Some(close) = after.find(')') else {
                                 return None;
                             };
-                            if after[1..close].contains('(') || close == 1 {
+                            if after[..close].contains('(') || close == 0 {
                                 return None;
                             }
-                            let argument = after[1..close].trim();
+                            let argument = after[..close].trim();
                             match name {
                                 "nth-child" => structural
                                     .push(StructuralPseudo::NthChild(AnB::parse(argument)?)),
@@ -2117,7 +2123,7 @@ impl InlineStyle {
 pub(crate) fn inline_style(tag: &tl::HTMLTag) -> Option<InlineStyle> {
     let text =
         crate::template::decode_entities(&tag.attributes().get("style").flatten()?.as_utf8_str());
-    if nesting_over_limit(&text, MAX_CSS_NESTING) {
+    if nesting_over_limit(&text) {
         debug!("html css: style attribute nests too deeply: {text:?}");
         return None;
     }
@@ -2806,7 +2812,7 @@ fn apply_resolved(
         debug!("html css: `var()` substitution failed");
         return;
     };
-    if nesting_over_limit(&text, MAX_CSS_NESTING) {
+    if nesting_over_limit(&text) {
         debug!("html css: substituted value nests too deeply: {text:?}");
         return;
     }
@@ -2844,14 +2850,23 @@ const MAX_VAR_DEPTH: usize = 64;
 /// any authored CSS (a nested rule inside `@media` inside `@supports`
 /// with a `calc(min(…))` value is ~6), but a few thousand blocks are
 /// rejected before lightningcss's own unbounded parser sees them.
-const MAX_CSS_NESTING: usize = 32;
+pub(crate) const MAX_CSS_NESTING: usize = 32;
+/// The pre-scan's bound on `(…)` blocks alone (functions included):
+/// authored values nest ~4 (`calc(var(--a) * clamp(1px, calc(…), 3px))`).
+/// lightningcss re-parses some functions' arguments on failure, so its
+/// parse time doubles per level: nested `light-dark(` (lightningcss#1382)
+/// and `calc(` around a `var()` (#1389) took 0.55 s at depth 18 and hours
+/// at 32 (bug_0179). At 8 the worst case is ~0.3 ms per declaration.
+pub(crate) const MAX_CSS_PAREN_NESTING: usize = 8;
 
 /// Whether `text` nests blocks — `(…)` (functions included), `[…]` and
-/// `{…}` (nested style rules) — deeper than `limit`. lightningcss's
+/// `{…}` (nested style rules) — deeper than `MAX_CSS_NESTING`, or `(…)`
+/// blocks alone deeper than `MAX_CSS_PAREN_NESTING`. lightningcss's
 /// parser recurses once per block with no bound, so a few KB of `((((`
-/// or of nested rules `a { a { …` abort the app at parse time; sheet
-/// sources, `style=` attributes and substituted `var()` values are
-/// scanned before it (review_0003 G08, review_0004 H02).
+/// or of nested rules `a { a { …` abort the app at parse time, and a
+/// few hundred bytes of nested functions can take hours (bug_0179);
+/// sheet sources, `style=` attributes and substituted `var()` values
+/// are scanned before it (review_0003 G08, review_0004 H02).
 ///
 /// The scan mirrors cssparser's block matching, so it can't undercount:
 /// a closer only closes a block of its own kind (a mismatched one is a
@@ -2860,10 +2875,11 @@ const MAX_CSS_NESTING: usize = 32;
 /// tell, it counts (an opener is always a block). A rejected text is
 /// dropped — the sheet fails, the attribute or declaration is dropped —
 /// the same outcome as unparseable CSS.
-pub(crate) fn nesting_over_limit(text: &str, limit: usize) -> bool {
+pub(crate) fn nesting_over_limit(text: &str) -> bool {
     let bytes = text.as_bytes();
-    // The open blocks' closers, innermost last.
+    // The open blocks' closers, innermost last; and how many are `)`.
     let mut open: Vec<u8> = Vec::new();
+    let mut parens = 0usize;
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
@@ -2906,13 +2922,15 @@ pub(crate) fn nesting_over_limit(text: &str, limit: usize) -> bool {
                     b'[' => b']',
                     _ => b'}',
                 });
-                if open.len() > limit {
+                parens += usize::from(opener == b'(');
+                if open.len() > MAX_CSS_NESTING || parens > MAX_CSS_PAREN_NESTING {
                     return true;
                 }
             }
             closer @ (b')' | b']' | b'}') => {
                 if open.last() == Some(&closer) {
                     open.pop();
+                    parens -= usize::from(closer == b')');
                 }
             }
             _ => {}
@@ -6076,20 +6094,26 @@ mod tests {
             sheet.push_str(&format!("--v{i}: var(--v{}); ", i - 1));
         }
         sheet.push_str("width: var(--v19)");
-        // 4 links × 7 `calc()` nests: the substituted value stays within
-        // the authored nesting bound (28 ≤ 32) and the recursion within
-        // the substitution bound.
-        let mut s2 = String::from("--w0: 1px; ");
-        for i in 1..=4 {
-            s2.push_str(&format!(
-                "--w{i}: {}var(--w{}){} ; ",
-                "calc(".repeat(7),
-                i - 1,
-                ")".repeat(7)
-            ));
-        }
-        s2.push_str("width: var(--w4)");
-        assert_eq!(declared(&s2).layout.width, Some(Val::Px(1.0)));
+        // 4 links × `calc()` nests: the substituted value's parens add up
+        // across the links. 4 × 2 = 8 stays within the paren bound and
+        // resolves; 4 × 3 = 12 passes the load (each link is 3 deep) but
+        // its substitution is dropped before the re-parse (bug_0179: a
+        // chain of comma-less `light-dark(` links would otherwise re-parse
+        // in exponential time per element).
+        let chain = |nests: usize| {
+            let mut s2 = String::from("--w0: 1px; ");
+            for i in 1..=4 {
+                s2.push_str(&format!(
+                    "--w{i}: {}var(--w{}){} ; ",
+                    "calc(".repeat(nests),
+                    i - 1,
+                    ")".repeat(nests)
+                ));
+            }
+            s2 + "width: var(--w4)"
+        };
+        assert_eq!(declared(&chain(2)).layout.width, Some(Val::Px(1.0)));
+        assert_eq!(declared(&chain(3)).layout.width, None);
         assert_eq!(declared(&sheet).layout.width, Some(Val::Px(1.0)));
     }
 
@@ -6129,25 +6153,25 @@ mod tests {
     #[test]
     fn pathological_nesting_is_rejected_before_the_parser() {
         let deep = |count: usize| "(".repeat(count) + "1px" + &")".repeat(count);
-        assert!(nesting_over_limit(&deep(40), MAX_CSS_NESTING));
-        assert!(!nesting_over_limit(&deep(10), MAX_CSS_NESTING));
+        assert!(nesting_over_limit(&deep(40)));
+        assert!(!nesting_over_limit(&deep(MAX_CSS_PAREN_NESTING)));
         // Unbalanced closing parens don't trip the scan.
-        assert!(!nesting_over_limit("))))) width: 1px", MAX_CSS_NESTING));
+        assert!(!nesting_over_limit("))))) width: 1px"));
 
         // Every block kind counts (review_0004 H02: nested style rules
         // weren't counted, and 1000 of them aborted the parser).
         let rules = |count: usize| format!("p {{ {} }}", "a {".repeat(count));
-        assert!(nesting_over_limit(&rules(40), MAX_CSS_NESTING));
-        assert!(nesting_over_limit(&"[".repeat(40), MAX_CSS_NESTING));
+        assert!(nesting_over_limit(&rules(40)));
+        assert!(nesting_over_limit(&"[".repeat(40)));
         // Closers that cssparser doesn't treat as closing this block
         // can't hide the nesting: in a string, a comment, an escape, an
         // unquoted URL, or of another kind.
         for filler in [r#""}""#, "'}'", "/* } */", r"\}", "url(})", "]", ")"] {
             let text = format!("a {{ {filler} ").repeat(40);
-            assert!(nesting_over_limit(&text, MAX_CSS_NESTING), "{filler}");
+            assert!(nesting_over_limit(&text), "{filler}");
         }
-        assert!(!nesting_over_limit(r#"(")")"#, MAX_CSS_NESTING));
-        assert!(nesting_over_limit(&r#"( ")" "#.repeat(40), MAX_CSS_NESTING));
+        assert!(!nesting_over_limit(r#"(")")"#));
+        assert!(nesting_over_limit(&r#"( ")" "#.repeat(40)));
         // Real CSS: nested at-rules and rules, functions, quoted and
         // unquoted URLs, strings and comments holding brackets, escapes.
         let authored = r#"
@@ -6158,10 +6182,7 @@ mod tests {
             .b { background: url(img/a\).png); border-image: url("x{.png") 4 }
             .c\{ { color: red }
         "#;
-        assert!(
-            !nesting_over_limit(authored, MAX_CSS_NESTING),
-            "authored CSS passes"
-        );
+        assert!(!nesting_over_limit(authored), "authored CSS passes");
 
         // The inline path drops the attribute instead of crashing.
         let html = format!(r#"<p style="width: {}">x</p>"#, deep(400));
@@ -6180,6 +6201,64 @@ mod tests {
                 .layout
                 .width,
             None,
+        );
+    }
+
+    /// Nested functions whose parse time doubles per level in lightningcss
+    /// are rejected by depth, well inside the block bound (bug_0179: the
+    /// nightly css fuzzer timed out on nested `light-dark(`; lightningcss
+    /// #1382 and #1389). Without the paren bound a depth-30 `style=`
+    /// attribute took minutes (`light-dark(`) or hours (`calc(var(…))`).
+    #[test]
+    fn exponential_function_nesting_is_rejected() {
+        let light_dark = |depth: usize| format!("color: {}", "light-dark(".repeat(depth));
+        // `depth` is the paren depth: the inner `var(` is one of them.
+        let custom = |depth: usize| {
+            format!(
+                "--x: {}var(--a){}",
+                "light-dark(".repeat(depth - 1),
+                ")".repeat(depth - 1)
+            )
+        };
+        let calc_var = |depth: usize| {
+            (1..depth).fold("var(--x)".to_owned(), |v, _| format!("calc({v} - 1px)"))
+        };
+        for (name, shape) in [
+            ("light-dark", &light_dark as &dyn Fn(usize) -> String),
+            ("custom-property light-dark", &custom),
+            ("calc(var)", &calc_var),
+        ] {
+            assert!(
+                !nesting_over_limit(&shape(MAX_CSS_PAREN_NESTING)),
+                "{name} at the bound passes"
+            );
+            assert!(
+                nesting_over_limit(&shape(MAX_CSS_PAREN_NESTING + 1)),
+                "{name} past the bound"
+            );
+        }
+        // Brackets between the functions don't hide them: parens count alone.
+        assert!(nesting_over_limit(
+            &"[light-dark(".repeat(MAX_CSS_PAREN_NESTING + 1)
+        ));
+        // Closed parens give their depth back.
+        assert!(!nesting_over_limit(&"calc(1px) ".repeat(100)));
+
+        // The inline path drops the attribute at once.
+        let start = std::time::Instant::now();
+        for value in [light_dark(30), calc_var(30)] {
+            let html = format!(r#"<p style="width: 1px; {value}">x</p>"#);
+            let dom = tl::parse(&html, tl::ParserOptions::default()).unwrap();
+            let tag = dom
+                .children()
+                .iter()
+                .find_map(|handle| handle.get(dom.parser()).and_then(|node| node.as_tag()))
+                .expect("the <p>");
+            assert!(inline_style(tag).is_none(), "the attribute is dropped");
+        }
+        assert!(
+            start.elapsed().as_secs() < 5,
+            "rejected before the parser runs"
         );
     }
 
@@ -7599,6 +7678,35 @@ mod tests {
         ));
         // A selector list (a comma inside) is unsupported: the rule skips.
         assert!(Selector::parse("p:not(.a, .b)").is_none());
+    }
+
+    /// bug_0180: a structural pseudo-class's argument must open right after
+    /// its name. The css fuzzer's `:not\0(){` panicked: lightningcss
+    /// serializes the NUL as U+FFFD (3 bytes), and the parser sliced past
+    /// an assumed `(` into it. ASCII in that spot was misread instead
+    /// (`:not.a)` matched as `:not(a)`).
+    #[test]
+    fn structural_pseudo_arguments_must_follow_the_name() {
+        for name in ["not", "nth-child", "nth-of-type"] {
+            for text in [
+                format!("p:{name}\u{FFFD}(2)"),
+                format!("p:{name}\u{FFFD}()"),
+                format!("p:{name}.a)"),
+                format!("p:{name} (2)"),
+                format!("p:{name}()"),
+                format!("p:{name}("),
+            ] {
+                assert!(Selector::parse(&text).is_none(), "{text:?}");
+            }
+        }
+        assert!(Selector::parse("p:not(.a)").is_some());
+        assert!(Selector::parse("li:nth-child(-n+3)").is_some());
+        // The whole path, as the fuzzer reached it: the sheet's rule skips.
+        let css = String::from_utf8_lossy(b":not\0(){");
+        let sheet = StyleSheet::parse(&css, ParserOptions::default())
+            .expect("lightningcss parses it")
+            .into_owned();
+        let _ = HtmlStyles::from_sheet(&sheet);
     }
 
     #[test]

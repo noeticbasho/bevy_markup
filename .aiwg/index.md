@@ -14,11 +14,11 @@ Derived pages cite their sources with `@path` mentions; provenance records are i
 - [Supplementary specification](requirements/supplementary-spec.md) — reliability, conformance (oracles), performance, supportability, security requirements with their checks
 
 ## Risks (1)
-- [Risk list](risks/risk-list.md) — R-001–008; highest: nightly red and untriaged, fluent-syntax patch not reaching apps, silent CSS deviations, Bevy churn
+- [Risk list](risks/risk-list.md) — R-001–008; highest: nightly red two weeks (fixed, uncommitted), fluent-syntax patch not reaching apps, silent CSS deviations, Bevy churn
 
 ## Testing (2)
 - [Test strategy](testing/test-strategy.md) — unit, vectors, oracles, property/model tests, golden images, five fuzzers, mutants, coverage, benchmarks
-- [Defect register](testing/defect-register.md) — bug_0001–0178: 176 fixed, none open; 13 upstream; 3 untriaged nightly findings
+- [Defect register](testing/defect-register.md) — bug_0001–0180: 178 fixed, none open; 15 upstream; nightly failures fixed (uncommitted)
 
 ## Architecture (1)
 - [Architecture](architecture/README.md) — pointer to `AGENTS.md` and ADRs 0001–0033

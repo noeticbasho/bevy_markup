@@ -12,7 +12,7 @@ For each vector directory (default: every `tests/vectors/*/` holding
 runs it in headless Chromium (`--dump-dom`, a VIEWPORT-sized window), and
 writes `browser.json` next to the inputs: computed styles per element
 (document order, `html` first) and the parent element's text style per
-non-whitespace text node. For `layout_*` vectors each element also gets its
+non-whitespace text node, as rendered (`text-transform` applied). For `layout_*` vectors each element also gets its
 border box (`getBoundingClientRect`). The Rust tests `browser_oracle` and
 `layout_oracle` in `tests/html_ui.rs` compare bevy_markup's output against it; no
 browser is needed to run the tests.
@@ -111,6 +111,7 @@ COLLECTOR = r"""
   document.fonts.ready.then(() => {
     const elements = [record(document.documentElement)];
     const runs = [];
+    const transformed = [];
     const visit = (parent) => {
       for (const node of parent.childNodes) {
         if (node === self) continue;
@@ -118,14 +119,25 @@ COLLECTOR = r"""
           elements.push(record(node));
           visit(node);
         } else if (node.nodeType === Node.TEXT_NODE && node.data.trim()) {
-          runs.push({
-            text: node.data.replace(/\s+/g, " "),
-            ...text(getComputedStyle(node.parentElement)),
-          });
+          const s = getComputedStyle(node.parentElement);
+          if (s.textTransform !== "none") transformed.push([runs.length, node]);
+          runs.push({ text: node.data.replace(/\s+/g, " "), ...text(s) });
         }
       }
     };
     visit(document.body);
+    // text-transform changes the rendered text, not the DOM's: read it
+    // as Chrome renders it (innerText applies the transform, capitalize's
+    // word rules included) through a temporary span, which inherits the
+    // parent's text-transform. After every record, so the spans can't
+    // move a measured box.
+    for (const [index, node] of transformed) {
+      const span = document.createElement("span");
+      node.replaceWith(span);
+      span.append(node);
+      runs[index].text = span.innerText.replace(/\s+/g, " ");
+      span.replaceWith(node);
+    }
     const out = document.createElement("pre");
     out.id = "bevy_markup-oracle";
     out.textContent = JSON.stringify({ elements, runs });

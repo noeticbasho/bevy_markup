@@ -7,3 +7,5 @@
 {"ts": "2026-10-28T13:01:16Z", "op": "ingest", "consumer": "sdlc-complete", "page": ".aiwg/testing/test-strategy.md", "sources": 5}
 {"ts": "2026-10-28T13:01:16Z", "op": "ingest", "consumer": "sdlc-complete", "page": ".aiwg/testing/defect-register.md", "sources": 5}
 {"ts": "2026-10-28T13:01:16Z", "op": "ingest", "consumer": "sdlc-complete", "page": ".aiwg/architecture/README.md", "sources": 4}
+{"ts": "2026-10-28T14:24:30Z", "op": "ingest", "consumer": "sdlc-complete", "page": ".aiwg/testing/defect-register.md", "sources": 7}
+{"ts": "2026-10-28T14:24:30Z", "op": "ingest", "consumer": "sdlc-complete", "page": ".aiwg/risks/risk-list.md", "sources": 7}

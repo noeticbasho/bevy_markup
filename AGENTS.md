@@ -665,6 +665,12 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
   256, counting into fallback and function-argument expansion too) —
   without both caps a chain of fallback-bearing `var()`s can double its
   output at every level and abort the process (bug_0092);
+  CSS text (sheet sources, `style=` attributes, substituted values) nesting
+  blocks deeper than `MAX_CSS_NESTING` (32) or parentheses deeper than
+  `MAX_CSS_PAREN_NESTING` (8) is rejected before lightningcss parses it:
+  its parser recurses without bound and parses nested `light-dark(` /
+  `calc(var(…))` in exponential time (`nesting_over_limit`; bug_0092,
+  bug_0106, bug_0179; UPSTREAM.md U14, U15);
   `transition` (the shorthand) animates a restyled color's change
   (`color`/`background-color`/`border-color`), driven by an
   `advance_transitions` system after `Build`.
@@ -1020,7 +1026,7 @@ harnesses below) are filed in `docs/agents/bugs/` — see **Bug reports**.
   breaking the code once).
 - **Browser oracle** (`browser_oracle` test): every `tests/vectors/*/` with a
   `browser.json` is built and compared with Chromium's computed styles — per
-  non-whitespace character (face from CSS font matching over the harness's
+  non-whitespace character as rendered (`text-transform` applied; face from CSS font matching over the harness's
   registered families, size, color) and per root/block/container (padding,
   border widths, border-image file/slices/repeat with `%` resolved on the
   32×24 fixture, background, container gap). Regenerate after changing a

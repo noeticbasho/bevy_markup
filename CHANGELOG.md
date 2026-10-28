@@ -122,6 +122,15 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   changed.
 
 ### Fixed
+- **A few hundred bytes of nested CSS functions could stall a
+  stylesheet's load for minutes** (30 nested `light-dark(`, or `calc(`
+  around a `var()` — lightningcss parses them in exponential time).
+  Parentheses nested deeper than 8 now fail the sheet's load like
+  unparseable CSS (a `style` attribute, or a `var()` chain whose value
+  would nest that deep, is dropped). Authored CSS nests about 4.
+- **A selector like `:not\0(…)` panicked** (a structural pseudo-class
+  followed by anything but `(`); such a rule is now skipped like other
+  unsupported selectors.
 - **Windowed UIs** (ADR 0031) now cull content inside containers (a
   `<main>` or `<section>` wrapping the page used to build in full), cull
   right after their first layout instead of after the first scroll, and

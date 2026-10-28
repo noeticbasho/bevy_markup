@@ -301,7 +301,7 @@ impl AssetLoader for StylesheetLoader {
         // lightningcss's parser recurses per parenthesis with no bound:
         // reject pathological nesting before it (review_0003 G08). The
         // sheet fails its load, like unparseable CSS.
-        if crate::cascade::nesting_over_limit(&source, 32) {
+        if crate::cascade::nesting_over_limit(&source) {
             return Err("stylesheet nests too deeply".into());
         }
         let sheet = StyleSheet::parse(&source, options).map_err(|err| err.to_string())?;

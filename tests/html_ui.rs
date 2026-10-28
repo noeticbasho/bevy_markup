@@ -546,6 +546,37 @@ html-ui
     );
 }
 
+/// A stylesheet with nested functions that lightningcss parses in
+/// exponential time fails its load at once instead of stalling the
+/// loader thread (bug_0179: 30 nested `light-dark(` took minutes, 30
+/// nested `calc(` around a `var()` hours, both inside the block bound).
+#[test]
+fn exponentially_slow_function_nesting_fails_the_load_at_once() {
+    let calc_var = (0..30).fold("var(--x)".to_owned(), |v, _| format!("calc({v} - 1px)"));
+    let sheet = format!(
+        "p {{ color: #ff0000; width: {calc_var} }}\np {{ color: {} }}",
+        "light-dark(".repeat(30)
+    );
+    let start = std::time::Instant::now();
+    let mut ui = TestUi::new(
+        "exponential_css",
+        &[("page.html", "<p>Text</p>"), ("style.css", sheet.as_str())],
+    )
+    .stylesheet("style.css")
+    .spawn("page.html", TemplateContext::new(), Node::default());
+    ui.settle().assert_dump(
+        r#"
+html-ui
+  p
+    "Text" default 16px #ffffff
+"#,
+    );
+    assert!(
+        start.elapsed().as_secs() < 30,
+        "the load fails before lightningcss parses it"
+    );
+}
+
 /// Content can't reach Bevy's network asset sources (review_0003 G19): a
 /// remote `border-image` is skipped (the rest of the sheet applies — it
 /// used to be loaded, and its failed dependency kept the sheet from ever
