@@ -4,7 +4,7 @@
 |---|---|
 | Template | `test/test-strategy-template.md` (condensed) |
 | Derived from | `AGENTS.md` ("Testing", "Verification"), `docs/agents/skills/testing.md`, ADRs 0004, 0018, 0019, 0036 |
-| Source state | `7792cea`, 2026-10-29 |
+| Source state | `dffb748`, 2026-10-29 |
 
 ## Context and Objectives
 

@@ -1,18 +1,18 @@
 metadata:
   schema_version: "1.0.0"
-  created_at: "2026-10-28T22:24:50Z"
+  created_at: "2026-10-29T00:06:02Z"
   description: "Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)"
 entity:
   id: "urn:aiwg:artifact:.aiwg/testing/defect-register.md"
   type: "document"
-  created_at: "2026-10-28T22:24:50Z"
-  checksum: "sha256:7d61ced1373a0e32984438c2022d6f79ec73dc8c5a70b62894f0220c5255e53b"
+  created_at: "2026-10-29T00:06:02Z"
+  checksum: "sha256:02618c4a5d964b21c9f17a7b02b33a0acd3ba6b100ab8adeaeeda9024e02ec8e"
   size_bytes: 3470
 activity:
   id: "urn:aiwg:activity:derivation:defect-register:1"
   type: "derivation"
-  started_at: "2026-10-28T22:24:50Z"
-  ended_at: "2026-10-28T22:24:50Z"
+  started_at: "2026-10-29T00:06:02Z"
+  ended_at: "2026-10-29T00:06:02Z"
   description: "Derived from the repository records cited in the page"
 agent:
   id: "urn:aiwg:agent:claude-opus-5-5"
@@ -23,7 +23,7 @@ relationships:
   wasGeneratedBy:
     entity: "urn:aiwg:artifact:.aiwg/testing/defect-register.md"
     activity: "urn:aiwg:activity:derivation:defect-register:1"
-    time: "2026-10-28T22:24:50Z"
+    time: "2026-10-29T00:06:02Z"
   used:
     - activity: "urn:aiwg:activity:derivation:defect-register:1"
       entity: "urn:aiwg:artifact:docs/agents/bugs/INDEX.md"

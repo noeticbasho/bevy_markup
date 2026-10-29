@@ -1,18 +1,18 @@
 metadata:
   schema_version: "1.0.0"
-  created_at: "2026-10-28T22:24:50Z"
+  created_at: "2026-10-29T00:06:02Z"
   description: "Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)"
 entity:
   id: "urn:aiwg:artifact:.aiwg/intake/option-matrix.md"
   type: "document"
-  created_at: "2026-10-28T22:24:50Z"
-  checksum: "sha256:4a06c570622670f9370dd82a9ef32be2e565c83c9229b2348d91af43727e75d4"
+  created_at: "2026-10-29T00:06:02Z"
+  checksum: "sha256:bf0ed5b77f4c7cba95c674192b8762312c88be8f71297071f6a8618b173b4f40"
   size_bytes: 2305
 activity:
   id: "urn:aiwg:activity:derivation:option-matrix:1"
   type: "derivation"
-  started_at: "2026-10-28T22:24:50Z"
-  ended_at: "2026-10-28T22:24:50Z"
+  started_at: "2026-10-29T00:06:02Z"
+  ended_at: "2026-10-29T00:06:02Z"
   description: "Derived from the repository records cited in the page"
 agent:
   id: "urn:aiwg:agent:claude-opus-5-5"
@@ -23,7 +23,7 @@ relationships:
   wasGeneratedBy:
     entity: "urn:aiwg:artifact:.aiwg/intake/option-matrix.md"
     activity: "urn:aiwg:activity:derivation:option-matrix:1"
-    time: "2026-10-28T22:24:50Z"
+    time: "2026-10-29T00:06:02Z"
   used:
     - activity: "urn:aiwg:activity:derivation:option-matrix:1"
       entity: "urn:aiwg:artifact:AGENTS.md"

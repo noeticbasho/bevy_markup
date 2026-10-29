@@ -4,7 +4,7 @@
 |---|---|
 | Template | `requirements/use-case-brief-template.md` (one brief per section) |
 | Derived from | `AGENTS.md` ("Public API", "Limits and next steps", "Verification"), ADRs 0001–0037, examples |
-| Source state | `7792cea`, 2026-10-29 |
+| Source state | `dffb748`, 2026-10-29 |
 
 Status: **Built** or **Planned**. IDs are stable. Each brief names the example that exercises it (`cargo run --example <name>`).
 

@@ -1,18 +1,18 @@
 metadata:
   schema_version: "1.0.0"
-  created_at: "2026-10-28T23:01:06Z"
+  created_at: "2026-10-29T00:06:02Z"
   description: "Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)"
 entity:
   id: "urn:aiwg:artifact:.aiwg/intake/project-intake.md"
   type: "document"
-  created_at: "2026-10-28T23:01:06Z"
-  checksum: "sha256:092f136e1f296f56865c4eba9916dadd7913e55fa968b3bb31333b4c60741f03"
-  size_bytes: 9692
+  created_at: "2026-10-29T00:06:02Z"
+  checksum: "sha256:831de438f3d72730648c65983ef4b1b774b10bb6c392abac3474eee6c3750dad"
+  size_bytes: 9860
 activity:
   id: "urn:aiwg:activity:derivation:project-intake:1"
   type: "derivation"
-  started_at: "2026-10-28T23:01:06Z"
-  ended_at: "2026-10-28T23:01:06Z"
+  started_at: "2026-10-29T00:06:02Z"
+  ended_at: "2026-10-29T00:06:02Z"
   description: "Derived from the repository records cited in the page"
 agent:
   id: "urn:aiwg:agent:claude-opus-5-5"
@@ -23,7 +23,7 @@ relationships:
   wasGeneratedBy:
     entity: "urn:aiwg:artifact:.aiwg/intake/project-intake.md"
     activity: "urn:aiwg:activity:derivation:project-intake:1"
-    time: "2026-10-28T23:01:06Z"
+    time: "2026-10-29T00:06:02Z"
   used:
     - activity: "urn:aiwg:activity:derivation:project-intake:1"
       entity: "urn:aiwg:artifact:AGENTS.md"

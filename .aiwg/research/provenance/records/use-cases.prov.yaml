@@ -1,18 +1,18 @@
 metadata:
   schema_version: "1.0.0"
-  created_at: "2026-10-28T22:24:50Z"
+  created_at: "2026-10-29T00:06:02Z"
   description: "Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)"
 entity:
   id: "urn:aiwg:artifact:.aiwg/requirements/use-cases.md"
   type: "document"
-  created_at: "2026-10-28T22:24:50Z"
-  checksum: "sha256:5b9ba930a713af38b623b109e69fb75fe59b4b7c36682a76a0b0e8b847d1bb59"
+  created_at: "2026-10-29T00:06:02Z"
+  checksum: "sha256:a4d1b8364c03cb6c9cee1b8931ce53efce27f1ba65e2a5b3977803937a272d61"
   size_bytes: 8007
 activity:
   id: "urn:aiwg:activity:derivation:use-cases:1"
   type: "derivation"
-  started_at: "2026-10-28T22:24:50Z"
-  ended_at: "2026-10-28T22:24:50Z"
+  started_at: "2026-10-29T00:06:02Z"
+  ended_at: "2026-10-29T00:06:02Z"
   description: "Derived from the repository records cited in the page"
 agent:
   id: "urn:aiwg:agent:claude-opus-5-5"
@@ -23,7 +23,7 @@ relationships:
   wasGeneratedBy:
     entity: "urn:aiwg:artifact:.aiwg/requirements/use-cases.md"
     activity: "urn:aiwg:activity:derivation:use-cases:1"
-    time: "2026-10-28T22:24:50Z"
+    time: "2026-10-29T00:06:02Z"
   used:
     - activity: "urn:aiwg:activity:derivation:use-cases:1"
       entity: "urn:aiwg:artifact:AGENTS.md"

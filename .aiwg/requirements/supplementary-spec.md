@@ -4,7 +4,7 @@
 |---|---|
 | Template | `requirements/supplementary-spec-template.md` |
 | Derived from | `AGENTS.md` ("Conventions", "Testing", "Verification", "Limits and next steps"), ADRs 0002, 0004, 0021, 0034, 0036, bug ledger, `UPSTREAM.md` |
-| Source state | `7792cea`, 2026-10-29 |
+| Source state | `dffb748`, 2026-10-29 |
 
 Numbered, testable statements with what verifies each ("—" = no automated check). `AGENTS.md` and the ADRs are authoritative. "Nightly" checks report, they don't block merges.
 

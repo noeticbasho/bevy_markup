@@ -8,3 +8,4 @@
 ## [2026-10-28 16:32] update | aiwg index build
 ## [2026-10-28 16:32] update | Refreshed SDLC pages for ADR 0034 (parcel_selectors matching, allowlist, Level 4 selectors, selectors_level4 vector, trial report); source state cf0da55
 ## [2026-10-28 22:25] update | SDLC pages refreshed to 7792cea: ADRs 0035-0037, htmlize decoding, Tab order, json filter, overlay flip, bug_0181
+## [2026-10-29 00:06] update | SDLC pages at dffb748 (release 0.8.0); R-004 now the consumers' lag, R-007 closed (repo moved to noeticbasho)

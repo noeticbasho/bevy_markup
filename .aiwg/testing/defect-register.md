@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Derived from | `docs/agents/bugs/INDEX.md`, `UPSTREAM.md`, `docs/agents/reviews/`, CI history |
-| Source state | `7792cea`, 2026-10-29 |
+| Source state | `dffb748`, 2026-10-29 |
 
 An index; the bug reports are authoritative. 181 reports, bug_0001–0181 (2026-10-04 to 2026-10-29).
 

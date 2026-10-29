@@ -1,18 +1,18 @@
 metadata:
   schema_version: "1.0.0"
-  created_at: "2026-10-28T22:24:50Z"
+  created_at: "2026-10-29T00:06:02Z"
   description: "Derived SDLC page (memory-ingest --consumer sdlc-complete via intake-from-codebase)"
 entity:
   id: "urn:aiwg:artifact:.aiwg/requirements/supplementary-spec.md"
   type: "document"
-  created_at: "2026-10-28T22:24:50Z"
-  checksum: "sha256:2603cbdcbcc0e8be18a4d451ff053b720d762a4aa31e3ceda4dabf0689904a8c"
+  created_at: "2026-10-29T00:06:02Z"
+  checksum: "sha256:286d415e2506553d06236067f043dd005477cf6c6427aee709c88ae26439e073"
   size_bytes: 8133
 activity:
   id: "urn:aiwg:activity:derivation:supplementary-spec:1"
   type: "derivation"
-  started_at: "2026-10-28T22:24:50Z"
-  ended_at: "2026-10-28T22:24:50Z"
+  started_at: "2026-10-29T00:06:02Z"
+  ended_at: "2026-10-29T00:06:02Z"
   description: "Derived from the repository records cited in the page"
 agent:
   id: "urn:aiwg:agent:claude-opus-5-5"
@@ -23,7 +23,7 @@ relationships:
   wasGeneratedBy:
     entity: "urn:aiwg:artifact:.aiwg/requirements/supplementary-spec.md"
     activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
-    time: "2026-10-28T22:24:50Z"
+    time: "2026-10-29T00:06:02Z"
   used:
     - activity: "urn:aiwg:activity:derivation:supplementary-spec:1"
       entity: "urn:aiwg:artifact:AGENTS.md"

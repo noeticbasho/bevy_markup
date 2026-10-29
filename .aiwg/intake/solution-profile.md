@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Derived from | `AGENTS.md`, ADRs 0004, 0018, 0019, 0021, 0028, bug ledger, `UPSTREAM.md`, CI history |
-| Source state | `7792cea`, 2026-10-29 |
+| Source state | `dffb748`, 2026-10-29 |
 
 ## Current Profile
 
@@ -15,12 +15,12 @@
 | Reliability | High | 179 of 181 filed bugs fixed with regression tests (the other two: one won't-fix, one withdrawn); pure update state machine; schedule-order shuffling in every test run |
 | Testing & quality | Very high | oracles, golden images, property/model tests, fuzzing, mutants, coverage (88–98 % by layer) |
 | Process rigor | High | 37 ADRs (0034 and 0036 accepted after measured trials; 0035 and 0037 rejected on measured evidence), bug reports, six review sessions, changelog convention, CI on every push |
-| Operations | Medium | nightly green again since 2026-10-29 (red 2026-10-14 to 2026-10-28); releases lag `main` (large `[Unreleased]`, now with breaking changes) |
+| Operations | Medium | nightly green again since 2026-10-29 (red 2026-10-14 to 2026-10-28); 0.8.0 released 2026-10-29 (the consumers still on 0.7.0 and 0.4.0) |
 
 ## Recommended Profile Adjustments
 
 - Keep the nightly green: triage a red one within days and treat it as a reason to file bugs, not noise (R-001).
-- Release the `[Unreleased]` work (a minor bump: it breaks templates without `| json`) and move prototype_19 off 0.4.0 (R-004).
+- Move the consumers to 0.8.0 with its upgrade notes: vtuber from 0.7.0, prototype_19 from 0.4.0 (R-004).
 
 ## Improvement Roadmap
 
