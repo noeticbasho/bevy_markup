@@ -65,5 +65,10 @@ Delivery: commits go straight to `main` on `nchashch/bevy_markup`; CI (`ci.yml`)
 - **Claude Code hooks:** the AIWG `PermissionRequest` auto-approve hook is left out of
   `.claude/settings.json` on purpose; remove it again if a redeploy adds it back.
 - **Activity log:** append with `aiwg activity-log append` (UTC); never hand-write timestamps.
+- **Merging local branches:** keep history linear, with no merge commits. Rebase the branch onto
+  the target, resolve conflicts, run the repo's checks on the rebased result, then
+  `git merge --ff-only`. Several branches go in one at a time, each rebased onto the last.
+  Rebase only commits that were never pushed; never rewrite pushed history. Don't disturb
+  uncommitted work in the checkout: rebase in a temporary `git worktree` if it's dirty.
 
 <!-- AIWG:workspace-operator:end -->
