@@ -73,7 +73,7 @@ One developer with AI coding agents (Claude Code, omp with other models); ADRs, 
 | fluent-syntax fork (`[patch.crates-io]`) | fixes for U1, U2 |
 | bevy_mcp_harness (`dev-tools`) | agent QA of the examples |
 | GitHub Actions (Ubuntu runner, lavapipe as the canonical renderer) | CI, nightly, mutants |
-| Consumers: prototype_19 (0.4.0), vtuber (0.7.0); current release 0.8.0 | studio users |
+| Consumers: prototype_19 (0.4.0), vtuber (0.8.0); current release 0.8.0 | studio users |
 
 ## Known Issues and Technical Debt
 
