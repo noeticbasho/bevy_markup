@@ -29,6 +29,7 @@ the issue may already be fixed or reported.
 | U13 | pulldown-cmark | The offset iterator panics on a list item holding only a link reference definition before a whitespace-only line ([bug_0178](bug_0178.md)) | panic from any `.md` template | minimum version raised to 0.13.5 (`Cargo.toml`) | fixed upstream (0.13.5, #1021); a residual un-hardened `unwrap()` in `OffsetIter` is latent only (not reachable in 0.13.5 per ~18M fuzz execs + instrumented replay), left unreported |
 | U14 | lightningcss | Nested `light-dark(` and `calc(` around a `var()` parse in exponential time ([bug_0179](bug_0179.md)) | a few hundred bytes of CSS stall the load for minutes to hours | nesting pre-scan bounds `(…)` at 8 (`MAX_CSS_PAREN_NESTING`) | reported upstream by others (#1382, #1389); PR #1383 open for #1382 |
 | U15 | lightningcss | The parser recurses once per block with no bound ([bug_0092](bug_0092.md), [bug_0179](bug_0179.md)) | stack overflow (abort) from a few KB of nested blocks | nesting pre-scan bounds all blocks at 32 (`MAX_CSS_NESTING`) | reported upstream by others (#1297, #1155, #1092) |
+| U16 | tera | The compiler recurses once per operator of an expression; the 2.4.0 cap (256 operations, Keats/tera#1035) still overflows a 2 MB thread in debug builds from 136 ([bug_0182](bug_0182.md)) | stack overflow (abort) at template load in unoptimized builds | none yet | unreported (follow-up to the closed #1035) |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -344,6 +345,25 @@ CI clippy command and workspace tests pass on both.
 - **Local workaround:** `nesting_over_limit` bounds all blocks at 32
   (bug_0092, bug_0106). The css fuzz harness applies it too (bug_0179),
   so fuzzing doesn't spend time on inputs every app rejects.
+
+## U16 — tera: expression compilation recurses once per operator
+
+- **Project:** [Keats/tera](https://github.com/Keats/tera). Affected:
+  2.4.0 (bevy_markup's lock; the latest release, checked 2026-11-03).
+- **Problem:** `Compiler::compile_expr` walks the left-deep AST of an
+  operator chain recursively, one frame per operator. Issue
+  [#1035](https://github.com/Keats/tera/issues/1035) (closed 2026-09-09)
+  reported the unbounded case; 2.4.0 bounds it with
+  `MAX_EXPRESSION_COMPLEXITY` = 256, measured against an 8 MB main
+  thread. On a 2 MB thread a debug build overflows from 136 operators;
+  release holds up to the cap (bug_0182).
+- **Reproduction:** in a debug build on a 2 MB thread,
+  `Tera::new().add_raw_template("t", &format!("{{{{ n{} }}}}", " - n".repeat(136)))`
+  aborts.
+- **Upstream:** not reported. A PR sketch: make `compile_expr` iterative
+  along the left spine of binary operations and filters, or count depth
+  in the compiler and lower the cap to what a 2 MB debug thread holds.
+- **Local workaround:** none yet.
 
 ## Not upstream bugs (recorded so they aren't re-filed)
 

@@ -211,6 +211,8 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0179](bug_0179.md) | Nested functions parsed in exponential time stalled the stylesheet load; the css harness skipped the nesting pre-scan | `src/cascade.rs` (`nesting_over_limit`), `src/fuzz.rs`; upstream lightningcss (UPSTREAM.md U14, U15) | high | fixed (uncommitted): paren bound 8 in the pre-scan; the harness applies it | nightly cargo-fuzz `css` timeouts + coverage replay stack overflow |
 | [bug_0180](bug_0180.md) | A structural pseudo-class followed by a non-`(` character panicked `Compound::parse` | `src/cascade.rs` (`Compound::parse`) | high | fixed (uncommitted) | cargo-fuzz `css` target |
 | [bug_0181](bug_0181.md) | `X ~ subject` matched in O(n²) over a sibling list, failing review_0005's scaling test in CI | `src/cascade/selector.rs` (`Selector::run`), `src/cascade.rs` (`SiblingList`) | medium | fixed (branch `fix/later-sibling-scaling`): one forward scan per list and selector | CI (`review_0005::long_sibling_lists_build_linearly`) |
+| [bug_0182](bug_0182.md) | A long operator chain in one Tera expression overflowed the stack of debug builds at template load | `src/template.rs`, `src/fuzz.rs`; upstream Tera 2.4.0 (UPSTREAM.md U16) | medium | open | nightly coverage replay (`replay_html_corpus`) stack overflow |
+| [bug_0183](bug_0183.md) | The CSS nesting pre-scan took a name ending in `url` for a URL token and skipped the rest of the text | `src/cascade.rs` (`nesting_over_limit`) | high | open | nightly cargo-fuzz `css` timeouts |
 
 ## Discovery session metadata: bug_0001–0005
 
@@ -457,3 +459,20 @@ settle (rebuild observed) and the resulting dump to match a reference model.
   `fix/later-sibling-scaling`.
 - **Machine/toolchain:** Arch Linux (kernel 7.2.11), AMD Ryzen 7 9800X3D,
   rustc 1.98.1, `nightly-2026-09-09` for cargo-fuzz 0.13.2.
+
+## Discovery session metadata: bug_0182–0183 (2026-11-03)
+
+- **Method:** triage of the nightly workflow, red every night since
+  2026-10-30 on `52c2fe5`, the commit that was green on 2026-10-29: the
+  cached fuzz corpora grew, the code didn't. The 2026-11-03 run's
+  `fuzz-corpus-html` (29,137 inputs) was replayed on a 2 MB thread in a
+  debug build, which isolated 16 inputs, all long Tera operator chains
+  (bug_0182); a backtrace and a bisection of `{{ n - n - … }}` lengths in
+  debug and release gave the bound. Its `fuzz-artifacts-css` timeout
+  (bug_0183) passed the nesting pre-scan only through its `url(`;
+  cssparser 0.37.0's tokenizer showed why, and three more spellings were
+  confirmed by timing.
+- **Discovery agent:** Claude Code session, `claude-opus-5-5`.
+- **Commit at discovery:** `52c2fe5`.
+- **Machine/toolchain:** Arch Linux (kernel 7.2.11), AMD Ryzen 7 9800X3D,
+  rustc 1.98.1; CI: rustc 1.99.1, `nightly-2026-09-09` for cargo-fuzz.
