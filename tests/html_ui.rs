@@ -608,6 +608,33 @@ html-ui
     );
 }
 
+/// The same nesting after a name that only ends in `url` fails the load
+/// at once too (bug_0183: the pre-scan took `\0url(` for a URL token and
+/// skipped the rest of the sheet; the nightly css fuzzer timed out on it).
+#[test]
+fn nesting_after_a_url_look_alike_fails_the_load_at_once() {
+    let nested = "light-dark(".repeat(30);
+    let sheet = format!("p {{ color: #ff0000 }}\np {{ color: \0url({nested} }}");
+    let start = std::time::Instant::now();
+    let mut ui = TestUi::new(
+        "url_look_alike",
+        &[("page.html", "<p>Text</p>"), ("style.css", sheet.as_str())],
+    )
+    .stylesheet("style.css")
+    .spawn("page.html", TemplateContext::new(), Node::default());
+    ui.settle().assert_dump(
+        r#"
+html-ui
+  p
+    "Text" default 16px #ffffff
+"#,
+    );
+    assert!(
+        start.elapsed().as_secs() < 30,
+        "the load fails before lightningcss parses it"
+    );
+}
+
 /// ADR 0034's trial: no element sits at position 0, so `:nth-child(0)`
 /// and `:nth-child(-n+0)` match nothing. The crate's own matcher matched
 /// the root `html`, whose style is computed without a position, and the

@@ -1235,6 +1235,11 @@ known gaps:
     ops found three rebuild bugs (override removal never rebuilt; a
     failed override ignored default swaps; a re-requested failed sheet's
     one-frame `Loading` ate the swap signal).
+  - [x] Differential against the tokenizer: the CSS nesting pre-scan never
+    counts less than cssparser 0.37 (a dev-dependency, pinned to
+    lightningcss's version) on text built from the tokens that open, close
+    or hide blocks (`cascade::tests::the_pre_scan_never_undercounts_the_tokenizer`;
+    it found bug_0183's look-behind at once).
   - [ ] Shrink quality: stateful ops shrink only by removal; proptest value
     shrinking inside an op isn't supported by the framework.
 - [x] **3. Headless layout checks** (fixes weakness 3, mostly): Bevy UI

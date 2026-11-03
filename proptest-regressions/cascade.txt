@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b89a7dacf114378e09dbb01d6ae1edfa63b1a34e080e5840a75bc4c48ca331b1 # shrinks to parts = ["light-dark(", "(", "a(", "a(", "(", "(", "(", "a(", "\\(", "url(", "("]

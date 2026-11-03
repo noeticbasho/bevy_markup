@@ -445,6 +445,8 @@ mod tests {
             format!("a{{width:{}1px{}}}", "calc(".repeat(3000), ")".repeat(3000)),
             format!("a{{x:{}", "[".repeat(505)),
             format!("a{{color:{}", "light-dark(".repeat(30)),
+            // bug_0183: after a name that only ends in `url`.
+            format!("a{{color:\0url({}", "light-dark(".repeat(30)),
         ] {
             assert!(cascade(&css).is_err(), "rejected: {}", &css[..20]);
         }
