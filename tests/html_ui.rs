@@ -443,6 +443,37 @@ html-ui border=16,16,16,16 padding=10,20,10,20 slice=frame.png 4,4,4,4 stretch
     );
 }
 
+/// A template whose tag chains more operators than the bound fails its
+/// load instead of aborting the process (bug_0182: Tera compiles a chain
+/// with one stack frame per operator, and 136 overflowed the loader's
+/// 2 MB thread in a debug build); the same chain as text, and a page
+/// within the bound, load.
+#[test]
+fn long_operator_chains_fail_the_load_instead_of_aborting() {
+    let chain = format!("{{{{ n{} }}}}", " - n".repeat(200));
+    let text = format!("<p>{}</p>", " - n".repeat(200));
+    let pages = [
+        ("chain.html", chain.as_str()),
+        ("chain.md", chain.as_str()),
+        ("text.html", text.as_str()),
+        ("bounded.html", "<p>{{ 1 + 2 * 3 - 4 }}</p>"),
+    ];
+    let mut ui = TestUi::new("operator_chains", &pages);
+    let handles: Vec<Handle<HtmlTemplate>> = pages.iter().map(|(name, _)| ui.load(name)).collect();
+    ui.update(60);
+    let server = ui.world_mut().resource::<AssetServer>();
+    let failed: Vec<bool> = handles
+        .iter()
+        .map(|handle| server.load_state(handle).is_failed())
+        .collect();
+    assert_eq!(failed, [true, true, false, false]);
+    assert!(
+        handles[2..]
+            .iter()
+            .all(|handle| server.load_state(handle).is_loaded())
+    );
+}
+
 /// A template that compiles but fails to *render* (an undefined variable)
 /// shows the error as a `failed to render:` paragraph naming the problem,
 /// styled like the root, and recovers once the context provides the value.

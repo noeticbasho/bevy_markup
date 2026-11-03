@@ -83,8 +83,10 @@ src/
                    file; a manual `AssetServer::reload` reloads only its own path — bug_0026)
                    → one Tera set per template, components shared), each file converted by its
                    own root extension (a `.md` partial included from an `.html` page converts,
-                   an `.html` partial from a `.md` page stays HTML), HtmlDocument (+ outline),
-                   decode_text / decode_attribute (htmlize, ADR 0036)
+                   an `.html` partial from a `.md` page stays HTML), a tag holding more than
+                   64 operators fails the load before Tera compiles it (tera_tag_over_limit,
+                   bug_0182), HtmlDocument (+ outline), decode_text / decode_attribute
+                   (htmlize, ADR 0036)
   l10n.rs          LocaleBundle asset + loader (`.ftl.ron`: manifest → Fluent resources, read as
                    dependencies), ActiveLocale, LocalizedText; localize system (data-l10n-id/-args);
                    with `markdown: true`, each cacheable message's pattern pre-converts at load

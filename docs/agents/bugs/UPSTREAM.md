@@ -29,7 +29,7 @@ the issue may already be fixed or reported.
 | U13 | pulldown-cmark | The offset iterator panics on a list item holding only a link reference definition before a whitespace-only line ([bug_0178](bug_0178.md)) | panic from any `.md` template | minimum version raised to 0.13.5 (`Cargo.toml`) | fixed upstream (0.13.5, #1021); a residual un-hardened `unwrap()` in `OffsetIter` is latent only (not reachable in 0.13.5 per ~18M fuzz execs + instrumented replay), left unreported |
 | U14 | lightningcss | Nested `light-dark(` and `calc(` around a `var()` parse in exponential time ([bug_0179](bug_0179.md)) | a few hundred bytes of CSS stall the load for minutes to hours | nesting pre-scan bounds `(…)` at 8 (`MAX_CSS_PAREN_NESTING`) | reported upstream by others (#1382, #1389); PR #1383 open for #1382 |
 | U15 | lightningcss | The parser recurses once per block with no bound ([bug_0092](bug_0092.md), [bug_0179](bug_0179.md)) | stack overflow (abort) from a few KB of nested blocks | nesting pre-scan bounds all blocks at 32 (`MAX_CSS_NESTING`) | reported upstream by others (#1297, #1155, #1092) |
-| U16 | tera | The compiler recurses once per operator of an expression; the 2.4.0 cap (256 operations, Keats/tera#1035) still overflows a 2 MB thread in debug builds from 136 ([bug_0182](bug_0182.md)) | stack overflow (abort) at template load in unoptimized builds | none yet | unreported (follow-up to the closed #1035) |
+| U16 | tera | The compiler recurses once per operator of an expression; the 2.4.0 cap (256 operations, Keats/tera#1035) still overflows a 2 MB thread in debug builds from 136 ([bug_0182](bug_0182.md)) | stack overflow (abort) at template load in unoptimized builds | a tag over 64 operators fails the load before Tera compiles it (`tera_tag_over_limit`, `src/template.rs`) | unreported (follow-up to the closed #1035) |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -363,7 +363,9 @@ CI clippy command and workspace tests pass on both.
 - **Upstream:** not reported. A PR sketch: make `compile_expr` iterative
   along the left spine of binary operations and filters, or count depth
   in the compiler and lower the cap to what a 2 MB debug thread holds.
-- **Local workaround:** none yet.
+- **Local workaround:** `template::tera_tag_over_limit` rejects a tag of
+  more than 64 operators before Tera compiles it; drop it once Tera's
+  compiler holds its cap on a 2 MB debug thread.
 
 ## Not upstream bugs (recorded so they aren't re-filed)
 

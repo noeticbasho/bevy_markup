@@ -43,6 +43,10 @@ fn fake_frame() -> Image {
 /// its parse must not panic either.
 pub fn render_html(source: &str, context_json: &str) -> Result<String, String> {
     let name = "fuzz/template.html";
+    // The loader's pre-scan, so the harness compiles what an app would
+    // (bug_0182: without it, long operator chains overflowed the 2 MB
+    // replay threads of debug builds inside Tera's compiler).
+    crate::template::check_tera_operators(name, source)?;
     let mut tera = crate::template::new_tera();
     tera.add_raw_template(name, source)
         .map_err(|err| err.to_string())?;
@@ -60,6 +64,7 @@ pub fn render_html(source: &str, context_json: &str) -> Result<String, String> {
     // The `.md` path: the load-time Markdown conversion (`to_html_template`,
     // ADR 0020) runs on the same bytes, then the converted template renders.
     let md_source = crate::md::to_html_template(source);
+    crate::template::check_tera_operators(md_name, &md_source)?;
     let mut tera = crate::template::new_tera();
     tera.add_raw_template(md_name, &md_source)
         .map_err(|err| err.to_string())?;

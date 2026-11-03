@@ -141,6 +141,156 @@ pub fn new_tera() -> tera::Tera {
     tera
 }
 
+/// The operator bound of one Tera tag (see [`tera_tag_over_limit`]):
+/// the studio's busiest tag holds 12 (a `ui.button` call with its
+/// arguments); a debug build overflows a 2 MB thread from 136 (bug_0182).
+/// 64 operators in the innermost of 39 nested blocks, Tera's own block
+/// limit, fit a 2 MB debug thread.
+pub(crate) const MAX_TERA_TAG_OPERATORS: usize = 64;
+
+/// The operator characters a Tera tag is counted by: every binary and
+/// unary operator, `|` filters, `.`/`[` access, `?` optional access, calls
+/// and groups, array and map literals, comparisons and component calls
+/// (`<`).
+const TERA_OPERATOR_BYTES: &[u8] = b"+-*/%~|.[({<>=!?";
+
+/// The Tera keywords that build an expression node: logic, `in`, tests,
+/// ternaries and comprehensions.
+const TERA_OPERATOR_WORDS: [&[u8]; 8] =
+    [b"and", b"or", b"not", b"in", b"is", b"if", b"else", b"for"];
+
+/// Whether a `{{ … }}` or `{% … %}` tag of `source` holds more than
+/// [`MAX_TERA_TAG_OPERATORS`] operators. Tera compiles an operator chain
+/// (`a - b - c …`, `a | f | g …`, `a.b.c …`) with one stack frame per
+/// operator, and its own cap (256 per expression) is sized for an 8 MB
+/// main thread: a few hundred bytes of template abort a 2 MB thread in a
+/// debug build at load (bug_0182, UPSTREAM.md U16). A rejected template
+/// fails its load before Tera sees it.
+///
+/// The count can only be too high: every operator character and keyword
+/// of a tag counts once (`==` twice, a float's `.` too), whatever node it
+/// builds. The scan mirrors Tera's lexer where a mistake could hide an
+/// operator: strings (with their escapes) are skipped, a tag ends only at
+/// its own closer, and `{# … #}` comments and `{% raw %}` bodies are text.
+/// Tera compiles only a template that parses, so the scan only has to be
+/// right on templates that do.
+pub(crate) fn tera_tag_over_limit(source: &str) -> bool {
+    let bytes = source.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        match &bytes[i..i + 2] {
+            b"{#" => {
+                i = source[i + 2..]
+                    .find("#}")
+                    .map_or(bytes.len(), |end| i + 2 + end + 2);
+            }
+            b"{%"
+                if tera_skip_tag(
+                    bytes,
+                    i + 2 + usize::from(bytes.get(i + 2) == Some(&b'-')),
+                    b"raw",
+                )
+                .is_some() =>
+            {
+                // A raw body is text to Tera, up to the first `{%` that
+                // is an `endraw` tag. Without one, the template fails to
+                // parse and nothing compiles.
+                let mut from = i + 2;
+                loop {
+                    let Some(start) = source[from..].find("{%") else {
+                        return false;
+                    };
+                    let tag = from + start + 2;
+                    if let Some(end) = tera_skip_tag(bytes, tag, b"endraw") {
+                        i = end;
+                        break;
+                    }
+                    from = tag;
+                }
+            }
+            opener @ (b"{{" | b"{%") => {
+                // A tag ends only at its own closer: `}}` closes a map
+                // literal inside `{% … %}`, as in Tera's lexer.
+                let closer = if opener == b"{{" { b'}' } else { b'%' };
+                let (end, operators) = tera_tag_operators(bytes, i + 2, closer);
+                if operators > MAX_TERA_TAG_OPERATORS {
+                    return true;
+                }
+                i = end;
+            }
+            _ => i += 1,
+        }
+    }
+    false
+}
+
+/// The operators of the tag whose body starts at `i`, and where the tag
+/// ends: after `closer` followed by `}` (`}}` or `%}`), or at the end of
+/// the text.
+fn tera_tag_operators(bytes: &[u8], mut i: usize, closer: u8) -> (usize, usize) {
+    let mut operators = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            byte if byte == closer && bytes.get(i + 1) == Some(&b'}') => {
+                return (i + 2, operators);
+            }
+            // A string, with Tera's backslash escapes, ends at its quote.
+            quote @ (b'"' | b'\'' | b'`') => {
+                i += 1;
+                while i < bytes.len() && bytes[i] != quote {
+                    i += if bytes[i] == b'\\' { 2 } else { 1 };
+                }
+                i += 1;
+            }
+            byte if byte.is_ascii_alphabetic() || byte == b'_' => {
+                let start = i;
+                while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    i += 1;
+                }
+                operators += usize::from(TERA_OPERATOR_WORDS.contains(&&bytes[start..i]));
+            }
+            byte => {
+                operators += usize::from(TERA_OPERATOR_BYTES.contains(&byte));
+                i += 1;
+            }
+        }
+    }
+    (i, operators)
+}
+
+/// Tera's `skip_tag`: whether the text at `i` (just after `{%`) is
+/// `-? {name} -?%}`, with ASCII whitespace around `name`; and where that
+/// tag ends.
+fn tera_skip_tag(bytes: &[u8], mut i: usize, name: &[u8]) -> Option<usize> {
+    let skip_ws = |mut i: usize| {
+        while bytes.get(i).is_some_and(u8::is_ascii_whitespace) {
+            i += 1;
+        }
+        i
+    };
+    i += usize::from(bytes.get(i) == Some(&b'-'));
+    i = skip_ws(i);
+    if !bytes[i.min(bytes.len())..].starts_with(name) {
+        return None;
+    }
+    i = skip_ws(i + name.len());
+    i += usize::from(bytes.get(i) == Some(&b'-'));
+    bytes[i.min(bytes.len())..]
+        .starts_with(b"%}")
+        .then_some(i + 2)
+}
+
+/// [`tera_tag_over_limit`] as the error a load fails with.
+pub(crate) fn check_tera_operators(name: &str, source: &str) -> Result<(), String> {
+    if tera_tag_over_limit(source) {
+        Err(format!(
+            "{name}: a template tag holds more than {MAX_TERA_TAG_OPERATORS} operators"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 /// The `json` filter: the value as compact JSON.
 fn json_filter(value: tera::Value, _: tera::Kwargs, _: &tera::State) -> tera::TeraResult<String> {
     serde_json::to_string(&value).map_err(|err| tera::Error::message(format!("json: {err}")))
@@ -564,6 +714,7 @@ async fn load_template(
                 pending.push((reference, String::from_utf8(bytes)?));
             }
         }
+        check_tera_operators(&path.to_string(), &source)?;
         templates.push((path.to_string(), source));
     }
     let mut tera = new_tera();
@@ -784,6 +935,85 @@ mod tests {
         }
     }
 
+    /// bug_0182: a tag over the operator bound fails the check, in every
+    /// shape Tera compiles recursively; one at the bound passes; and what
+    /// Tera reads as text or strings doesn't count. The CI corpus inputs
+    /// (`fuzz/seeds/html/2405b86b…`) are 150-operator chains.
+    #[test]
+    fn long_operator_chains_are_rejected_before_tera() {
+        let over = MAX_TERA_TAG_OPERATORS + 1;
+        let chains = |count: usize| {
+            [
+                format!("{{{{ n{} }}}}", " - n".repeat(count)),
+                format!("{{{{ n{} }}}}", " | upper".repeat(count)),
+                format!("{{{{ n{} }}}}", ".x".repeat(count)),
+                format!("{{{{ n{} }}}}", "[0]".repeat(count)),
+                format!("{{{{ n{} }}}}", " and n".repeat(count)),
+                format!("{{{{ {}n }}}}", "n if n else ".repeat(count.div_ceil(2))),
+                format!("{{% set x = n{} %}}", " ~ n".repeat(count)),
+                // `}}` closes a map, not the `{% … %}` tag.
+                format!(
+                    r#"{{% set x = {{"a": {{"b": 1}}}}{} %}}"#,
+                    " - n".repeat(count)
+                ),
+                // A comment before and a raw block before don't hide it.
+                format!(
+                    "{{# {{{{ #}}{{% raw %}}\"{{% endraw %}}{{{{ n{} }}}}\"",
+                    " - n".repeat(count)
+                ),
+            ]
+        };
+        for template in chains(over) {
+            assert!(tera_tag_over_limit(&template), "rejected: {template:.60}");
+        }
+        assert!(!tera_tag_over_limit(&format!(
+            "{{{{ n{} }}}}",
+            " - n".repeat(MAX_TERA_TAG_OPERATORS)
+        )));
+        let many = " - n".repeat(2 * over);
+        for text in [
+            // Strings, text, comments and raw bodies aren't expressions.
+            format!("{{{{ \"{many}\" }}}}"),
+            format!("{{{{ 'a\\'{many}' }}}}"),
+            format!("<p>{many}</p>{{{{ n }}}}"),
+            format!("{{# {{{{ n{many} }}}} #}}"),
+            format!("{{%- raw -%}}{{{{ n{many} }}}}{{%- endraw %}}{{{{ n }}}}"),
+            // One bounded tag per expression, many tags.
+            "{{ a - b }}".repeat(100),
+            // The studio's busiest tag (prototype_19's menu buttons).
+            r#"{{ <ui.button id="connect" class="primary" autofocus={true} signal="main-menu.connect" key="main-menu-connect" label="Connect" /> }}"#.to_owned(),
+        ] {
+            assert!(!tera_tag_over_limit(&text), "accepted: {text:.60}");
+        }
+    }
+
+    /// What the check lets through compiles on a 2 MB thread (the test
+    /// harness's), in a debug build: the bound's every shape at the bound,
+    /// in the innermost of 39 nested blocks (Tera rejects 40).
+    #[test]
+    fn chains_at_the_bound_compile_on_a_small_stack() {
+        let at = MAX_TERA_TAG_OPERATORS;
+        for chain in [
+            format!("n{}", " - n".repeat(at)),
+            format!("n{}", " | upper".repeat(at)),
+            format!("n{}", ".x".repeat(at)),
+            format!("n{}", "[0]".repeat(at)),
+            format!("n{}", " ~ n".repeat(at)),
+            format!("{}n", "n if n else ".repeat(at / 2)),
+            format!("{}n{}", "(".repeat(at / 2), ")".repeat(at / 2)),
+        ] {
+            let template = format!(
+                "{}{{{{ {chain} }}}}{}",
+                "{% if n %}".repeat(39),
+                "{% endif %}".repeat(39)
+            );
+            assert!(!tera_tag_over_limit(&template));
+            new_tera()
+                .add_raw_template("t.html", &template)
+                .unwrap_or_else(|err| panic!("{err}: {chain:.40}"));
+        }
+    }
+
     #[test]
     fn scanners_stay_linear_on_pathological_input() {
         use std::time::{Duration, Instant};
@@ -800,6 +1030,9 @@ mod tests {
         };
         let resolve = |text: &str| drop(resolve_references(&path, text, false));
         let separate = |text: &str| drop(md::separate_statements(text));
+        let operators = |text: &str| {
+            std::hint::black_box(tera_tag_over_limit(text));
+        };
         // Deeply nested, indented blocks: the dedent re-reads each body per
         // level (review_0004 H11), bounded by its depth cap.
         let nested = |count: usize| {
@@ -834,10 +1067,21 @@ mod tests {
                 nested(1_000),
                 nested(4_000),
             ),
+            (
+                "raw blocks without an end",
+                "{% raw %}{{ ".repeat(10_000),
+                "{% raw %}{{ ".repeat(40_000),
+            ),
+            (
+                "an unclosed tag",
+                format!("{{{{ {}", "\"a\" ".repeat(10_000)),
+                format!("{{{{ {}", "\"a\" ".repeat(40_000)),
+            ),
         ] {
             for (scanner, run) in [
                 ("resolve_references", &resolve as &dyn Fn(&str)),
                 ("separate_statements", &separate),
+                ("tera_tag_over_limit", &operators),
             ] {
                 let (small_time, large_time) = (best(&small, run), best(&large, run));
                 assert!(
