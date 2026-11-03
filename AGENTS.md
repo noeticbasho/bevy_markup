@@ -338,7 +338,7 @@ tests/
                    cargo-fuzz per target, other fuzz drivers build, criterion + divan
                    benchmarks (reports as artifacts, not a gate; fuzz on pinned
                    BEVY_MARKUP_NIGHTLY)
-  mutants.yml      twice-weekly mutation testing, 4 shards, --in-place, fast settings, informational
+  mutants.yml      twice-weekly mutation testing, 8 shards, --in-place, fast settings, informational
   cache.yml        builds the shared `mutants`, `fuzz` and `bench` (both harnesses)
                    dependency caches once (push to main, daily); scheduled jobs only
                    restore them (see Testing, CI)
@@ -1371,9 +1371,18 @@ known gaps:
   cold). The main CI job is ~3–4 min with a warm cache (build 37 s, tests
   ~38 s).
   - [ ] Complete a `--full` run locally, or read the CI results (twice weekly)
-    (`mutants.yml`: unit + html_ui + stateful, 4 shards; survivors in each
+    (`mutants.yml`: unit + html_ui + stateful, 8 shards; survivors in each
     shard's job summary and the `mutants-shard-N` artifacts). Line numbers
     below are from `e1b910c`.
+  - [x] Every CI run red from 2026-10-14 to 2026-11-01, for two reasons.
+    Shard 3 lost its runner each time (“the runner has received a shutdown
+    signal”): the mutant `src/md.rs:763` `cursor += 1` → `*= 1` never
+    advances the paragraph scan, which appends the same text forever (6 GB
+    in 3 s locally). The other shards outgrew the 300 min limit (~820
+    mutants each at ~25 s). Now each test binary runs under `prlimit
+    --as=8589934592` (8 GB; such a mutant aborts in seconds and is caught)
+    and there are 8 shards. Two early baseline failures (2026-10-18,
+    10-28) were bug_0181.
   - [x] First optimized CI run (2026-10-04, run 37236608548, 4 shards of
     105 mutants: 28–49 min each). Per mutant: build median 4.7–8.0 s
     (was 194 s), tests 0.3–0.7 s (was 39 s) — all mutants of a shard take

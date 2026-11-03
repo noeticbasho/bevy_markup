@@ -19,13 +19,15 @@ env:
 
 jobs:
   mutants:
-    name: Mutants shard ${{ matrix.shard }}/4
+    # 8 shards: at ~25 s per mutant, 4 shards of ~820 mutants no longer fit
+    # the 300 min limit (2026-11-01).
+    name: Mutants shard ${{ matrix.shard }}/8
     runs-on: ubuntu-latest
     timeout-minutes: 300
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
       - uses: actions/checkout@v7
       - name: Free disk space (full-Bevy test builds are large)
@@ -49,9 +51,17 @@ jobs:
         with:
           tool: cargo-mutants
       - name: Mutate and test (unit tests, vectors and oracles, state machine)
+        # Caps each test binary's address space at 8 GB (the build is not
+        # capped). A mutant that allocates without bound, such as
+        # `cursor += 1` -> `*= 1` in md.rs's paragraph scan, then aborts in
+        # seconds and counts as caught, instead of exhausting the runner's
+        # memory until the runner shuts down and the shard is lost. Set on
+        # this step, not the job: rust-cache keys on CARGO* variables.
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: prlimit --as=8589934592 --
         run: |
           status=0
-          cargo mutants --in-place --shard ${{ matrix.shard }}/4 \
+          cargo mutants --in-place --shard ${{ matrix.shard }}/8 \
             --profile mutants --cargo-arg=--features=bevy/dynamic_linking \
             -e src/fuzz.rs -e src/lib.rs \
             --cargo-arg=--lib --cargo-arg=--test=html_ui --cargo-arg=--test=stateful \
@@ -63,7 +73,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "### Mutants shard ${{ matrix.shard }}/4"
+            echo "### Mutants shard ${{ matrix.shard }}/8"
             for kind in missed timeout; do
               file=target/mutants.out/$kind.txt
               if [ -s "$file" ]; then

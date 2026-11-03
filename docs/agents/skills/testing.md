@@ -585,8 +585,10 @@ reporting upstream or removing a vendored patch.
   the other fuzz drivers. Failures are reports to triage, not blockers. The
   fuzz corpora carry over between nights (GitHub cache
   `fuzz-corpus-<target>-*`, minimized with `cargo fuzz cmin` on Sundays).
-- `mutants.yml` (Sundays and Wednesdays, 4 shards): informational. Survivors are in each
-  shard's job summary and the `mutants-shard-N` artifacts.
+- `mutants.yml` (Sundays and Wednesdays, 8 shards): informational. Survivors are in each
+  shard's job summary and the `mutants-shard-N` artifacts. Test binaries run
+  under an 8 GB address-space cap (`prlimit`), so a mutant that allocates
+  without bound is caught instead of taking the runner down.
 - `cache.yml` (every push to main, and daily before the schedules): builds
   dependency caches once so jobs don't each build Bevy from scratch.
 
@@ -595,7 +597,7 @@ Shared build caches (`Swatinem/rust-cache` `shared-key`):
 | Cache | Built by | Restored by |
 |---|---|---|
 | `dev` | ci.yml `test` | nightly `golden`, `golden-update` |
-| `mutants` | cache.yml `mutants` | the 4 mutants shards |
+| `mutants` | cache.yml `mutants` | the 8 mutants shards |
 | `fuzz` | cache.yml `fuzz` | nightly `fuzz` (3 targets) |
 
 Consumers restore with `save-if: false`; the producer builds only when the
