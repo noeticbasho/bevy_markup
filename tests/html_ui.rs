@@ -10368,3 +10368,90 @@ mod review_0006 {
         );
     }
 }
+
+/// ADR 0038: with the `svg` feature, `.svg` files load as images wherever
+/// an image path is accepted. The `<img>` keeps the SVG's intrinsic aspect
+/// (32×8: a CSS width of 16px gives 4px); the `border-image`'s `%` slices
+/// resolve against its intrinsic size (40×20: 25% is 5 of the height, 10
+/// of the width), so slice numbers mean the SVG's own px, as in a browser.
+#[cfg(feature = "svg")]
+#[test]
+fn svg_images_load_through_img_and_border_image() {
+    let icon = r##"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="8"><rect width="32" height="8" fill="gold"/></svg>"##;
+    let frame = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 20"><rect x="2" y="2" width="36" height="16" fill="none" stroke="#843" stroke-width="4"/></svg>"##;
+    let mut ui = TestUi::new(
+        "svg-images",
+        &[
+            ("icon.svg", icon),
+            ("frame.svg", frame),
+            (
+                "page.html",
+                r#"<p><img class="w" src="icon.svg"></p><div class="framed"><p>In</p></div>"#,
+            ),
+            (
+                "style.css",
+                "html { color: #ffffff } img.w { width: 16px } \
+                 .framed { border-image: url(frame.svg) 25% stretch; border-width: 4px }",
+            ),
+        ],
+    )
+    .stylesheet("style.css")
+    .spawn("page.html", TemplateContext::new(), Node::default());
+    ui.settle().assert_dump(
+        r#"
+html-ui
+  p
+    "icon.svg" img 16x4
+  div.framed border=4,4,4,4 slice=frame.svg 5,10,5,10 stretch
+    p
+      "In" default 16px #ffffff
+"#,
+    );
+    // The loaded image is the SVG drawn at its intrinsic size.
+    let world = ui.world_mut();
+    let server = world.resource::<AssetServer>().clone();
+    let handle: Handle<Image> = server.load("icon.svg");
+    let image = world
+        .resource::<Assets<Image>>()
+        .get(&handle)
+        .expect("loaded");
+    assert_eq!(image.size(), UVec2::new(32, 8));
+}
+
+/// A hostile SVG (a `<use>` cycle, which usvg would expand past a 2 MB
+/// stack) fails its load and the page still builds, without the image.
+#[cfg(feature = "svg")]
+#[test]
+fn hostile_svg_fails_its_load_and_the_page_builds() {
+    let bomb = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><g id="a"><use href="#b"/></g><g id="b"><use href="#a"/></g></svg>"##;
+    let mut ui = TestUi::new(
+        "svg-hostile",
+        &[
+            ("bomb.svg", bomb),
+            ("page.html", r#"<p>Before <img src="bomb.svg"> after</p>"#),
+            ("style.css", "html { color: #ffffff }"),
+        ],
+    )
+    .stylesheet("style.css")
+    .spawn("page.html", TemplateContext::new(), Node::default());
+    ui.settle();
+    let world = ui.world_mut();
+    let server = world.resource::<AssetServer>().clone();
+    let handle: Handle<Image> = server.load("bomb.svg");
+    for _ in 0..200 {
+        if server.load_state(&handle).is_failed() {
+            break;
+        }
+        ui.update(1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let world = ui.world_mut();
+    let server = world.resource::<AssetServer>().clone();
+    let state = server.load_state(&handle);
+    assert!(state.is_failed(), "{state:?}");
+    let dump = ui.dump();
+    assert!(
+        dump.contains("\"Before \"") && dump.contains("\" after\""),
+        "{dump}"
+    );
+}

@@ -211,6 +211,12 @@ jobs:
           path: fuzz/corpus/ftl
           key: fuzz-corpus-ftl-for-coverage-${{ github.run_id }}
           restore-keys: fuzz-corpus-ftl-
+      - name: Restore the svg fuzz corpus
+        uses: actions/cache/restore@v6
+        with:
+          path: fuzz/corpus/svg
+          key: fuzz-corpus-svg-for-coverage-${{ github.run_id }}
+          restore-keys: fuzz-corpus-svg-
       - name: Measure
         shell: bash
         run: |
@@ -232,7 +238,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [html, css, ftl]
+        target: [html, css, ftl, svg]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master

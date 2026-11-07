@@ -42,6 +42,7 @@ never reach library users. A missing feature shows up in `cargo check --lib`.
 | `ActiveLocale(Option<Handle<LocaleBundle>>)` | Resource | Fluent bundle; `None` = no localization; swap = language |
 | `FontFamilies` / `FontFaces` / `GenericFamily` | Resource + types | CSS `font-family` name → faces: font files or system families (any `FontSource`; for system families bold/italic are requested via `TextFont` weight/style), + generic keyword mapping. A CSS list resolves to every registered family in order and composes Bevy 0.20's per-glyph fallback list (ADR 0015) |
 | `HtmlTemplate`, `Stylesheet`, `NineSlice`, `LocaleBundle` | Assets | `.html`/`.htm`/`.md`/`.markdown`, `.css`, `*.slice.ron`, `*.ftl.ron` |
+| `SvgLoaderSettings { scale }` | Loader settings (`svg` feature) | `.svg` → `Image` (`svg.rs` `SvgLoader`, ADR 0038): drawn on the CPU at intrinsic size × `scale`, ≤ `MAX_SVG_SIDE` per side; refusing `<image href>` resolver, `recursion_depth` check (≤ 256, U17), render-cost budget (`MAX_SVG_COST`); typed `Image` loads coexist with other crates' `.svg` loaders |
 | `NineSliceFrame(Handle<NineSlice>)` | Component | 9-slice image as a node's border-box background (non-HTML nodes; HTML uses CSS `border-image`) |
 | `HtmlCustomElementsExt::define_html_element(name, system)`, `ElementConnected { entity, root, name, dataset }` | App ext, system input | `is="<name>"` customized built-ins: the system (`In<ElementConnected>`, `data-*` attributes as `dataset`) runs on every spawn of the element, in document order, before `HtmlUiBuilt`; not on restyles |
 | `HtmlWorldAnchor { target, offset, pivot, camera }`, `HtmlWorldAnchorView { distance, on_screen }` | Component | keeps a UI root's `pivot` (fraction of its size, default bottom center) over `target`'s translation + `offset` projected through `camera` / its `UiTargetCamera` / the default UI camera (viewport-relative and `UiScale`-divided: offset viewports and scale factors read correctly); owns its `Visibility` (hidden behind the camera, off screen, or over an invisible target); despawned with `target`; `place_world_anchored`, `PostUpdate` before `UiSystems::Prepare` (last frame's transforms) |
@@ -59,7 +60,8 @@ Re-exported crates (their types appear in the API): `tera`, `tl` (the
 `astral-tl` fork, bug_0019 / UPSTREAM.md U11),
 `fluent`, `lightningcss`. Cargo features: `system_fonts` (Bevy's
 `system_font_discovery`), `text-input` (the editable-text widget),
-`hot-reload` (the file watcher), `fuzzing` (the fuzz harness),
+`hot-reload` (the file watcher), `svg` (`.svg` images via usvg/resvg,
+ADR 0038; `fuzzing` implies it), `fuzzing` (the fuzz harness),
 `dev-tools` (the examples' QA surface), and `hotpath` / `hotpath-alloc` /
 `hotpath-prometheus` / `hotpath-cloud` (hotpath profiling: `#[hotpath::measure]`
 on the pipeline systems and hot internals, `#[hotpath::main]` on every
@@ -120,6 +122,16 @@ src/
                    frame), focus pseudo-state, press-to-focus, activation (InputFocus-based;
                    a submit button's activation submits its form)
   nine_slice.rs    NineSlice asset + loader, NineSliceFrame
+  svg.rs           (`svg` feature, ADR 0038) `.svg` → `Image` loader: `parse` (roxmltree once, as
+                   usvg configures it → `recursion_depth`: longest path over nesting + url(#…)/href
+                   edges, `<style>` rules matched by simplecss like usvg, cycles refused, ≤ 256
+                   units ≈ 800 KB debug stack — usvg's converter overflows a 2 MB thread on a few
+                   KB of references, UPSTREAM U17 → `usvg::Tree::from_xmltree` on the same
+                   document), refusing `<image href>` resolver (usvg's default reads any file,
+                   U19), `raster_size` (side cap before allocating: tiny-skia aborts on a failed
+                   allocation), `estimate_cost` (resvg's layer/filter/mask/clip model, early exit
+                   at `MAX_SVG_COST`; calibrated in docs/agents/performance/adr-0038-probe.md §7),
+                   straight-alpha `Rgba8UnormSrgb` output
 examples/
                    One directory per example (`<name>/main.rs`, which cargo finds as the
                    example `<name>`), each with a README.md: a screenshot, what it shows,
@@ -358,7 +370,8 @@ scripts/
                      header; they encapsulate the per-driver workarounds
                      described under Testing TODO 5)
 fuzz/
-  fuzz_targets/      cargo-fuzz targets (`html`, `css`, `ftl`) over `bevy_markup::fuzz`
+  fuzz_targets/      cargo-fuzz targets (`html`, `css`, `ftl`, `svg`) over `bevy_markup::fuzz`
+                     (`svg` is cargo-fuzz only and asserts each input finishes in 5 s)
   seeds/<target>/    committed minimized seed corpora (read-only extra input to every fuzz run)
   corpus/, artifacts/, coverage/  gitignored (corpus/ = working corpus; CI carries it over nightly)
 honggfuzz/

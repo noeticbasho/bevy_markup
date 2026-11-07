@@ -30,7 +30,7 @@ exclude = [
 system_fonts = ["bevy/system_font_discovery"]
 # Exposes `bevy_markup::fuzz` (`#[doc(hidden)]`, not covered by semver): internal
 # glue callable without a full Bevy app, for `fuzz/` targets.
-fuzzing = ["dep:wgpu-types"]
+fuzzing = ["dep:wgpu-types", "svg"]
 # Dev/QA only: serves the examples over localhost BRP + MCP
 # (bevy_mcp_harness), so an agent can playtest them — `game/screenshot`
 # (the examples' README screenshots), `game/ui`, input mocks. Never enabled
@@ -40,6 +40,11 @@ dev-tools = ["dep:bevy_mcp_harness"]
 # (`EditableText` + `TextInput`); the widget crate isn't part of the
 # crate's minimal `ui_api` bevy features, so it's opt-in.
 text-input = ["bevy/bevy_ui_widgets", "bevy/keyboard"]
+# `.svg` files load as `Image`s, drawn on the CPU by resvg (ADR 0038):
+# `<img src="x.svg">`, `border-image`/`background-image: url(x.svg)` and
+# 9-slice images. resvg without its default features: no text (fonts), no
+# raster decoders, no svgz. Opt-in: apps that don't use SVG pay nothing.
+svg = ["dep:resvg", "dep:roxmltree", "dep:simplecss", "dep:wgpu-types"]
 # Bevy's asset file watcher, for the `hot-reload` example (edit an asset
 # file and the UI restyles without a restart — the library already reacts
 # to `LoadedWithDependencies`/`Modified`). Inert otherwise; the library
@@ -120,6 +125,18 @@ hotpath = "0.28"
 # Only for the `fuzzing` harness: `Image::new_fill` needs wgpu texture types,
 # which bevy_image does not re-export.
 wgpu-types = { version = "30.0.1", optional = true }
+# SVG parsing (usvg) and CPU rasterization (tiny-skia), the `svg` feature.
+resvg = { version = "0.49.0", default-features = false, optional = true }
+# usvg's XML parser and CSS selector engine, for the `svg` loader's
+# recursion-depth check (ADR 0038). roxmltree is used through usvg's
+# re-export (`usvg::roxmltree`), so it can't differ from usvg's; this
+# entry is only a floor: 0.21.1's tokenizer recursed per nesting level
+# (~14 KB of stack each in debug) and overflowed a 2 MB thread at ~150
+# levels. simplecss matches `<style>` rules as usvg matches them; usvg
+# keeps it private, so `svg::tests::usvg_and_the_depth_check_share_one_
+# simplecss_and_roxmltree` fails if Cargo.lock ever holds two.
+roxmltree = { version = "0.21.2", optional = true }
+simplecss = { version = "0.2.2", optional = true }
 # Only for the `dev-tools` feature: the examples' QA tool surface — localhost
 # BRP + MCP (bevy_mcp_harness) so an agent can playtest the examples:
 # `game/screenshot` (the examples' README screenshots), `game/ui`, input

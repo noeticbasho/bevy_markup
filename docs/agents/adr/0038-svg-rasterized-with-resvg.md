@@ -6,7 +6,7 @@
 | `Title` | SVG: rasterize on the CPU with usvg + resvg |
 | `Date` | 2026-11-07 17:19 +0400 |
 | `Author` | Claude Opus 5.5 (Anthropic), via Claude Code; direction chosen by Nikita Chashchinskii |
-| `Commit` | `5bae780 Fix the Mutants workflow: cap test memory and use 8 shards` + uncommitted (this ADR, revised after the probe) |
+| `Commit` | `5bae780 Fix the Mutants workflow: cap test memory and use 8 shards` + uncommitted (this ADR, revised after the probe); revised again at `d1eae43` + uncommitted step 1 (the recursion-depth check, §5) |
 | `Status` | Proposed |
 | `Related` | ADR 0028 (roadmap item 12: "decide the shape first"), 0002 (library shape, minimal Bevy features), 0036 (in-domain crates replacing maintained code); review_0003 G19 (no remote loads); [probe report](../performance/adr-0038-probe.md) (the evidence for §2, §3 and §5) |
 
@@ -203,13 +203,51 @@ SVG is untrusted input, like every other loader input here. The probe
   worst-case raster in the tens of milliseconds at the pixel cap
   [INFERENCE: the cost model's weights hold across primitives; a
   property test checks estimate vs measured time].
-- **Parse limits: usvg's own suffice.** roxmltree rejects entity loops
-  (depth 10, 255 references per entity). usvg rejects nesting deeper
-  than 1024 and trees over 1,000,000 nodes counted after `<use>`
-  expansion. That stopped a 10⁷-node `<use>` bomb in 0.06 s and 100,000
-  nested groups in 5 ms with no stack overflow. Memory stays
-  proportional to input size, so no pre-check like `nesting_over_limit`
-  is added.
+- **Parse limits.** roxmltree rejects entity loops (depth 10, 255
+  references per entity). usvg rejects trees over 1,000,000 nodes
+  counted after `<use>` expansion. That stopped a 10⁷-node `<use>` bomb
+  in 0.06 s. Memory stays proportional to input size.
+- **A static recursion-depth check before usvg converts** (revised during
+  step 1, probe §6). On a 2 MB thread (Bevy's task-pool default), usvg
+  0.49's converter overflows the stack at a few KB of input:
+  - 113 `feImage` hops, 121 chained patterns or 251 `<use>` hops in debug;
+  - ~689 nested `<g>` in debug, below its own 1024-level check.
+
+  Upstream's `max_depth` (#1223, unreleased) doesn't count references
+  (UPSTREAM U17). So `svg::parse`:
+  1. parses the XML once with roxmltree, configured as usvg configures it;
+  2. bounds the recursion with `svg::recursion_depth`;
+  3. hands that same document to `usvg::Tree::from_xmltree`.
+
+  The bound is the longest path over parent → child and element →
+  referenced-element edges:
+  - weights are 1 per element, 2 per `<svg>`, +6 per reference;
+  - a reference is any `url(#id)` or `#id` in an attribute, or in a
+    `<style>` rule matched with simplecss as usvg matches it;
+  - cycles are refused, since usvg expands `<use>` cycles to its depth
+    limit;
+  - the limit is 256, about 800 KB in debug.
+
+  One parse means the check and usvg can't disagree about the document
+  (a DTD entity that expands into markup counts). A test draws the
+  deepest accepted document of every construct, and of mixes, on a 2 MB
+  debug thread. roxmltree 0.21.1 also recursed per level (~14 KB each in
+  debug); 0.21.2 fixed it, and the crate takes it as a version floor
+  (UPSTREAM U18).
+
+  The check is sound only while it uses usvg's own parser and selector
+  engine:
+  - roxmltree comes from usvg's re-export (`usvg::roxmltree`), so the
+    versions can't differ (`Tree::from_xmltree` would also fail to
+    compile);
+  - simplecss is private in usvg, so
+    `usvg_and_the_depth_check_share_one_simplecss_and_roxmltree` fails if
+    `Cargo.lock` holds two (falsified with a second copy). Both ask for
+    `0.2`, so an app's build always resolves one; a split arrives only
+    with a resvg bump here.
+
+  The same coupling for the CSS pre-scan is a compile-time check
+  (ADR 0039).
 - **Remote paths.** `.svg` assets go through the existing `is_remote`
   refusal like any other image.
 - **Fuzzing.** A fuzz target `svg` over the loader's parse, budget and
@@ -277,6 +315,26 @@ Limits).
 - **Status quo: apps pre-rasterize to PNG.** No dependency, but no
   sharp scaling, no `currentColor` theming and no inline SVG. Keeping
   this means closing ADR 0028 item 12 as "won't do".
+- **For the stack overflows (§5), weighed during step 1:**
+  - *A dedicated loader thread with a large stack.* This was chosen first,
+    then dropped for the static check, which the user proposed. The
+    thread needs a stack sized from the input (up to ~500 B of debug
+    stack per input byte, measured), so it reserves hundreds of MB for
+    large files. It doesn't exist on wasm, and it's a workaround to
+    remove later. The static check costs one linear pass over a
+    document that is parsed once anyway, and works on every target.
+  - *Patch usvg in a fork via `[patch.crates-io]`*, like the
+    fluent-syntax fork. `[patch]` doesn't reach crates that depend on
+    bevy_markup, so their apps would stay exposed unless they copied the
+    entry.
+  - *Another XML parser for the check* (quick-xml, xml-rs). It would be
+    no more robust than roxmltree 0.21.2, which is iterative and caps
+    entities. It would open parser differentials: a parser that doesn't
+    expand DTD entities into markup sees a flat document where usvg sees
+    600 levels.
+  - *Wait for upstream.* A usvg release that counts references in
+    `max_depth` makes the check removable (a PR sketch is in U17), but
+    there's no such release yet.
 - **Hand-write a rasterizer or a narrower SVG subset.** This is the
   kind of code ADR 0036 replaced with a maintained crate, and SVG is far
   larger than the entity table was.

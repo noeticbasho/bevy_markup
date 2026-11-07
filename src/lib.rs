@@ -209,6 +209,10 @@
 //!   ([`EditableText`](bevy::text::EditableText) + `TextInput`); the widget
 //!   crate isn't part of the crate's minimal `ui_api` bevy features, so it's
 //!   opt-in.
+//! - `svg`: `.svg` files load as `Image`s, drawn on the CPU, so
+//!   `<img src="x.svg">`, `border-image`/`background-image: url(x.svg)` and
+//!   9-slice images accept SVG (the `bevy_markup::svg` module has the details
+//!   and the limits on untrusted files).
 //! - `hot-reload`: Bevy's asset file watcher, for editing an asset file and
 //!   restyling without a restart (the library already reacts to asset events).
 //! - `fuzzing`: exposes `bevy_markup::fuzz` (`#[doc(hidden)]`, not covered by
@@ -246,6 +250,9 @@ pub mod nine_slice;
 mod rebuild;
 pub mod signals;
 pub mod style;
+#[cfg(feature = "svg")]
+#[cfg_attr(docsrs, doc(cfg(feature = "svg")))]
+pub mod svg;
 pub mod template;
 pub mod tooltips;
 
@@ -273,12 +280,15 @@ pub mod prelude {
         SignalSource, SignalTrigger,
     };
     pub use crate::style::{DefaultStylesheet, HtmlStylesheet, Stylesheet};
+    #[cfg(feature = "svg")]
+    pub use crate::svg::SvgLoaderSettings;
     pub use crate::template::HtmlTemplate;
     pub use crate::tooltips::{HtmlTooltip, HtmlTooltips};
     pub use crate::{BevyMarkupPlugin, HtmlUiSystems};
 }
 
-/// Adds the asset loaders (`.html`/`.md`, `.css`, `*.slice.ron`, `*.ftl.ron`), the
+/// Adds the asset loaders (`.html`/`.md`, `.css`, `*.slice.ron`, `*.ftl.ron`,
+/// and `.svg` with the `svg` feature), the
 /// [`DefaultStylesheet`](style::DefaultStylesheet),
 /// [`ActiveLocale`](l10n::ActiveLocale) and
 /// [`FontFamilies`](fonts::FontFamilies) resources, and the systems that turn
@@ -338,6 +348,9 @@ impl Plugin for BevyMarkupPlugin {
             // changes nothing.
             .init_resource::<bevy::input_focus::directional_navigation::DirectionalNavigationMap>()
             .init_resource::<bevy::input_focus::directional_navigation::AutoNavigationConfig>();
+        #[cfg(feature = "svg")]
+        app.init_asset::<Image>()
+            .init_asset_loader::<svg::SvgLoader>();
         #[cfg(feature = "text-input")]
         {
             // The widget's keyboard editing keys off Bevy's

@@ -30,6 +30,9 @@ the issue may already be fixed or reported.
 | U14 | lightningcss | Nested `light-dark(` and `calc(` around a `var()` parse in exponential time ([bug_0179](bug_0179.md)) | a few hundred bytes of CSS stall the load for minutes to hours | nesting pre-scan bounds `(…)` at 8 (`MAX_CSS_PAREN_NESTING`) | reported upstream by others (#1382, #1389); PR #1383 open for #1382 |
 | U15 | lightningcss | The parser recurses once per block with no bound ([bug_0092](bug_0092.md), [bug_0179](bug_0179.md)) | stack overflow (abort) from a few KB of nested blocks | nesting pre-scan bounds all blocks at 32 (`MAX_CSS_NESTING`) | reported upstream by others (#1297, #1155, #1092) |
 | U16 | tera | The compiler recurses once per operator of an expression; the 2.4.0 cap (256 operations, Keats/tera#1035) still overflows a 2 MB thread in debug builds from 136 ([bug_0182](bug_0182.md)) | stack overflow (abort) at template load in unoptimized builds | a tag over 64 operators fails the load before Tera compiles it (`tera_tag_over_limit`, `src/template.rs`) | unreported (follow-up to the closed #1035) |
+| U17 | usvg (resvg) | Converter recursion through references and nesting is unbounded | stack overflow (abort) from a few KB of SVG on a 2 MB thread (`svg` feature) | static recursion-depth check before conversion (`svg::recursion_depth`) | unreported; resvg #1223 (unreleased) bounds XML nesting and `<use>` only |
+| U18 | roxmltree | 0.21.1's tokenizer recursed once per nesting level | stack overflow at ~150 levels in debug on a 2 MB thread (`svg` feature) | version floor `roxmltree >= 0.21.2` | fixed upstream (0.21.2) |
+| U19 | usvg (resvg) | The default `ImageHrefResolver` reads any file path | an SVG reads any file the process can and embeds it (`svg` feature) | a resolver that resolves nothing | unreported (by design; worth a docs warning) |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -366,6 +369,71 @@ CI clippy command and workspace tests pass on both.
 - **Local workaround:** `template::tera_tag_over_limit` rejects a tag of
   more than 64 operators before Tera compiles it; drop it once Tera's
   compiler holds its cap on a 2 MB debug thread.
+
+## U17 — usvg: converter recursion through references and nesting is unbounded
+
+- **Project:** [linebender/resvg](https://github.com/linebender/resvg)
+  (`usvg` crate). Affected: 0.49.0 (the latest release, checked
+  2026-11-07); `main` after PR
+  [#1223](https://github.com/linebender/resvg/pull/1223) (merged
+  2026-11-05, unreleased) too, which makes the XML nesting limit
+  configurable (`Options::max_depth`, default 1024) and counts `<use>`
+  instances, but not references followed by the converter.
+- **Problem:** `parser/converter.rs` recurses once per nested element
+  and once per reference it follows into a target's content
+  (`paint_server::convert_pattern` → `convert_children` → … →
+  `convert_path` → back into `paint_server::convert`; likewise masks,
+  clip paths, markers, `feImage`). On a 2 MB thread (Bevy's task-pool
+  default) a debug build overflows at 121 chained patterns, 113 `feImage`
+  hops, 123 markers, 251 `<use>` hops, 293 masks, 370 nested `<svg>`,
+  ~689 nested `<g>` (below the 1024 nesting check); release at about 3×
+  those (probe report `docs/agents/performance/adr-0038-probe.md` §6).
+  A few KB of SVG abort the process.
+- **Reproduction:** on a 2 MB thread, `usvg::Tree::from_str` of
+  `<svg xmlns="http://www.w3.org/2000/svg">` followed by 130 patterns,
+  each `<pattern id="pN" width="8" height="8"
+  patternUnits="userSpaceOnUse"><rect width="8" height="8"
+  fill="url(#pN-1)"/></pattern>`, and a rect filled with the last.
+- **Upstream:** not reported. A PR sketch: carry a depth in the
+  converter's `State` (already threaded through every recursive call),
+  increment it on each element and each followed reference, and fail
+  with the existing `NodesLimitReached` past `Options::max_depth` — the
+  option #1223 introduced, so callers on small stacks set one number.
+- **Local workaround:** `svg::parse` parses the XML with roxmltree,
+  bounds the recursion with `svg::recursion_depth` (longest path over
+  nesting and `url(#…)`/`href` edges, `<style>` rules matched with
+  simplecss as usvg matches them, cycles refused) and only then calls
+  `Tree::from_xmltree` on the same document. Keep it until a usvg
+  release bounds the converter's recursion; then set `max_depth` and
+  drop the check (keep `accepted_depths_fit_a_two_megabyte_stack`).
+
+## U18 — roxmltree: the tokenizer recursed once per nesting level
+
+- **Project:** [RazrFalcon/roxmltree](https://github.com/RazrFalcon/roxmltree).
+  Affected: 0.21.1 and earlier; fixed in 0.21.2 (2026-10-24: "Element
+  content is now parsed iteratively instead of recursing once per
+  nesting level").
+- **Problem:** `tokenizer::parse_element` / `parse_content` recursed per
+  level, ~14 KB of stack each in a debug build: a 2 MB thread overflowed
+  at ~150 nested elements. usvg 0.49 accepts `roxmltree ^0.21.1`, so an
+  older lockfile keeps the bad version (bevy_markup's did).
+- **Local workaround:** `roxmltree = "0.21.2"` in `Cargo.toml` (the `svg`
+  feature), a version floor. Status: fixed upstream; the floor stays as
+  long as usvg allows 0.21.1.
+
+## U19 — usvg: the default image resolver reads any file path
+
+- **Project:** linebender/resvg (`usvg`). Affected: 0.49.0.
+- **Problem:** `ImageHrefResolver::default_string_resolver` treats every
+  non-`data:` `href` as a file path (absolute, cwd-relative without
+  `resources_dir`, `..` without containment) and `std::fs::read`s it,
+  embedding bitmaps and parsing SVGs (probe report §2, under `strace`).
+  Reasonable for a command-line converter; a hazard for libraries that
+  render untrusted SVG, and the docs don't warn.
+- **Upstream:** not reported. Suggest a docs warning, or a resolver that
+  confines paths to `resources_dir`.
+- **Local workaround:** `svg::options` installs a resolver whose closures
+  return `None`.
 
 ## Not upstream bugs (recorded so they aren't re-filed)
 

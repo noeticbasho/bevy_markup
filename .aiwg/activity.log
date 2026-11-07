@@ -12,3 +12,4 @@
 ## [2026-11-07 13:20] update | ADR 0038 proposed: SVG rasterized on the CPU with usvg + resvg behind an svg feature; SDLC pointers updated; source state 5bae780
 ## [2026-11-07 13:36] update | ADR 0038 probe: loader conflicts, usvg resolver reads, parse/raster limits measured; ADR revised
 ## [2026-11-07 14:57] update | ADR 0039: CSS nesting pre-scan walks cssparser's tokens (replaces the hand-written scan); SDLC pointers updated
+## [2026-11-07 15:07] update | ADR 0038 step 1: svg feature (loader, depth check, cost budget, fuzz target, tests); UPSTREAM U17-U19

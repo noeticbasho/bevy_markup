@@ -196,3 +196,97 @@ From its 3.0.1 source:
 
 There's nothing to reuse behind the library's `Handle<Image>` paths, so
 the ADR's own-loader decision stands.
+
+## 6. Stack depth on a 2 MB thread (found while implementing step 1)
+
+Bevy's task-pool threads, which run asset loaders, get the default 2 MB
+stack (`bevy_tasks` `TaskPoolBuilder::stack_size` unset). The step-1 unit
+tests run on 2 MB test threads and aborted with a stack overflow. Every
+case below was located with gdb (`bt`, frames grouped by function) and
+sized by bisection in a probe that parses on a 2 MB thread.
+
+**roxmltree 0.21.1** (bevy_markup's lockfile; usvg accepts `^0.21.1`):
+`tokenizer::parse_element` / `parse_content` recurse per nesting level,
+~13.8 KB per level in debug (2.08 MB over 151 levels, from frame
+addresses). 1,000 nested `<g>` overflowed. 0.21.2 (2026-10-24) parses
+iteratively: fixed upstream, so the crate takes a version floor
+(UPSTREAM U18).
+
+**usvg 0.49 converter**, with roxmltree 0.21.2. It recurses per nested
+element and per reference followed into a target's content
+(`paint_server::convert_pattern` → `convert_children` → … →
+`convert_path` → `paint_server::convert`). Overflow on a 2 MB thread,
+parse stage (`Tree::from_str`) alone:
+
+| Construct (each level references or nests the previous) | Debug | Release | Debug stack per level |
+|---|---|---|---|
+| `<g>` nesting | 689 | none below usvg's 1024 limit | 3.0 KB |
+| nested `<svg>` | 370 | 704 | 5.7 KB |
+| `<use>` chain | 251 | none up to 4096 (node limit first) | 8.4 KB |
+| `<pattern>` filled with the previous | 121 | 333 | 17 KB |
+| `<marker>` on a path in the previous | 123 | 336 | 17 KB |
+| `<filter><feImage href>` | 113 | 440 | 18.5 KB |
+| `<mask>` | 293 | 710 | 7.2 KB |
+| `<clipPath clip-path>` | 984 | 1566 | 2.1 KB |
+| `href` inheritance (pattern, gradient, filter) | none up to 65,536 | none | — |
+
+The `<g>` case escaped §3: its doubling search went from 512 straight to
+1024, where usvg's nesting check fails first. Upstream's PR #1223 (merged
+2026-11-05, unreleased) makes that check configurable and counts `<use>`
+instances, but not converter references (UPSTREAM U17).
+
+**The check.** `svg::recursion_depth` runs on the roxmltree document
+before usvg converts it (the same document: `Tree::from_xmltree`). It
+takes the longest path over parent → child edges and element →
+referenced-element edges:
+- Edge weights: 1 per element, 2 per `<svg>`, +6 per reference.
+- References are `url(#id)` or `#id` in any attribute, and in `<style>`
+  rules matched by simplecss as usvg matches them.
+- Cycles are refused.
+
+The limit is 256. Calibration against the table: 3.0 KB per element, and
+a pattern hop (path → reference → pattern → content, 8 units) costs
+≤ 17 KB, so 256 units stays near 800 KB in debug.
+
+**Verified.** `accepted_depths_fit_a_two_megabyte_stack` builds, for each
+construct and for 24 pseudo-random mixes, the deepest document the check
+accepts, and draws it on a 2 MB thread in the debug test build. Accepted
+depths: `<g>` 253 levels, `<svg>` 126, `<use>`/pattern/mask/marker/CSS
+mask 31, `feImage` 15, mixes 31–36.
+- *Falsified:* with the limit raised to 4096 the test aborts with a stack
+  overflow.
+- *Headroom:* the same documents pass on a 1 MB stack and overflow at
+  768 KB, so 2 MB leaves at least 2× in debug (release frames are about 3×
+  smaller).
+
+## 7. Cost-estimate calibration
+
+`fuzz::svg_estimate` against `resvg::render` (best of three, release
+build), 31 document families × 256², 1024², 2048² (the families of §4,
+plus gradients, strokes, patterns, lighting, displacement, 20,000 small
+paths, a 200,000-segment path). Time per estimated unit:
+
+| | ns per unit |
+|---|---|
+| plain fill (overestimated: a solid rect is a fast path) | 0.02–0.08 |
+| paths, clip chains, morphology, lighting | 0.1–1.2 |
+| gradients, masks, opacity nests, blurs, convolution | 1.1–1.9 |
+| drop shadow, displacement, turbulence | 2.0–2.7 |
+| blur over a 20× filter region (clamped to 25× the canvas) | 3.7–3.8 |
+
+The first run had morphology at 3.3–3.75 ns/unit for radius 40
+(time grows faster than linearly in the radius). Its weight became
+`2·rx·ry + 8·(rx + ry)`, and those rows now read 0.40–0.65.
+
+At `MAX_SVG_COST` = 2²⁷ (134,217,728 units) the slowest accepted draw is
+≈ 0.5 s on this machine (Ryzen 7 9800X3D), on an IO thread, not a frame.
+Ordinary content stays far below the limit:
+- a 1024² panel with a drop shadow: 36M units;
+- a 4096² gradient: 50M units.
+
+Debug builds draw roughly 10–50× slower.
+
+The cargo-fuzz `svg` target draws within a 256 px side and a
+proportional budget, and asserts each input finishes within 5 s: a miss
+of the estimate by more than ~1000× fails it. First run: 144,475 inputs
+in 180 s, no failures.

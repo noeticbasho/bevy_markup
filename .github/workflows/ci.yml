@@ -55,12 +55,20 @@ jobs:
       # here fails fast; the full unit tests run further down.
       - name: Library with fuzzing
         run: cargo check --lib --features fuzzing
+      # The svg loader compiles only under its feature (`fuzzing` implies
+      # it, but dead-code warnings show only without the harness).
+      - name: Library with svg
+        run: cargo check --lib --features svg
       - name: All targets
         run: cargo build --all-targets
       - name: Tests
         run: cargo test
       - name: Tests with text-input
         run: cargo test --features text-input
+      # The loader's unit tests (2 MB-stack soundness, budget, resolver)
+      # and the headless SVG vectors.
+      - name: Tests with svg
+        run: cargo test --features svg --lib --test html_ui
       # The hot-reload and demo dev-tools examples are gated behind those
       # features and skipped by --all-targets.
       - name: Gated examples compile

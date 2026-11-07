@@ -1,0 +1,1 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="64" height="64"><filter id='f'><feTurbulence baseFrequency='0.01' numOctaves='100000'/><feMorphology radius='9999'/></filter><rect width='64' height='64' filter='url(#f)'/></svg>

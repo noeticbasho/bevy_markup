@@ -74,3 +74,11 @@ fn replay_ftl_corpus() {
         }
     }
 }
+
+#[test]
+#[ignore = "replays thousands of corpus inputs; run for coverage"]
+fn replay_svg_corpus() {
+    for svg in corpus("svg") {
+        let _ = bevy_markup::fuzz::svg(svg.as_bytes());
+    }
+}

@@ -464,3 +464,37 @@ mod tests {
         let _ = cascade(&String::from_utf8_lossy(bytes));
     }
 }
+
+/// The `svg` loader's whole path on arbitrary bytes: usvg parse (with the
+/// refusing image resolver), the size cap, the render-cost estimate, and
+/// the resvg draw when the estimate allows it. Drawn within a 256 px side
+/// and a budget scaled to that area, so one input stays fast; the fuzz
+/// target times the call, and a slow one means the estimate missed a cost.
+/// `Ok` carries the size and the estimate.
+pub fn svg(source: &[u8]) -> Result<String, String> {
+    let side = 256;
+    let full = u64::from(crate::svg::MAX_SVG_SIDE).pow(2);
+    let limits = crate::svg::Limits {
+        side,
+        cost: crate::svg::MAX_SVG_COST / (full / u64::from(side).pow(2)),
+    };
+    let raster = crate::svg::rasterize(source, 1.0, limits).map_err(|err| err.to_string())?;
+    Ok(format!(
+        "{}x{} cost {}",
+        raster.width, raster.height, raster.cost
+    ))
+}
+
+/// The `svg` loader's size and cost estimate at its default limits, without
+/// drawing: `(width, height, estimate)`. For calibrating the estimate
+/// against resvg's real render time (probe report §7).
+pub fn svg_estimate(source: &[u8]) -> Result<(u32, u32, u64), String> {
+    let tree = crate::svg::parse(source).map_err(|err| err.to_string())?;
+    let (width, height, _) = crate::svg::raster_size(&tree, 1.0, crate::svg::MAX_SVG_SIDE)
+        .map_err(|err| err.to_string())?;
+    Ok((
+        width,
+        height,
+        crate::svg::estimate_cost(&tree, width, height, u64::MAX),
+    ))
+}

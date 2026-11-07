@@ -1,12 +1,12 @@
 #!/bin/sh
 # cargo-fuzz (libFuzzer + AddressSanitizer) over bevy_markup::fuzz harnesses.
-# Usage: scripts/fuzz-libfuzzer.sh <html|css|ftl> [seconds] [libFuzzer flags...]
+# Usage: scripts/fuzz-libfuzzer.sh <html|css|ftl|svg> [seconds] [libFuzzer flags...]
 set -eu
 cd "$(dirname "$0")/.."
 
 case "${1:-}" in
-    html|css|ftl) target=$1 ;;
-    *) echo "usage: $0 <html|css|ftl> [seconds=60]" >&2; exit 2 ;;
+    html|css|ftl|svg) target=$1 ;;
+    *) echo "usage: $0 <html|css|ftl|svg> [seconds=60]" >&2; exit 2 ;;
 esac
 duration=${2:-60}
 shift $(( $# < 2 ? $# : 2 ))

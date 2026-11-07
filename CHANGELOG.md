@@ -8,6 +8,21 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **SVG images** (the new `svg` cargo feature): `.svg` files load as
+  ordinary `Image`s, drawn on the CPU by resvg, so `<img src="icon.svg">`,
+  `border-image: url(frame.svg) 8` (slices in the SVG's px),
+  `background-image: url(…)` and `*.slice.ron` images accept SVG.
+  Images are drawn at the document's intrinsic size; `SvgLoaderSettings`
+  (`load_with_settings::<Image, SvgLoaderSettings>`) draws them larger.
+  Static SVG only, and `<text>` inside an SVG isn't drawn. The loader
+  treats files as untrusted:
+  - `<image href>` is never resolved, so an SVG can't read other files;
+  - images are capped at 4096 px per side;
+  - a file that would recurse too deeply or cost too much to draw fails
+    to load with an error saying why, instead of crashing or stalling the
+    app.
+
 ### Fixed
 - A stylesheet, `style` attribute or `var()` value with deeply nested
   functions after an unquoted URL closed by ` \)` (`url(a \)`) could stall
