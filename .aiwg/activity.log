@@ -11,3 +11,4 @@
 ## [2026-10-29 00:06] update | SDLC pages at dffb748 (release 0.8.0); R-004 now the consumers' lag, R-007 closed (repo moved to noeticbasho)
 ## [2026-11-07 13:20] update | ADR 0038 proposed: SVG rasterized on the CPU with usvg + resvg behind an svg feature; SDLC pointers updated; source state 5bae780
 ## [2026-11-07 13:36] update | ADR 0038 probe: loader conflicts, usvg resolver reads, parse/raster limits measured; ADR revised
+## [2026-11-07 14:57] update | ADR 0039: CSS nesting pre-scan walks cssparser's tokens (replaces the hand-written scan); SDLC pointers updated

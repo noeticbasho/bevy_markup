@@ -55,5 +55,6 @@ as `[INFERENCE]`.
 | [0036](./0036-decode-character-references-with-htmlize.md) | Decode character references with htmlize | Accepted |
 | [0037](./0037-anchored-overlays-with-bevy-popover.md) | Anchored overlays with Bevy's Popover | Rejected |
 | [0038](./0038-svg-rasterized-with-resvg.md) | SVG: rasterize on the CPU with usvg + resvg | Proposed |
+| [0039](./0039-css-pre-scan-walks-cssparser-tokens.md) | The CSS nesting pre-scan walks cssparser's tokens | Accepted |
 
 Add new records to this index in the same commit that adds the file.

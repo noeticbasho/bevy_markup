@@ -2106,312 +2106,45 @@ pub(crate) const MAX_CSS_PAREN_NESTING: usize = 8;
 /// sheet sources, `style=` attributes and substituted `var()` values
 /// are scanned before it (review_0003 G08, review_0004 H02).
 ///
-/// The scan mirrors cssparser 0.37's tokenizer where a token can hide
-/// blocks, so it can't undercount: a closer only closes a block of its
-/// own kind (a mismatched one is a plain token, as in cssparser), and
-/// closers inside strings, comments, escapes and unquoted `url(…)` tokens
-/// close nothing. Whether a `url(` is that token is cssparser's answer:
-/// names are read whole, escapes decoded, so `\0url(` and `\(url(` are
-/// functions and `u\72l(` is a URL (bug_0183: a one-byte look-behind
-/// missed all three). Where it can't tell, it counts (an opener is always
-/// a block). A rejected text is dropped — the sheet fails, the attribute
-/// or declaration is dropped — the same outcome as unparseable CSS.
+/// The blocks are cssparser's own: the scan walks the tokens of the
+/// tokenizer lightningcss parses with (the same cssparser version), so
+/// strings, comments, escapes, names and `url(…)` tokens hide or count
+/// exactly what they do for the parser. A hand-written scan of the same
+/// tokens disagreed with it twice (bug_0183, bug_0184). Recursion is
+/// bounded by the limits: the walk enters a block only while both counts
+/// are within them, and cssparser skips an unentered block iteratively.
+/// A rejected text is dropped — the sheet fails, the attribute or
+/// declaration is dropped — the same outcome as unparseable CSS.
 pub(crate) fn nesting_over_limit(text: &str) -> bool {
-    let bytes = text.as_bytes();
-    // The open blocks' closers, innermost last; and how many are `)`.
-    let mut open: Vec<u8> = Vec::new();
-    let mut parens = 0usize;
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            quote @ (b'"' | b'\'') => {
-                // A string ends at its quote, or (unterminated) at a
-                // newline; an escaped newline continues it.
-                i += 1;
-                while i < bytes.len() && bytes[i] != quote && !is_css_newline(bytes[i]) {
-                    if bytes[i] == b'\\' {
-                        i += 1;
-                        if bytes.get(i) == Some(&b'\r') && bytes.get(i + 1) == Some(&b'\n') {
-                            i += 1;
-                        }
-                    }
-                    i += 1;
-                }
+    use cssparser::{ParseError, Parser, ParserInput, Token};
+    /// The rest of this block level: `true` once a count passes its
+    /// limit. `parens`/`blocks`: the blocks open around this level.
+    fn over(input: &mut Parser, parens: usize, blocks: usize) -> bool {
+        loop {
+            let paren = match input.next_including_whitespace_and_comments() {
+                Err(_) => return false,
+                Ok(Token::Function(_) | Token::ParenthesisBlock) => true,
+                Ok(Token::SquareBracketBlock | Token::CurlyBracketBlock) => false,
+                Ok(_) => continue,
+            };
+            let (parens, blocks) = (parens + usize::from(paren), blocks + 1);
+            if parens > MAX_CSS_PAREN_NESTING || blocks > MAX_CSS_NESTING {
+                return true;
             }
-            b'/' if bytes.get(i + 1) == Some(&b'*') => {
-                i = text[i + 2..]
-                    .find("*/")
-                    .map_or(bytes.len(), |end| i + 2 + end + 1);
+            let mut inner_over = false;
+            let _ = input.parse_nested_block(|inner| {
+                inner_over = over(inner, parens, blocks);
+                Ok::<_, ParseError<()>>(())
+            });
+            if inner_over {
+                return true;
             }
-            // `<!--` is one token: the `--` after it isn't a name.
-            b'<' if bytes[i..].starts_with(b"<!--") => i += 3,
-            // Hashes, at-keywords and numbers with their units hold
-            // names that are never a `url(` token, even when spelled `url`.
-            b'#' if css_ident_start(bytes, i + 1)
-                || matches!(bytes.get(i + 1), Some(b'0'..=b'9' | b'-')) =>
-            {
-                i = css_name(text, i + 1).0;
-                continue;
-            }
-            b'@' if css_ident_start(bytes, i + 1) => {
-                i = css_name(text, i + 1).0;
-                continue;
-            }
-            _ if css_number_start(bytes, i) => {
-                i = css_number_end(text, i);
-                continue;
-            }
-            _ if css_ident_start(bytes, i) => {
-                let (end, is_url) = css_name(text, i);
-                i = end;
-                let mut after = i + 1;
-                while bytes.get(after).copied().is_some_and(is_css_whitespace) {
-                    after += 1;
-                }
-                if is_url
-                    && bytes.get(i) == Some(&b'(')
-                    && !matches!(bytes.get(after), Some(b'"' | b'\''))
-                {
-                    // An unquoted URL is one token, valid or bad: nothing
-                    // inside opens or closes a block.
-                    i = css_unquoted_url_end(text, i + 1);
-                }
-                // Otherwise a function's `(` opens a block next.
-                continue;
-            }
-            opener @ (b'(' | b'[' | b'{') => {
-                open.push(match opener {
-                    b'(' => b')',
-                    b'[' => b']',
-                    _ => b'}',
-                });
-                parens += usize::from(opener == b'(');
-                if open.len() > MAX_CSS_NESTING || parens > MAX_CSS_PAREN_NESTING {
-                    return true;
-                }
-            }
-            closer @ (b')' | b']' | b'}') => {
-                if open.last() == Some(&closer) {
-                    open.pop();
-                    parens -= usize::from(closer == b')');
-                }
-            }
-            _ => {}
         }
-        i += 1;
     }
-    false
+    let mut input = ParserInput::new(text);
+    over(&mut Parser::new(&mut input), 0, 0)
 }
 
-/// cssparser 0.37's `consume_unquoted_url` from `i` (just after `url(`,
-/// whose next non-whitespace isn't a quote): where the URL token ends,
-/// just past its `)` or at the end. Three states, as cssparser has them
-/// (bug_0184: one "skip the escaped byte" rule for all three let `\)`
-/// after a space hide everything up to the next `)`):
-/// - the body: `)` ends it; whitespace moves to the end state; a quote,
-///   `(` or a non-printable byte makes it a bad URL; a valid escape is
-///   consumed whole (hex digits and one whitespace after them);
-/// - the end (`consume_url_end`): whitespace is skipped, `)` ends it, and
-///   any other byte is consumed — a `\` too, unescaped — before the bad
-///   URL;
-/// - the bad URL (`consume_bad_url`): up to the next `)`, where a `\`
-///   skips only a following `)` or `\`.
-fn css_unquoted_url_end(text: &str, mut i: usize) -> usize {
-    let bytes = text.as_bytes();
-    while bytes.get(i).copied().is_some_and(is_css_whitespace) {
-        i += 1;
-    }
-    loop {
-        match bytes.get(i) {
-            None => return i,
-            Some(b')') => return i + 1,
-            Some(&byte) if is_css_whitespace(byte) => break,
-            Some(
-                b'\x01'..=b'\x08' | b'\x0B' | b'\x0E'..=b'\x1F' | b'\x7F' | b'"' | b'\'' | b'(',
-            ) => {
-                return css_bad_url_end(bytes, i + 1);
-            }
-            Some(b'\\') => {
-                if bytes.get(i + 1).copied().is_some_and(is_css_newline) {
-                    return css_bad_url_end(bytes, i + 1);
-                }
-                i = css_escape(text, i + 1).1;
-            }
-            Some(_) => i += 1,
-        }
-    }
-    loop {
-        match bytes.get(i) {
-            None => return i,
-            Some(b')') => return i + 1,
-            Some(&byte) if is_css_whitespace(byte) => i += 1,
-            Some(_) => return css_bad_url_end(bytes, i + 1),
-        }
-    }
-}
-
-/// cssparser's `consume_bad_url` from `i`: just past the next `)` that a
-/// `\` doesn't escape, or the end.
-fn css_bad_url_end(bytes: &[u8], mut i: usize) -> usize {
-    while let Some(&byte) = bytes.get(i) {
-        i += 1;
-        match byte {
-            b')' => return i,
-            b'\\' if matches!(bytes.get(i), Some(b')' | b'\\')) => i += 1,
-            _ => {}
-        }
-    }
-    i
-}
-
-/// CSS whitespace (the tokenizer's, not Unicode's).
-fn is_css_whitespace(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t') || is_css_newline(byte)
-}
-
-fn is_css_newline(byte: u8) -> bool {
-    matches!(byte, b'\n' | b'\r' | b'\x0C')
-}
-
-/// cssparser's `is_ident_start` at `i`: a name starts there (an escape,
-/// NUL and non-ASCII count as letters).
-fn css_ident_start(bytes: &[u8], i: usize) -> bool {
-    let escape_at = |i: usize| {
-        bytes.get(i) == Some(&b'\\') && !bytes.get(i + 1).copied().is_some_and(is_css_newline)
-    };
-    match bytes.get(i) {
-        Some(b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'\0' | 0x80..) => true,
-        Some(b'-') => {
-            matches!(
-                bytes.get(i + 1),
-                Some(b'a'..=b'z' | b'A'..=b'Z' | b'-' | b'_' | b'\0' | 0x80..)
-            ) || escape_at(i + 1)
-        }
-        Some(b'\\') => escape_at(i),
-        _ => false,
-    }
-}
-
-/// cssparser's `consume_name` from `i`: where the name ends, and whether
-/// its value (escapes decoded, NUL as U+FFFD) is `url`, ASCII
-/// case-insensitively.
-fn css_name(text: &str, mut i: usize) -> (usize, bool) {
-    let bytes = text.as_bytes();
-    // The value's first characters: enough to tell `url` from the rest.
-    let mut value = String::new();
-    let mut push = |c: char| {
-        if value.len() <= 3 {
-            value.push(c);
-        }
-    };
-    while let Some(&byte) = bytes.get(i) {
-        match byte {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-' => {
-                push(byte as char);
-                i += 1;
-            }
-            b'\0' => {
-                push('\u{FFFD}');
-                i += 1;
-            }
-            b'\\' if !bytes.get(i + 1).copied().is_some_and(is_css_newline) => {
-                let (c, end) = css_escape(text, i + 1);
-                push(c);
-                i = end;
-            }
-            0x80.. => {
-                let (c, len) = char_at(text, i);
-                push(c);
-                i += len;
-            }
-            _ => break,
-        }
-    }
-    (i, value.eq_ignore_ascii_case("url"))
-}
-
-/// cssparser's `consume_escape` from `i` (just after the `\`): the
-/// character, and where the escape ends — up to six hex digits and one
-/// whitespace after them, or one character.
-fn css_escape(text: &str, i: usize) -> (char, usize) {
-    let bytes = text.as_bytes();
-    match bytes.get(i) {
-        None => ('\u{FFFD}', i),
-        Some(byte) if byte.is_ascii_hexdigit() => {
-            let digits = bytes[i..]
-                .iter()
-                .take(6)
-                .take_while(|byte| byte.is_ascii_hexdigit())
-                .count();
-            let value = u32::from_str_radix(&text[i..i + digits], 16).unwrap_or(0);
-            let mut end = i + digits;
-            match bytes.get(end) {
-                Some(b'\r') if bytes.get(end + 1) == Some(&b'\n') => end += 2,
-                Some(&byte) if is_css_whitespace(byte) => end += 1,
-                _ => {}
-            }
-            let c = char::from_u32(value).filter(|_| value != 0);
-            (c.unwrap_or('\u{FFFD}'), end)
-        }
-        Some(b'\0') => ('\u{FFFD}', i + 1),
-        Some(_) => {
-            let (c, len) = char_at(text, i);
-            (c, i + len)
-        }
-    }
-}
-
-/// The character at byte `i` and its length; inside a character (the
-/// scan never lands there), U+FFFD over one byte.
-fn char_at(text: &str, i: usize) -> (char, usize) {
-    text.get(i..)
-        .and_then(|rest| rest.chars().next())
-        .map_or(('\u{FFFD}', 1), |c| (c, c.len_utf8()))
-}
-
-/// Whether a number starts at `i`, as cssparser's dispatch tells: a
-/// digit, or `+`, `-` or `.` before one (`+.5`, `-.5` too).
-fn css_number_start(bytes: &[u8], i: usize) -> bool {
-    let digit = |i: usize| bytes.get(i).is_some_and(u8::is_ascii_digit);
-    match bytes.get(i) {
-        Some(b'0'..=b'9') => true,
-        Some(b'+' | b'-') => digit(i + 1) || (bytes.get(i + 1) == Some(&b'.') && digit(i + 2)),
-        Some(b'.') => digit(i + 1),
-        _ => false,
-    }
-}
-
-/// cssparser's `consume_numeric` from `i`: where the number, percentage
-/// or dimension ends (its unit is a name, but never a `url(` token).
-fn css_number_end(text: &str, mut i: usize) -> usize {
-    let bytes = text.as_bytes();
-    let digit = |i: usize| bytes.get(i).is_some_and(u8::is_ascii_digit);
-    let digits = |mut i: usize| {
-        while digit(i) {
-            i += 1;
-        }
-        i
-    };
-    i += usize::from(matches!(bytes[i], b'+' | b'-'));
-    i = digits(i);
-    if bytes.get(i) == Some(&b'.') && digit(i + 1) {
-        i = digits(i + 1);
-    }
-    if matches!(bytes.get(i), Some(b'e' | b'E')) {
-        if digit(i + 1) {
-            i = digits(i + 1);
-        } else if matches!(bytes.get(i + 1), Some(b'+' | b'-')) && digit(i + 2) {
-            i = digits(i + 2);
-        }
-    }
-    if bytes.get(i) == Some(&b'%') {
-        i + 1
-    } else if css_ident_start(bytes, i) {
-        css_name(text, i).0
-    } else {
-        i
-    }
-}
 /// The total recursion bound of one declaration's `var()` substitution
 /// (`substitute` → function arguments / fallbacks → `var`): every level
 /// of nesting is a stack frame, and content can nest ~500 levels per
@@ -5842,6 +5575,17 @@ mod tests {
         }
     }
 
+    /// The walk recurses at most to the limits: a million unclosed blocks
+    /// of each kind are rejected on the test's 2 MB thread, in one linear
+    /// pass (cssparser skips what the walk doesn't enter iteratively).
+    #[test]
+    fn the_pre_scan_recursion_is_bounded() {
+        for opener in ["(", "[", "{", "a(", "url(\"x\" ", "light-dark("] {
+            let text = opener.repeat(1_000_000);
+            assert!(nesting_over_limit(&text), "{opener:?}");
+        }
+    }
+
     /// The tokenizer's own nesting of `text`: the deepest `(` blocks
     /// (functions included) and the deepest blocks of any kind.
     fn cssparser_nesting(text: &str) -> (usize, usize) {
@@ -5872,10 +5616,12 @@ mod tests {
         #![proptest_config(proptest::prelude::ProptestConfig::with_cases(4096))]
 
         /// The pre-scan never counts less than cssparser: whatever text
-        /// nests past a bound for the tokenizer, it rejects (bug_0183's
-        /// look-behind failed this on four spellings). Text built from the
-        /// tokens that open, close or hide blocks, and the ones whose
-        /// boundaries decide what hides.
+        /// nests past a bound for the tokenizer, it rejects. The scan walks
+        /// cssparser's own tokens now, so this pins the walk (its early
+        /// exit, its two counts) against a full walk of the same tokens;
+        /// the hand-written scan it replaced failed it twice (bug_0183,
+        /// bug_0184). Text built from the tokens that open, close or hide
+        /// blocks, and the ones whose boundaries decide what hides.
         #[test]
         fn the_pre_scan_never_undercounts_the_tokenizer(
             parts in proptest::collection::vec(

@@ -674,8 +674,10 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
   blocks deeper than `MAX_CSS_NESTING` (32) or parentheses deeper than
   `MAX_CSS_PAREN_NESTING` (8) is rejected before lightningcss parses it:
   its parser recurses without bound and parses nested `light-dark(` /
-  `calc(var(…))` in exponential time (`nesting_over_limit`; bug_0092,
-  bug_0106, bug_0179; UPSTREAM.md U14, U15);
+  `calc(var(…))` in exponential time (`nesting_over_limit`, a walk over
+  cssparser's own tokens with recursion bounded by the limits — ADR 0039,
+  after a hand-written scan disagreed with the tokenizer in bug_0183 and
+  bug_0184; bug_0092, bug_0106, bug_0179; UPSTREAM.md U14, U15);
   `transition` (the shorthand) animates a restyled color's change
   (`color`/`background-color`/`border-color`), driven by an
   `advance_transitions` system after `Build`.
@@ -1236,10 +1238,12 @@ known gaps:
     failed override ignored default swaps; a re-requested failed sheet's
     one-frame `Loading` ate the swap signal).
   - [x] Differential against the tokenizer: the CSS nesting pre-scan never
-    counts less than cssparser 0.37 (a dev-dependency, pinned to
-    lightningcss's version) on text built from the tokens that open, close
-    or hide blocks (`cascade::tests::the_pre_scan_never_undercounts_the_tokenizer`;
-    it found bug_0183's look-behind at once).
+    counts less than cssparser 0.37 on text built from the tokens that
+    open, close or hide blocks
+    (`cascade::tests::the_pre_scan_never_undercounts_the_tokenizer`; it
+    found bug_0183's look-behind at once and bug_0184 on a later seed).
+    Since ADR 0039 the scan walks cssparser's tokens itself, so the
+    property pins the walk's early exit against a full walk.
   - [ ] Shrink quality: stateful ops shrink only by removal; proptest value
     shrinking inside an op isn't supported by the framework.
 - [x] **3. Headless layout checks** (fixes weakness 3, mostly): Bevy UI

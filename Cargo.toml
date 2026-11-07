@@ -86,6 +86,12 @@ fluent = "0.16.0"
 unic-langid = { version = "0.9", features = ["serde"] }
 # CSS. `into_owned`: parsed StyleSheet<'i> → StyleSheet<'static> for storing as an asset.
 lightningcss = { version = "1.0.0-alpha.72", features = ["into_owned"] }
+# The tokenizer lightningcss parses with: the CSS nesting pre-scan walks
+# its tokens (`cascade::nesting_over_limit`, ADR 0039), so it can't
+# disagree with the parser about what a block is (bug_0183, bug_0184).
+# Pinned to the version lightningcss uses, so there is one copy: check
+# `cargo tree -i cssparser` on every lightningcss bump.
+cssparser = "=0.37.0"
 # `text-transform: capitalize` as Chrome does it: ICU's word boundaries and
 # simple titlecasing (ICU4X; `icu_segmenter` is already in the tree through
 # Bevy's text stack, parley).
@@ -121,9 +127,6 @@ bevy_mcp_harness = { version = "0.4.0", optional = true }
 
 [dev-dependencies]
 arbtest = "0.3.2"
-# The tokenizer lightningcss parses with, as the oracle of the CSS nesting
-# pre-scan's property test (bug_0183). Pinned to lightningcss's version.
-cssparser = "=0.37.0"
 async-trait = "0.1.92"
 # Examples are full apps: Bevy defaults (window, renderer, …) plus system
 # font fallback so the demo's Japanese locale renders.
