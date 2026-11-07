@@ -1336,8 +1336,11 @@ mod tests {
                 .unwrap()
                 .join()
                 .unwrap();
-            // Drawn or refused by the budget/usvg: anything but a crash.
-            eprintln!(
+            // Drawn or refused by the budget/usvg: anything but a crash
+            // (which aborts the process before this line). Each case is a
+            // real chain at the limit, not an empty document.
+            assert!(
+                levels.len() > 1 && depth <= MAX_DEPTH && depth > MAX_DEPTH / 2,
                 "{name}: {} levels, depth {depth}: {outcome:?}",
                 levels.len()
             );
