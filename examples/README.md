@@ -12,6 +12,17 @@ left stick move focus, Enter / A press, and each shortcut has a gamepad
 button (shown on screen). bevy_markup owns focus and activation; the
 examples bind the input (`shared/input.rs`).
 
+Gamepad buttons are named by the Xbox layout (A bottom, B right, X left,
+Y top), and the examples bind them by position. If X and Y (or A and B)
+seem swapped and the log shows `No mapping found for UUID …`, Bevy's
+gamepad backend (gilrs) has no SDL mapping for the pad and guessed its
+button order. This happens on a Flydigi Apex 5, for example; a Direwolf 4
+maps correctly. Give the pad a mapping line through the
+`SDL_GAMECONTROLLERCONFIG` environment variable (SDL's `controllermap`
+or the SDL2 Gamepad Tool generates one), or submit the line to
+[SDL_GameControllerDB](https://github.com/mdqinc/SDL_GameControllerDB),
+which gilrs bundles.
+
 ## Start here
 
 | | Example |
