@@ -315,6 +315,17 @@ pub enum HtmlUiSystems {
     Build,
 }
 
+/// Registers the asset type `A` unless something already did. Bevy's
+/// `init_asset` isn't idempotent: it inserts a new, empty `Assets<A>` with a
+/// new handle allocator, so calling it after `ImagePlugin`/`TextPlugin`
+/// drops their assets and orphans every handle they gave out (bug_0187).
+#[cfg(feature = "svg")]
+fn init_asset_once<A: Asset>(app: &mut App) {
+    if !app.world().contains_resource::<Assets<A>>() {
+        app.init_asset::<A>();
+    }
+}
+
 impl Plugin for BevyMarkupPlugin {
     fn build(&self, app: &mut App) {
         // The loaders read includes and Fluent resources themselves
@@ -365,16 +376,25 @@ impl Plugin for BevyMarkupPlugin {
                 })
                 .register_asset_loader(svg::SvgDocumentLoader { fonts });
             // `Assets<Font>` (and its events) even without Bevy's
-            // `TextPlugin` (headless apps): idempotent when it's there.
+            // `TextPlugin` (headless apps), but never over an existing one:
+            // `init_asset` replaces the store and its handle allocator
+            // (bug_0187: Bevy's default font gone).
             #[cfg(feature = "svg-text")]
-            app.init_asset::<bevy::text::Font>().add_systems(
-                PostUpdate,
-                svg_fonts::sync_svg_fonts.before(HtmlUiSystems::Render),
-            );
+            {
+                init_asset_once::<bevy::text::Font>(app);
+                app.add_systems(
+                    PostUpdate,
+                    svg_fonts::sync_svg_fonts.before(HtmlUiSystems::Render),
+                );
+            }
         }
+        // `Assets<Image>` only where no `ImagePlugin` made it (bug_0187:
+        // replacing it orphaned the handles Bevy had already given out, and
+        // the next image load panicked).
         #[cfg(feature = "svg")]
-        app.init_asset::<Image>()
-            .init_asset::<svg::SvgDocument>()
+        init_asset_once::<Image>(app);
+        #[cfg(feature = "svg")]
+        app.init_asset::<svg::SvgDocument>()
             .init_resource::<svg::SvgRasters>()
             .add_systems(
                 PostUpdate,

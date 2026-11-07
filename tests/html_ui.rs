@@ -11276,3 +11276,47 @@ mod svg_css_images {
         assert_eq!(slicer.max_corner_scale, 1.0);
     }
 }
+
+/// bug_0187: adding `BevyMarkupPlugin` with `svg` after Bevy's image and
+/// text plugins keeps their asset stores. `init_asset` replaced
+/// `Assets<Image>` (and, with `svg-text`, `Assets<Font>`): the assets they
+/// held were gone, and loading an image through a handle the old store had
+/// given out panicked in `Assets::insert` (index out of bounds).
+#[cfg(feature = "svg")]
+#[test]
+fn the_plugin_keeps_existing_image_and_font_stores() {
+    use bevy::text::Font;
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        AssetPlugin::default(),
+        ImagePlugin::default(),
+    ))
+    .init_asset::<Font>();
+    let image = app
+        .world_mut()
+        .resource_mut::<Assets<Image>>()
+        .add(Image::default());
+    let font = app
+        .world_mut()
+        .resource_mut::<Assets<Font>>()
+        .add(Font::from_bytes(bevy::text::DEFAULT_FONT_DATA.to_vec()));
+    // A handle the store gave out before the plugin, filled after it (what
+    // Bevy's asset server does for a load in flight).
+    let reserved = app.world().resource::<Assets<Image>>().reserve_handle();
+    app.add_plugins(BevyMarkupPlugin);
+    app.update();
+    let world = app.world_mut();
+    assert!(
+        world.resource::<Assets<Image>>().contains(&image),
+        "the image store was replaced"
+    );
+    assert!(
+        world.resource::<Assets<Font>>().contains(&font),
+        "the font store was replaced"
+    );
+    world
+        .resource_mut::<Assets<Image>>()
+        .insert(reserved.id(), Image::default())
+        .expect("a handle from before the plugin still fits the store");
+}
