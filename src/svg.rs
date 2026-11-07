@@ -57,8 +57,20 @@
 //! - In Markdown, it's raw HTML: a blank line inside it ends the raw HTML
 //!   block (CommonMark), so write it without blank lines.
 //!
-//! Static SVG only: no animation, no scripts. Text inside an SVG (`<text>`)
-//! isn't drawn (the feature builds resvg without its font stack).
+//! Static SVG only: no animation, no scripts.
+//!
+//! # Text
+//!
+//! `<text>` inside an SVG needs the `svg-text` feature (resvg's font stack);
+//! without it, text draws nothing. With it, an SVG's `font-family`
+//! resolves like the page's CSS: through the families registered in
+//! [`FontFamilies`](crate::fonts::FontFamilies) (any case), the generic
+//! keywords mapped with `set_generic`, and CSS's face fallback; a family
+//! nobody registered uses Bevy's default font. Only faces given as font
+//! files (`FontSource::Handle`) are available: a system family
+//! (`FontSource::Family`, a generic system font) falls back to the default
+//! font. A font that loads after an SVG was drawn draws it again: `.svg`
+//! files with text are reloaded, and inline `<svg>` with text is redrawn.
 //!
 //! # Limits
 //!
@@ -130,7 +142,9 @@ impl Default for SvgLoaderSettings {
 
 /// Loads `.svg` files as [`Image`]s.
 #[derive(Default, TypePath)]
-pub(crate) struct SvgLoader;
+pub(crate) struct SvgLoader {
+    pub(crate) fonts: SvgFonts,
+}
 
 impl AssetLoader for SvgLoader {
     type Asset = Image;
@@ -145,7 +159,8 @@ impl AssetLoader for SvgLoader {
     ) -> Result<Image, BevyError> {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
-        let raster = rasterize(&bytes, settings.scale, Limits::DEFAULT)
+        self.fonts.note(&bytes, load_context.path());
+        let raster = rasterize_with(&bytes, settings.scale, Limits::DEFAULT, &self.fonts)
             .map_err(|err| format!("svg {}: {err}", load_context.path()))?;
         debug!(
             "svg {}: {}x{}, estimated cost {} of {MAX_SVG_COST}",
@@ -254,18 +269,61 @@ pub(crate) struct Raster {
     pub cost: u64,
 }
 
+/// The fonts SVG `<text>` is drawn with (the `svg-text` feature,
+/// [`svg_fonts`](crate::svg_fonts)), shared by the loaders, the inline
+/// cache and the system that keeps it current. Without the feature it's
+/// empty and `<text>` draws nothing.
+#[derive(Resource, Clone, Default)]
+pub(crate) struct SvgFonts {
+    #[cfg(feature = "svg-text")]
+    shared: std::sync::Arc<crate::svg_fonts::Shared>,
+}
+
+impl SvgFonts {
+    #[cfg(feature = "svg-text")]
+    pub(crate) fn shared(&self) -> &crate::svg_fonts::Shared {
+        &self.shared
+    }
+
+    /// The font set's generation: inline `<svg>` with text keys its drawing
+    /// by it (0 without `svg-text`).
+    fn generation(&self) -> u64 {
+        #[cfg(feature = "svg-text")]
+        return self.shared.current().generation;
+        #[cfg(not(feature = "svg-text"))]
+        0
+    }
+
+    /// Notes a loaded file whose text the fonts affect.
+    fn note(&self, bytes: &[u8], path: &bevy::asset::AssetPath<'_>) {
+        #[cfg(feature = "svg-text")]
+        if crate::svg_fonts::has_text(bytes) {
+            self.shared.note_text(path.clone_owned());
+        }
+        #[cfg(not(feature = "svg-text"))]
+        let _ = (bytes, path);
+    }
+}
+
 /// usvg options that resolve no `<image href>`: usvg's default resolver
 /// reads any file path the process can (absolute, cwd-relative, `..`) and
-/// embeds `data:` URLs (probe report §2).
-fn options() -> usvg::Options<'static> {
-    usvg::Options {
+/// embeds `data:` URLs (probe report §2). With `svg-text`, `<text>` uses
+/// the app's fonts.
+fn options(fonts: &SvgFonts) -> usvg::Options<'static> {
+    #[cfg_attr(not(feature = "svg-text"), allow(unused_mut))]
+    let mut options = usvg::Options {
         resources_dir: None,
         image_href_resolver: usvg::ImageHrefResolver {
             resolve_data: Box::new(|_, _, _| None),
             resolve_string: Box::new(|_, _| None),
         },
         ..usvg::Options::default()
-    }
+    };
+    #[cfg(feature = "svg-text")]
+    fonts.shared.current().apply(&mut options);
+    #[cfg(not(feature = "svg-text"))]
+    let _ = fonts;
+    options
 }
 
 /// Parses an SVG the way `usvg::Tree::from_data` does, with one step in
@@ -274,8 +332,14 @@ fn options() -> usvg::Options<'static> {
 /// recurse through, and only then does usvg convert that same document
 /// (`Tree::from_xmltree`). One parse, so the check and usvg can't disagree
 /// about the document's structure (a DTD entity expanding into markup, say).
+#[cfg(any(test, feature = "fuzzing"))]
 pub(crate) fn parse(bytes: &[u8]) -> Result<usvg::Tree, SvgError> {
-    guarded(|| parse_unguarded(bytes))
+    parse_with(bytes, &SvgFonts::default())
+}
+
+/// [`parse`] with the fonts `<text>` resolves against.
+pub(crate) fn parse_with(bytes: &[u8], fonts: &SvgFonts) -> Result<usvg::Tree, SvgError> {
+    guarded(|| parse_unguarded(bytes, fonts))
 }
 
 /// Runs usvg or resvg work, turning a panic into [`SvgError::Panicked`].
@@ -300,7 +364,7 @@ fn guarded<T>(work: impl FnOnce() -> Result<T, SvgError>) -> Result<T, SvgError>
     })
 }
 
-fn parse_unguarded(bytes: &[u8]) -> Result<usvg::Tree, SvgError> {
+fn parse_unguarded(bytes: &[u8], fonts: &SvgFonts) -> Result<usvg::Tree, SvgError> {
     if bytes.starts_with(&[0x1f, 0x8b]) {
         return Err(SvgError::Parse(usvg::Error::SvgzFeatureNotEnabled));
     }
@@ -319,7 +383,7 @@ fn parse_unguarded(bytes: &[u8]) -> Result<usvg::Tree, SvgError> {
             max: MAX_DEPTH,
         });
     }
-    usvg::Tree::from_xmltree(&document, &options()).map_err(SvgError::Parse)
+    usvg::Tree::from_xmltree(&document, &options(fonts)).map_err(SvgError::Parse)
 }
 
 /// The deepest recursion [`recursion_depth`] lets through, in its units of
@@ -560,8 +624,19 @@ pub(crate) fn raster_size(
 }
 
 /// Parses, budgets and draws an SVG.
+#[cfg(any(test, feature = "fuzzing"))]
 pub(crate) fn rasterize(bytes: &[u8], scale: f32, limits: Limits) -> Result<Raster, SvgError> {
-    let tree = parse(bytes)?;
+    rasterize_with(bytes, scale, limits, &SvgFonts::default())
+}
+
+/// [`rasterize`] with the fonts `<text>` resolves against.
+pub(crate) fn rasterize_with(
+    bytes: &[u8],
+    scale: f32,
+    limits: Limits,
+    fonts: &SvgFonts,
+) -> Result<Raster, SvgError> {
+    let tree = parse_with(bytes, fonts)?;
     let (width, height, downscaled) = raster_size(&tree, scale, limits.side)?;
     let (image, cost) = draw(&tree, width, height, limits)?;
     Ok(Raster {
@@ -651,7 +726,9 @@ pub(crate) struct SvgDocument {
 /// Loads `.svg` files as [`SvgDocument`]s, with the same checks as
 /// [`SvgLoader`] (the depth bound, the refusing resolver).
 #[derive(Default, TypePath)]
-pub(crate) struct SvgDocumentLoader;
+pub(crate) struct SvgDocumentLoader {
+    pub(crate) fonts: SvgFonts,
+}
 
 impl AssetLoader for SvgDocumentLoader {
     type Asset = SvgDocument;
@@ -666,7 +743,9 @@ impl AssetLoader for SvgDocumentLoader {
     ) -> Result<SvgDocument, BevyError> {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
-        let tree = parse(&bytes).map_err(|err| format!("svg {}: {err}", load_context.path()))?;
+        self.fonts.note(&bytes, load_context.path());
+        let tree = parse_with(&bytes, &self.fonts)
+            .map_err(|err| format!("svg {}: {err}", load_context.path()))?;
         Ok(SvgDocument {
             tree: std::sync::Arc::new(tree),
         })
@@ -722,6 +801,7 @@ pub(crate) struct SvgRasters {
 #[derive(Resource, Default)]
 pub(crate) struct InlineSvgs {
     inner: std::sync::Mutex<InlineInner>,
+    fonts: SvgFonts,
 }
 
 #[derive(Default)]
@@ -800,11 +880,18 @@ impl InlineSvgs {
         text: String,
         images: &Assets<Image>,
     ) -> Option<(Handle<Image>, Option<Vec2>)> {
+        // Text is drawn with the current fonts: a new font set is a new
+        // drawing (the `FontFamilies` restyle collects it).
+        let key = if cfg!(feature = "svg-text") && text.contains("<text") {
+            format!("{}\0{text}", self.fonts.generation())
+        } else {
+            text.clone()
+        };
         let mut inner = self
             .inner
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        if let Some(entry) = inner.entries.get_mut(&text) {
+        if let Some(entry) = inner.entries.get_mut(&key) {
             entry.unused = 0;
             return Some((entry.image.clone(), entry.intrinsic));
         }
@@ -817,7 +904,7 @@ impl InlineSvgs {
             unused: 0,
         };
         if text.len() <= INLINE_SYNC_BYTES {
-            let tree = match parse(text.as_bytes()) {
+            let tree = match parse_with(text.as_bytes(), &self.fonts) {
                 Ok(tree) => std::sync::Arc::new(tree),
                 Err(err) => {
                     debug!("inline svg skipped: {err}");
@@ -842,13 +929,15 @@ impl InlineSvgs {
                         .map(|(image, _)| (image, task_tree))
                         .map_err(|err| err.to_string())
                 });
-                inner.drawing.push((text.clone(), task));
+                inner.drawing.push((key.clone(), task));
             }
             entry.tree = Some(tree);
         } else {
             let task_text = text.clone();
+            let task_fonts = self.fonts.clone();
             let task = bevy::tasks::AsyncComputeTaskPool::get().spawn(async move {
-                let tree = parse(task_text.as_bytes()).map_err(|err| err.to_string())?;
+                let tree =
+                    parse_with(task_text.as_bytes(), &task_fonts).map_err(|err| err.to_string())?;
                 let (width, height, _) =
                     raster_size(&tree, 1.0, MAX_SVG_SIDE).map_err(|err| err.to_string())?;
                 let tree = std::sync::Arc::new(tree);
@@ -856,11 +945,19 @@ impl InlineSvgs {
                     .map(|(image, _)| (image, tree))
                     .map_err(|err| err.to_string())
             });
-            inner.drawing.push((text.clone(), task));
+            inner.drawing.push((key.clone(), task));
         }
         let intrinsic = entry.intrinsic;
-        inner.entries.insert(text, entry);
+        inner.entries.insert(key, entry);
         Some((image, intrinsic))
+    }
+
+    /// A cache whose `<text>` resolves against `fonts`.
+    pub(crate) fn new(fonts: SvgFonts) -> Self {
+        Self {
+            inner: std::sync::Mutex::default(),
+            fonts,
+        }
     }
 
     /// The parsed document behind an inline image, for the redraw.
@@ -971,6 +1068,7 @@ pub(crate) fn rasterize_svg_images(
     inline: Res<InlineSvgs>,
     mut images: ResMut<Assets<Image>>,
     documents: Res<Assets<SvgDocument>>,
+    mut document_events: MessageReader<AssetEvent<SvgDocument>>,
     mut rasters: ResMut<SvgRasters>,
     mut spans: Query<(
         Entity,
@@ -1003,8 +1101,31 @@ pub(crate) fn rasterize_svg_images(
         }
     }
 
+    // A document reloaded (new fonts for its `<text>`, or the file
+    // changed): its rasters are stale.
+    let reloaded: std::collections::HashSet<AssetId<SvgDocument>> = document_events
+        .read()
+        .filter_map(|event| match event {
+            AssetEvent::Modified { id } => Some(*id),
+            _ => None,
+        })
+        .collect();
+    if !reloaded.is_empty() {
+        rasters.ready.retain(|key, _| !reloaded.contains(&key.0));
+        rasters.refused.retain(|key| !reloaded.contains(&key.0));
+    }
+
     let mut in_use = std::collections::HashSet::new();
-    for (entity, parent, mut image, inline_box, raster) in &mut spans {
+    for (entity, parent, mut image, inline_box, mut raster) in &mut spans {
+        if let Some(raster) = raster.as_mut()
+            && reloaded.contains(&raster.document.id())
+            && raster.shown.is_some()
+        {
+            // Back to the (also reloaded) 1x image until the redraw.
+            raster.shown = None;
+            raster.wanted = None;
+            image.image = raster.source.clone();
+        }
         // What the build put there: the raster's source if the span still
         // shows (or was reset to) it, else whatever it holds now.
         let source = match &raster {

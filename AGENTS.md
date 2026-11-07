@@ -61,7 +61,7 @@ Re-exported crates (their types appear in the API): `tera`, `tl` (the
 `fluent`, `lightningcss`. Cargo features: `system_fonts` (Bevy's
 `system_font_discovery`), `text-input` (the editable-text widget),
 `hot-reload` (the file watcher), `svg` (`.svg` images via usvg/resvg,
-ADR 0038; `fuzzing` implies it), `fuzzing` (the fuzz harness),
+ADR 0038; `fuzzing` implies it), `svg-text` (`svg` + SVG `<text>`), `fuzzing` (the fuzz harness),
 `dev-tools` (the examples' QA surface), and `hotpath` / `hotpath-alloc` /
 `hotpath-prometheus` / `hotpath-cloud` (hotpath profiling: `#[hotpath::measure]`
 on the pipeline systems and hot internals, `#[hotpath::main]` on every
@@ -122,6 +122,15 @@ src/
                    frame), focus pseudo-state, press-to-focus, activation (InputFocus-based;
                    a submit button's activation submits its form)
   nine_slice.rs    NineSlice asset + loader, NineSliceFrame
+  svg_fonts.rs     (`svg-text`, ADR 0038 §6) `SvgFontSet`: fontdb loaded with the
+                   `FontSource::Handle` faces of `FontFamilies` + Bevy's default font; a usvg
+                   `FontResolver` maps `font-family` like the page CSS (names any case,
+                   `set_generic`, `FontFaces::face` fallback, unknown → default font);
+                   `sync_svg_fonts` (PostUpdate, before Render) rebuilds it when the
+                   signature (families × face handles × loaded) changes, then reloads `.svg`
+                   paths with `<text>` (`note_text`) and `set_changed`s `FontFamilies` so
+                   inline text (keyed by the set's generation) is re-collected; the next run
+                   sees the same signature (no loop). System families: default font
   svg.rs           (`svg` feature, ADR 0038) `.svg` → `Image` loader: `parse` (roxmltree once, as
                    usvg configures it → `recursion_depth`: longest path over nesting + url(#…)/href
                    edges, `<style>` rules matched by simplecss like usvg, cycles refused, ≤ 256

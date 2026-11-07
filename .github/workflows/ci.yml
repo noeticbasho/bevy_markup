@@ -59,6 +59,8 @@ jobs:
       # it, but dead-code warnings show only without the harness).
       - name: Library with svg
         run: cargo check --lib --features svg
+      - name: Library with svg-text
+        run: cargo check --lib --features svg-text
       - name: All targets
         run: cargo build --all-targets
       - name: Tests
@@ -69,6 +71,8 @@ jobs:
       # and the headless SVG vectors.
       - name: Tests with svg
         run: cargo test --features svg --lib --test html_ui
+      - name: Tests with svg-text
+        run: cargo test --features svg-text --lib --test html_ui
       # The hot-reload and demo dev-tools examples are gated behind those
       # features and skipped by --all-targets.
       - name: Gated examples compile

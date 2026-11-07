@@ -233,6 +233,37 @@ Tests (`html_ui` `inline_svg`, `svg::tests`):
 Falsified: without the cascade color, three tests fail; with the
 children walked, six; without the collect-time intrinsic size, one.
 
+### 6. SVG `<text>`: the `svg-text` feature (added 2026-11-07)
+
+usvg converts `<text>` to outlines while it parses, so the fonts must be
+known then. The feature turns on resvg's text stack (fontdb, harfrust,
+skrifa); `svg` alone stays lean for icon-only apps.
+
+- **Which fonts.** `svg_fonts::SvgFontSet` loads into a fontdb database
+  every face of `FontFamilies` given as a font file (`FontSource::Handle`:
+  its `Font::data` blob, not copied), plus Bevy's default font (its
+  default handle).
+- **How `font-family` resolves.** A custom `usvg::FontResolver` resolves
+  the SVG's `font-family` as the page's CSS does: registered names in any
+  case, generics through `set_generic`, `FontFaces::face`'s fallback
+  (bold-italic → italic → bold → regular), and an unknown family → the
+  default font. Names inside the font files are never used. Unit test:
+  three copies of FiraMono as distinct faces, each glyph's resolved
+  `fontdb::ID` (`Text::layouted`) checked (fails when the resolver
+  ignores the family list).
+- **Fonts that arrive later.** `sync_svg_fonts` rebuilds the set when
+  its signature changes: families × face handles × loaded. It then
+  reloads every `.svg` path whose source has `<text>` (the loaders note
+  them), and the redraw cache drops rasters of a `Modified`
+  `SvgDocument`. It also signals a `FontFamilies` change, which restyles
+  the UIs: inline text is keyed by the set's generation, so the build
+  draws it again. The next run sees the same signature, so it doesn't
+  loop (tested). `a_font_that_arrives_later_redraws_the_text` fails
+  without the reload and without the generation key.
+- **Limit.** System font families (`FontSource::Family`, `Generic`,
+  `system_fonts`) have no bytes in Bevy's assets, so SVG text naming them
+  uses the default font.
+
 ### 5. Safety limits
 
 SVG is untrusted input, like every other loader input here. The probe
@@ -430,9 +461,7 @@ Limits).
 - Static SVG only: no SMIL animation, no scripts. `<text>` inside SVG
   renders nothing without the `text` feature.
 - Open:
-  - SVG `<text>`: feed usvg's fontdb from the `FontFamilies` faces' loaded
-    bytes, so SVG text uses the app's fonts. Its own feature
-    (`svg-text`) or part of `svg`, decided then.
+  - SVG `<text>` with system font families (§6: font files only).
   - CSS-loaded SVGs (`border-image`, `background-image`) stay at 1× and
     blur on HiDPI. Re-rasterizing them needs the slice numbers scaled by
     the raster/intrinsic ratio inside `sliced_image`.

@@ -213,6 +213,8 @@
 //!   `<img src="x.svg">`, `border-image`/`background-image: url(x.svg)` and
 //!   9-slice images accept SVG (the `bevy_markup::svg` module has the details
 //!   and the limits on untrusted files).
+//! - `svg-text`: `svg` plus `<text>` inside SVGs, drawn with the font files
+//!   registered in [`FontFamilies`](fonts::FontFamilies).
 //! - `hot-reload`: Bevy's asset file watcher, for editing an asset file and
 //!   restyling without a restart (the library already reacts to asset events).
 //! - `fuzzing`: exposes `bevy_markup::fuzz` (`#[doc(hidden)]`, not covered by
@@ -253,6 +255,8 @@ pub mod style;
 #[cfg(feature = "svg")]
 #[cfg_attr(docsrs, doc(cfg(feature = "svg")))]
 pub mod svg;
+#[cfg(feature = "svg-text")]
+mod svg_fonts;
 pub mod template;
 pub mod tooltips;
 
@@ -349,12 +353,29 @@ impl Plugin for BevyMarkupPlugin {
             .init_resource::<bevy::input_focus::directional_navigation::DirectionalNavigationMap>()
             .init_resource::<bevy::input_focus::directional_navigation::AutoNavigationConfig>();
         #[cfg(feature = "svg")]
+        {
+            // One font set for every SVG user: the loaders (IO threads),
+            // the inline cache, and (`svg-text`) the system keeping it
+            // current.
+            let fonts = svg::SvgFonts::default();
+            app.insert_resource(fonts.clone())
+                .insert_resource(svg::InlineSvgs::new(fonts.clone()))
+                .register_asset_loader(svg::SvgLoader {
+                    fonts: fonts.clone(),
+                })
+                .register_asset_loader(svg::SvgDocumentLoader { fonts });
+            // `Assets<Font>` (and its events) even without Bevy's
+            // `TextPlugin` (headless apps): idempotent when it's there.
+            #[cfg(feature = "svg-text")]
+            app.init_asset::<bevy::text::Font>().add_systems(
+                PostUpdate,
+                svg_fonts::sync_svg_fonts.before(HtmlUiSystems::Render),
+            );
+        }
+        #[cfg(feature = "svg")]
         app.init_asset::<Image>()
-            .init_asset_loader::<svg::SvgLoader>()
             .init_asset::<svg::SvgDocument>()
-            .init_asset_loader::<svg::SvgDocumentLoader>()
             .init_resource::<svg::SvgRasters>()
-            .init_resource::<svg::InlineSvgs>()
             .add_systems(
                 PostUpdate,
                 (

@@ -22,7 +22,10 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   image sized like an `<img>`; its `currentColor` is the element's CSS
   `color`, so `svg { color: … }`, `:hover` and themes recolor it. It must
   be well-formed XML (quoted attributes, closed tags); page CSS doesn't
-  reach inside it. Static SVG only, and `<text>` inside an SVG isn't drawn. The loader
+  reach inside it. Static SVG only. `<text>` inside an SVG needs the
+  `svg-text` feature, which draws it with the font files registered in
+  `FontFamilies` (resolved as the page's CSS resolves `font-family`, falling
+  back to Bevy's default font) and redraws it when a font loads later. The loader
   treats files as untrusted:
   - `<image href>` is never resolved, so an SVG can't read other files;
   - images are capped at 4096 px per side;

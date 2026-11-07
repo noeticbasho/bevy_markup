@@ -129,6 +129,20 @@ impl FontFamilies {
         self.index_of(name).map(|index| &self.families[index].1)
     }
 
+    /// Every registered family, in registration order.
+    #[cfg(feature = "svg-text")]
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&str, &FontFaces)> {
+        self.families
+            .iter()
+            .map(|(name, faces)| (name.as_str(), faces))
+    }
+
+    /// The family a generic keyword maps to, if any.
+    #[cfg(feature = "svg-text")]
+    pub(crate) fn generic(&self, generic: GenericFamily) -> Option<&str> {
+        self.generics.get(&generic).map(String::as_str)
+    }
+
     fn index_of(&self, name: &str) -> Option<usize> {
         self.families
             .iter()

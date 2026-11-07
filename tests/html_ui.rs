@@ -10969,3 +10969,153 @@ html-ui
         assert_eq!(sizes, vec![Vec2::new(20.0, 10.0)]);
     }
 }
+
+/// ADR 0038 §6: SVG `<text>`, drawn with the app's fonts (`svg-text`).
+#[cfg(feature = "svg")]
+mod svg_text {
+    use super::*;
+    use bevy::text::Font;
+    use bevy::ui::widget::InlineImage;
+
+    /// Opaque-ish pixels in every inline image.
+    fn inked(ui: &mut TestUi) -> Vec<usize> {
+        let world = ui.world_mut();
+        let mut spans = world.query::<&InlineImage>();
+        let handles: Vec<Handle<Image>> =
+            spans.iter(world).map(|image| image.image.clone()).collect();
+        let assets = world.resource::<Assets<Image>>();
+        handles
+            .iter()
+            .filter_map(|handle| {
+                let data = assets.get(handle)?.data.as_ref()?;
+                Some(data.chunks(4).filter(|pixel| pixel[3] > 128).count())
+            })
+            .collect()
+    }
+
+    /// The layout harness (it has Bevy's `TextPlugin`, so Bevy's default
+    /// font is in `Assets<Font>`), with `family` registered on it.
+    fn page(name: &str, html: &str, family: Option<&str>) -> TestUi {
+        let mut ui = TestUi::with_layout(
+            name,
+            &[("page.html", html), ("style.css", "p { color: #ffffff }")],
+            UVec2::new(200, 100),
+        )
+        .stylesheet("style.css");
+        if let Some(family) = family {
+            ui.world_mut()
+                .resource_mut::<FontFamilies>()
+                .insert(family, FontFaces::new(Handle::<Font>::default()));
+        }
+        let mut ui = ui.spawn("page.html", TemplateContext::new(), Node::default());
+        ui.settle();
+        ui.update(5);
+        ui
+    }
+
+    const TEXT: &str = r#"<p><svg width="60" height="20"><text x="2" y="16" font-family="Body" font-size="16" fill="currentColor">Hi</text></svg></p>"#;
+
+    /// With `svg-text`, the text is drawn in the registered family.
+    #[cfg(feature = "svg-text")]
+    #[test]
+    fn text_is_drawn_with_a_registered_family() {
+        let mut ui = page("svg-text-family", TEXT, Some("Body"));
+        let inked = inked(&mut ui);
+        assert_eq!(inked.len(), 1);
+        assert!(inked[0] > 20, "{inked:?}");
+    }
+
+    /// A family nobody registered falls back to Bevy's default font.
+    #[cfg(feature = "svg-text")]
+    #[test]
+    fn an_unknown_family_falls_back_to_the_default_font() {
+        let mut ui = page("svg-text-fallback", TEXT, None);
+        let inked = inked(&mut ui);
+        assert!(inked[0] > 20, "{inked:?}");
+    }
+
+    /// Without `svg-text`, `<text>` draws nothing (the rest of the SVG
+    /// still does).
+    #[cfg(not(feature = "svg-text"))]
+    #[test]
+    fn text_needs_the_svg_text_feature() {
+        let mut ui = page("svg-text-off", TEXT, Some("Body"));
+        assert_eq!(inked(&mut ui), vec![0]);
+    }
+
+    /// A font that becomes available after the SVGs were drawn redraws
+    /// them: the `<img>` file (reloaded: its image is `Modified`) and the
+    /// inline `<svg>` (a new drawing, keyed by the font set).
+    #[cfg(feature = "svg-text")]
+    #[test]
+    fn a_font_that_arrives_later_redraws_the_text() {
+        let label = r#"<svg xmlns="http://www.w3.org/2000/svg" width="60" height="20"><text x="2" y="16" font-family="Late" font-size="16">Hi</text></svg>"#;
+        let mut ui = TestUi::with_layout(
+            "svg-text-late",
+            &[
+                ("label.svg", label),
+                (
+                    "page.html",
+                    r#"<p><img src="label.svg"> <svg width="60" height="20"><text x="2" y="16" font-family="Late" font-size="16">Hi</text></svg></p>"#,
+                ),
+                ("style.css", "p { color: #ffffff }"),
+            ],
+            UVec2::new(300, 100),
+        )
+        .stylesheet("style.css")
+        .spawn("page.html", TemplateContext::new(), Node::default());
+        ui.settle();
+        ui.update(5);
+        let file: Handle<Image> = ui.load("label.svg");
+        let inline_before: Vec<AssetId<Image>> = {
+            let world = ui.world_mut();
+            let mut spans = world.query::<&InlineImage>();
+            spans.iter(world).map(|image| image.image.id()).collect()
+        };
+        // Collect the file image's events from here on.
+        #[derive(Resource, Default)]
+        struct Modified(Vec<AssetId<Image>>);
+        ui.app_mut().init_resource::<Modified>().add_systems(
+            Last,
+            |mut events: MessageReader<AssetEvent<Image>>, mut seen: ResMut<Modified>| {
+                for event in events.read() {
+                    if let AssetEvent::Modified { id } = event {
+                        seen.0.push(*id);
+                    }
+                }
+            },
+        );
+        // The font arrives: a new `Font` asset registered as "Late".
+        let world = ui.world_mut();
+        let bytes = world
+            .resource::<Assets<Font>>()
+            .get(&Handle::<Font>::default())
+            .expect("Bevy's default font")
+            .data
+            .as_ref()
+            .to_vec();
+        let late = world
+            .resource_mut::<Assets<Font>>()
+            .add(Font::from_bytes(bytes));
+        world
+            .resource_mut::<FontFamilies>()
+            .insert("Late", FontFaces::new(late));
+        for _ in 0..300 {
+            ui.update(1);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let world = ui.world_mut();
+        assert!(
+            world.resource::<Modified>().0.contains(&file.id()),
+            "the <img> SVG was not reloaded"
+        );
+        let mut spans = world.query::<&InlineImage>();
+        let inline_after: Vec<AssetId<Image>> =
+            spans.iter(world).map(|image| image.image.id()).collect();
+        assert_ne!(
+            inline_before, inline_after,
+            "the inline SVG was not redrawn"
+        );
+        assert!(inked(&mut ui).iter().all(|&count| count > 20));
+    }
+}
