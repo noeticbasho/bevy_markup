@@ -635,6 +635,34 @@ html-ui
     );
 }
 
+/// The same nesting after an unquoted URL that a space and `\)` close
+/// fails the load at once too (bug_0184: the pre-scan took `\)` for an
+/// escape and skipped the rest of the sheet; lightningcss parses 24 levels
+/// in 2.3 s, 30 in hours).
+#[test]
+fn nesting_after_a_closed_bad_url_fails_the_load_at_once() {
+    let nested = "light-dark(".repeat(30);
+    let sheet = format!("p {{ color: #ff0000 }}\np {{ --x: url(a \\); color: {nested} }}");
+    let start = std::time::Instant::now();
+    let mut ui = TestUi::new(
+        "closed_bad_url",
+        &[("page.html", "<p>Text</p>"), ("style.css", sheet.as_str())],
+    )
+    .stylesheet("style.css")
+    .spawn("page.html", TemplateContext::new(), Node::default());
+    ui.settle().assert_dump(
+        r#"
+html-ui
+  p
+    "Text" default 16px #ffffff
+"#,
+    );
+    assert!(
+        start.elapsed().as_secs() < 30,
+        "the load fails before lightningcss parses it"
+    );
+}
+
 /// ADR 0034's trial: no element sits at position 0, so `:nth-child(0)`
 /// and `:nth-child(-n+0)` match nothing. The crate's own matcher matched
 /// the root `html`, whose style is computed without a position, and the

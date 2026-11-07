@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc b89a7dacf114378e09dbb01d6ae1edfa63b1a34e080e5840a75bc4c48ca331b1 # shrinks to parts = ["light-dark(", "(", "a(", "a(", "(", "(", "(", "a(", "\\(", "url(", "("]
+cc f60c3846e60fd95af6aa4a2ecc1323289da3240f13ef324b092aa792d2025f10 # shrinks to parts = ["(", "*/", "url(", "\\(", " ", "\\)", "light-dark(", "light-dark(", "(", "light-dark(", "light-dark(", "\\", "\\75rl(", "light-dark(", "light-dark("]

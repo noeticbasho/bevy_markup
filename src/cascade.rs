@@ -2172,17 +2172,9 @@ pub(crate) fn nesting_over_limit(text: &str) -> bool {
                     && bytes.get(i) == Some(&b'(')
                     && !matches!(bytes.get(after), Some(b'"' | b'\''))
                 {
-                    // An unquoted URL is one token up to its `)` (escapes
-                    // included), valid or bad: nothing inside opens or
-                    // closes a block.
-                    i += 1;
-                    while i < bytes.len() && bytes[i] != b')' {
-                        if bytes[i] == b'\\' {
-                            i += 1;
-                        }
-                        i += 1;
-                    }
-                    i += 1;
+                    // An unquoted URL is one token, valid or bad: nothing
+                    // inside opens or closes a block.
+                    i = css_unquoted_url_end(text, i + 1);
                 }
                 // Otherwise a function's `(` opens a block next.
                 continue;
@@ -2209,6 +2201,67 @@ pub(crate) fn nesting_over_limit(text: &str) -> bool {
         i += 1;
     }
     false
+}
+
+/// cssparser 0.37's `consume_unquoted_url` from `i` (just after `url(`,
+/// whose next non-whitespace isn't a quote): where the URL token ends,
+/// just past its `)` or at the end. Three states, as cssparser has them
+/// (bug_0184: one "skip the escaped byte" rule for all three let `\)`
+/// after a space hide everything up to the next `)`):
+/// - the body: `)` ends it; whitespace moves to the end state; a quote,
+///   `(` or a non-printable byte makes it a bad URL; a valid escape is
+///   consumed whole (hex digits and one whitespace after them);
+/// - the end (`consume_url_end`): whitespace is skipped, `)` ends it, and
+///   any other byte is consumed — a `\` too, unescaped — before the bad
+///   URL;
+/// - the bad URL (`consume_bad_url`): up to the next `)`, where a `\`
+///   skips only a following `)` or `\`.
+fn css_unquoted_url_end(text: &str, mut i: usize) -> usize {
+    let bytes = text.as_bytes();
+    while bytes.get(i).copied().is_some_and(is_css_whitespace) {
+        i += 1;
+    }
+    loop {
+        match bytes.get(i) {
+            None => return i,
+            Some(b')') => return i + 1,
+            Some(&byte) if is_css_whitespace(byte) => break,
+            Some(
+                b'\x01'..=b'\x08' | b'\x0B' | b'\x0E'..=b'\x1F' | b'\x7F' | b'"' | b'\'' | b'(',
+            ) => {
+                return css_bad_url_end(bytes, i + 1);
+            }
+            Some(b'\\') => {
+                if bytes.get(i + 1).copied().is_some_and(is_css_newline) {
+                    return css_bad_url_end(bytes, i + 1);
+                }
+                i = css_escape(text, i + 1).1;
+            }
+            Some(_) => i += 1,
+        }
+    }
+    loop {
+        match bytes.get(i) {
+            None => return i,
+            Some(b')') => return i + 1,
+            Some(&byte) if is_css_whitespace(byte) => i += 1,
+            Some(_) => return css_bad_url_end(bytes, i + 1),
+        }
+    }
+}
+
+/// cssparser's `consume_bad_url` from `i`: just past the next `)` that a
+/// `\` doesn't escape, or the end.
+fn css_bad_url_end(bytes: &[u8], mut i: usize) -> usize {
+    while let Some(&byte) = bytes.get(i) {
+        i += 1;
+        match byte {
+            b')' => return i,
+            b'\\' if matches!(bytes.get(i), Some(b')' | b'\\')) => i += 1,
+            _ => {}
+        }
+    }
+    i
 }
 
 /// CSS whitespace (the tokenizer's, not Unicode's).
@@ -5756,6 +5809,39 @@ mod tests {
         }
     }
 
+    /// bug_0184: an unquoted URL ends where cssparser ends it. After the
+    /// URL's whitespace the next byte is consumed unescaped, so `\)` there
+    /// closes the URL; a quote, `(`, a non-printable byte or an escaped
+    /// newline makes it a bad URL that ends at the next `)`; in the body,
+    /// a hex escape eats one whitespace, so `\41 \)` stays inside. Each
+    /// expectation is derived from cssparser 0.37's `consume_unquoted_url`
+    /// and confirmed by its tokenizer.
+    #[test]
+    fn unquoted_urls_end_where_cssparser_ends_them() {
+        let nested = "light-dark(".repeat(MAX_CSS_PAREN_NESTING + 1);
+        for (url, counted) in [
+            ("url(a \\)", true),
+            ("url(\\( \\)", true),
+            ("url( a b)", true),
+            ("url(a\")", true),
+            ("url(a()", true),
+            ("url(a\x01)", true),
+            ("url(a\\\n)", true),
+            ("url(a \\\\)", false),
+            ("url(\\41 \\)", false),
+            ("url(a\\))", true),
+        ] {
+            let text = format!("{url}{nested})");
+            assert_eq!(nesting_over_limit(&text), counted, "{url:?}");
+            let (parens, _) = cssparser_nesting(&text);
+            assert_eq!(
+                parens > MAX_CSS_PAREN_NESTING,
+                counted,
+                "cssparser on {url:?}"
+            );
+        }
+    }
+
     /// The tokenizer's own nesting of `text`: the deepest `(` blocks
     /// (functions included) and the deepest blocks of any kind.
     fn cssparser_nesting(text: &str) -> (usize, usize) {
@@ -5797,7 +5883,8 @@ mod tests {
                     "(", ")", "[", "]", "{", "}", "a(", "url(", "URL(", "u\\72l(",
                     "\\75rl(", "\\", "\\(", "\\)", "\\28 ", "\\\n", "\0", "#", "@",
                     "1", "1e", "+", "-", ".", "-->", "<!--", "\"", "'", "/*", "*/",
-                    " ", "\n", "\r", "\r\n", "\x0c", "\u{a0}", "é", "x", "_", "%",
+                    " ", "\n", "\r", "\r\n", "\x0c", "\t", "\x01", "\x7f", "\u{a0}", "é",
+                    "x", "_", "%",
                     "light-dark(", "calc(",
                 ][..]),
                 0..60,

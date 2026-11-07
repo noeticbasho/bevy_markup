@@ -8,6 +8,12 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+- A stylesheet, `style` attribute or `var()` value with deeply nested
+  functions after an unquoted URL closed by ` \)` (`url(a \)`) could stall
+  its load for seconds to hours; it's now rejected at once, like other
+  over-nested CSS.
+
 ## [0.8.0] - 2026-10-29
 
 **Upgrading from 0.7** (details in the entries below):

@@ -213,6 +213,7 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0181](bug_0181.md) | `X ~ subject` matched in O(n²) over a sibling list, failing review_0005's scaling test in CI | `src/cascade/selector.rs` (`Selector::run`), `src/cascade.rs` (`SiblingList`) | medium | fixed (branch `fix/later-sibling-scaling`): one forward scan per list and selector | CI (`review_0005::long_sibling_lists_build_linearly`) |
 | [bug_0182](bug_0182.md) | A long operator chain in one Tera expression overflowed the stack of debug builds at template load | `src/template.rs`, `src/fuzz.rs`; upstream Tera 2.4.0 (UPSTREAM.md U16) | medium | fixed (branch `fix/tera-operator-chains`): a tag over 64 operators fails the load | nightly coverage replay (`replay_html_corpus`) stack overflow |
 | [bug_0183](bug_0183.md) | The CSS nesting pre-scan took a name ending in `url` for a URL token and skipped the rest of the text | `src/cascade.rs` (`nesting_over_limit`) | high | fixed (branch `fix/css-url-prescan`): names read as cssparser reads them | nightly cargo-fuzz `css` timeouts |
+| [bug_0184](bug_0184.md) | The CSS nesting pre-scan read `\)` after an unquoted URL's whitespace as an escape and skipped the rest of the text | `src/cascade.rs` (`nesting_over_limit`) | high | fixed: unquoted URLs end as cssparser ends them | the bug_0183 pre-scan property (random seed) |
 
 ## Discovery session metadata: bug_0001–0005
 
@@ -459,6 +460,18 @@ settle (rebuild observed) and the resulting dump to match a reference model.
   `fix/later-sibling-scaling`.
 - **Machine/toolchain:** Arch Linux (kernel 7.2.11), AMD Ryzen 7 9800X3D,
   rustc 1.98.1, `nightly-2026-09-09` for cargo-fuzz 0.13.2.
+
+## Discovery session metadata: bug_0184 (2026-11-07)
+
+- **Method:** a plain `cargo test` run during the ADR 0038 work failed
+  `the_pre_scan_never_undercounts_the_tokenizer` on a fresh random seed.
+  The minimized input was read against cssparser 0.37.0's
+  `consume_unquoted_url`, `consume_url_end` and `consume_bad_url`, and
+  the severity was timed with lightningcss in release.
+- **Discovery agent:** Claude Code session, `claude-opus-5-5`.
+- **Commit at discovery:** `d1eae43`.
+- **Machine/toolchain:** Arch Linux (kernel 7.2.14), AMD Ryzen 7 9800X3D,
+  rustc 1.98.1.
 
 ## Discovery session metadata: bug_0182–0183 (2026-11-03)
 
