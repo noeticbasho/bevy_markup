@@ -2145,6 +2145,19 @@ pub(crate) fn nesting_over_limit(text: &str) -> bool {
     over(&mut Parser::new(&mut input), 0, 0)
 }
 
+/// A compile-time check that the pre-scan's cssparser is lightningcss's
+/// (ADR 0039): lightningcss's `Parse::parse` takes a `cssparser::Parser`,
+/// and this hands it ours, which type-checks only when both are the same
+/// crate. If a lightningcss release moves to another cssparser, Cargo keeps
+/// two copies and every build (apps that depend on bevy_markup included)
+/// fails here with a type mismatch: bump the `cssparser` pin in
+/// `Cargo.toml` to lightningcss's. Never called.
+#[allow(dead_code)]
+fn pre_scan_tokenizes_with_lightningcss_cssparser(input: &mut cssparser::Parser<'_, '_>) {
+    use lightningcss::traits::Parse;
+    let _ = lightningcss::values::number::CSSNumber::parse(input);
+}
+
 /// The total recursion bound of one declaration's `var()` substitution
 /// (`substitute` → function arguments / fallbacks → `var`): every level
 /// of nesting is a stack frame, and content can nest ~500 levels per

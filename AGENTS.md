@@ -677,7 +677,9 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
   `calc(var(…))` in exponential time (`nesting_over_limit`, a walk over
   cssparser's own tokens with recursion bounded by the limits — ADR 0039,
   after a hand-written scan disagreed with the tokenizer in bug_0183 and
-  bug_0184; bug_0092, bug_0106, bug_0179; UPSTREAM.md U14, U15);
+  bug_0184; `pre_scan_tokenizes_with_lightningcss_cssparser` fails the
+  build if bevy_markup's cssparser pin and lightningcss's ever differ;
+  bug_0092, bug_0106, bug_0179; UPSTREAM.md U14, U15);
   `transition` (the shorthand) animates a restyled color's change
   (`color`/`background-color`/`border-color`), driven by an
   `advance_transitions` system after `Build`.

@@ -89,8 +89,10 @@ lightningcss = { version = "1.0.0-alpha.72", features = ["into_owned"] }
 # The tokenizer lightningcss parses with: the CSS nesting pre-scan walks
 # its tokens (`cascade::nesting_over_limit`, ADR 0039), so it can't
 # disagree with the parser about what a block is (bug_0183, bug_0184).
-# Pinned to the version lightningcss uses, so there is one copy: check
-# `cargo tree -i cssparser` on every lightningcss bump.
+# Pinned to the version lightningcss uses, so there is one copy; if they
+# ever differ, the build fails at
+# `cascade::pre_scan_tokenizes_with_lightningcss_cssparser`: bump the pin
+# to lightningcss's.
 cssparser = "=0.37.0"
 # `text-transform: capitalize` as Chrome does it: ICU's word boundaries and
 # simple titlecasing (ICU4X; `icu_segmenter` is already in the tree through
