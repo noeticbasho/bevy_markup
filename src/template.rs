@@ -76,6 +76,10 @@ pub struct HtmlDocument {
 
 impl HtmlDocument {
     pub fn parse(html: String) -> Result<Self, tl::ParseError> {
+        let html = match normalize_self_closing(&html) {
+            std::borrow::Cow::Borrowed(_) => html,
+            std::borrow::Cow::Owned(normalized) => normalized,
+        };
         let source = html.clone();
         // SAFETY: `parse_owned` leaks `html` and frees it when the returned
         // `VDomGuard` drops; `VDomGuard::get_ref` ties borrows to the guard.
@@ -900,8 +904,154 @@ fn scanner_protects_code_like_pulldown() {
         "a code span can't span a blank line"
     );
 }
+/// Puts a space before a `/>` that ends a tag name or a value-less
+/// attribute (`<br/>` → `<br />`, `<input disabled/>` → `<input disabled
+/// />`), the spelling `tl` parses (bug_0185). `tl` counts `/` as a name
+/// character, so `<b/>` became an element named `b/`, never closed: the
+/// rest of the document nested inside it (a `<br/>` merged the following
+/// paragraphs into one). Only tag names and attribute names are touched:
+/// text, comments and attribute values stay as written, and an unquoted
+/// value keeps its slash, as HTML reads it (`<a href=/x/>`: the value is
+/// `/x/`).
+pub(crate) fn normalize_self_closing(html: &str) -> std::borrow::Cow<'_, str> {
+    let bytes = html.as_bytes();
+    let mut out: Option<String> = None;
+    let mut copied = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+        // A comment or a `<!…>`/`<?…>` declaration: skip it whole.
+        if bytes[i..].starts_with(b"<!--") {
+            i = html[i + 4..]
+                .find("-->")
+                .map_or(bytes.len(), |end| i + 4 + end + 3);
+            continue;
+        }
+        if !bytes.get(i + 1).is_some_and(u8::is_ascii_alphabetic) {
+            i += 1;
+            continue;
+        }
+        // A start tag: its name, then attributes, up to `>`.
+        let mut j = i + 1;
+        let mut in_name = true; // the tag name, or an attribute name
+        while j < bytes.len() && bytes[j] != b'>' {
+            match bytes[j] {
+                b'/' if in_name
+                    && bytes.get(j + 1) == Some(&b'>')
+                    && !bytes[j - 1].is_ascii_whitespace() =>
+                {
+                    let out = out.get_or_insert_with(|| String::with_capacity(html.len() + 16));
+                    out.push_str(&html[copied..j]);
+                    out.push(' ');
+                    copied = j;
+                    j += 1;
+                }
+                byte if byte.is_ascii_whitespace() => {
+                    in_name = true;
+                    j += 1;
+                }
+                b'=' => {
+                    // The value: quoted up to its quote, unquoted up to
+                    // whitespace or `>` (a `/` there is part of it).
+                    j += 1;
+                    while bytes.get(j).is_some_and(u8::is_ascii_whitespace) {
+                        j += 1;
+                    }
+                    match bytes.get(j) {
+                        Some(&quote @ (b'"' | b'\'')) => {
+                            j += 1;
+                            while j < bytes.len() && bytes[j] != quote {
+                                j += 1;
+                            }
+                            j += 1;
+                        }
+                        _ => {
+                            while j < bytes.len()
+                                && bytes[j] != b'>'
+                                && !bytes[j].is_ascii_whitespace()
+                            {
+                                j += 1;
+                            }
+                        }
+                    }
+                    in_name = false;
+                }
+                _ => j += 1,
+            }
+        }
+        i = j;
+    }
+    match out {
+        Some(mut out) => {
+            out.push_str(&html[copied..]);
+            std::borrow::Cow::Owned(out)
+        }
+        None => std::borrow::Cow::Borrowed(html),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::normalize_self_closing as norm;
+
+    /// bug_0185: what `tl` misreads gets a space; nothing else changes.
+    #[test]
+    fn self_closing_tags_get_the_space_tl_needs() {
+        for (html, expected) in [
+            ("<p>A<br/>B</p>", "<p>A<br />B</p>"),
+            (
+                "<svg><rect/><g><path/></g></svg>",
+                "<svg><rect /><g><path /></g></svg>",
+            ),
+            ("<input disabled/>", "<input disabled />"),
+            (
+                "<input type=\"text\" disabled/>",
+                "<input type=\"text\" disabled />",
+            ),
+            // Already parsed right, or not a tag name / attribute name.
+            ("<br />", "<br />"),
+            ("<rect width=\"1\"/>", "<rect width=\"1\"/>"),
+            ("<a href=/x/>link</a>", "<a href=/x/>link</a>"),
+            ("<a title=\"a/>b\">x</a>", "<a title=\"a/>b\">x</a>"),
+            ("<!-- <b/> -->text a/> b", "<!-- <b/> -->text a/> b"),
+            ("1 </> 2 < b/>", "1 </> 2 < b/>"),
+        ] {
+            assert_eq!(norm(html), expected, "{html}");
+        }
+        assert!(matches!(
+            norm("<p>plain</p>"),
+            std::borrow::Cow::Borrowed(_)
+        ));
+    }
+
+    /// Every tag `tl` closes after normalizing: the second paragraph is a
+    /// sibling, not nested in a `br/`.
+    #[test]
+    fn a_self_closing_tag_no_longer_swallows_the_document() {
+        for html in [
+            "<p>A<br/>B</p><p>C</p>",
+            "<p>A <b/> B</p><p>C</p>",
+            "<svg><rect/></svg><p>C</p>",
+        ] {
+            let document = super::HtmlDocument::parse(html.to_owned()).unwrap();
+            let dom = document.dom();
+            let tops: Vec<String> = dom
+                .children()
+                .iter()
+                .filter_map(|handle| handle.get(dom.parser())?.as_tag())
+                .map(|tag| tag.name().as_utf8_str().into_owned())
+                .collect();
+            assert_eq!(tops.len(), 2, "{html}: top-level tags {tops:?}");
+            assert!(
+                !tops.iter().any(|name| name.contains('/')),
+                "{html}: {tops:?}"
+            );
+        }
+    }
+
     /// The scanners are linear (review_0003 G14: they used to re-find each
     /// stop needle, or re-scan the line, per statement — a 320 KB template
     /// cost seconds to load). Asserted as *scaling*, not wall time (review_0004

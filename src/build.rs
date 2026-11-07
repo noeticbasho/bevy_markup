@@ -4817,6 +4817,8 @@ fn walk_translation(
     let Some(Ok(translation)) = ctx.localized.get(&handle) else {
         return false;
     };
+    // bug_0185: `<br/>` in a translation, as in a document.
+    let translation = &*crate::template::normalize_self_closing(translation);
     let Ok(fragment) = tl::parse(translation, tl::ParserOptions::default()) else {
         return false;
     };

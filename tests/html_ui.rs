@@ -663,6 +663,32 @@ html-ui
     );
 }
 
+/// bug_0185: `<br/>` (and any `<name/>`) no longer swallows the rest of
+/// the document. `tl` read the tag name as `br/`, never closed it, and the
+/// next paragraph nested inside: the two paragraphs became one block,
+/// "A BC".
+#[test]
+fn a_self_closing_tag_keeps_the_next_paragraph_a_block() {
+    let mut ui = TestUi::new(
+        "self_closing",
+        &[
+            ("page.html", "<p>A <br/> B</p><p>C <b/>D</p>"),
+            ("style.css", "html { color: #ffffff }"),
+        ],
+    )
+    .stylesheet("style.css")
+    .spawn("page.html", TemplateContext::new(), Node::default());
+    ui.settle().assert_dump(
+        r#"
+html-ui
+  p
+    "A B" default 16px #ffffff
+  p
+    "C D" default 16px #ffffff
+"#,
+    );
+}
+
 /// ADR 0034's trial: no element sits at position 0, so `:nth-child(0)`
 /// and `:nth-child(-n+0)` match nothing. The crate's own matcher matched
 /// the root `html`, whose style is computed without a position, and the

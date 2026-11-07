@@ -34,6 +34,7 @@ the issue may already be fixed or reported.
 | U18 | roxmltree | 0.21.1's tokenizer recursed once per nesting level | stack overflow at ~150 levels in debug on a 2 MB thread (`svg` feature) | version floor `roxmltree >= 0.21.2` | fixed upstream (0.21.2) |
 | U19 | usvg (resvg) | The default `ImageHrefResolver` reads any file path | an SVG reads any file the process can and embeds it (`svg` feature) | a resolver that resolves nothing | unreported (by design; worth a docs warning) |
 | U20 | resvg | `feTurbulence` overflows `i32` after enough octaves (#1185, open; #937 a similar multiply overflow) | panic where overflow checks are on (debug builds, fuzzing): a failed load, or a crash through a redraw task (`svg` feature) | `svg::guarded` (catch_unwind around usvg/resvg) | reported upstream (#1185), open |
+| U21 | astral-tl | `/` is a name character: `<b/>` is an unclosed element named `b/` ([bug_0185](bug_0185.md)) | a `<br/>` merged the rest of the document into one block | `template::normalize_self_closing` before every `tl` parse | unreported |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -458,6 +459,24 @@ CI clippy command and workspace tests pass on both.
   draw in `catch_unwind`: the panic becomes `SvgError::Panicked` (the load
   fails, or the size isn't redrawn). Keep it while resvg can panic on
   input; it costs nothing on the normal path.
+
+## U21 — astral-tl: `/` is a name character, so `<b/>` never closes
+
+- **Project:** [astral-sh/astral-tl](https://github.com/astral-sh/astral-tl)
+  0.8.1 (crates.io `astral-tl`, library `tl`; the latest release, checked
+  2026-11-07). y21/tl 0.7.8 has the same `IDENT_CHARS` table.
+- **Problem:** `util.rs` `IDENT_CHARS` includes `/`, and `parse_tag`
+  reads a tag name with `read_ident`: `<b/>` is an element named `b/`,
+  the self-closing check finds no `/`, and the element stays open over
+  the rest of the document. The same goes for a value-less attribute
+  before `/>` (bug_0185).
+- **Reproduction:** `tl::parse("<p>A <br/> B</p><p>C</p>")`: the second
+  `p` is a child of `br/`.
+- **Upstream:** not reported. A PR sketch: end `read_ident` for tag and
+  attribute names at `/` (keep it for unquoted values), or check for
+  `/>` after the name.
+- **Local workaround:** `template::normalize_self_closing` (a space
+  before such a `/>`) in `HtmlDocument::parse` and `walk_translation`.
 
 ## Not upstream bugs (recorded so they aren't re-filed)
 

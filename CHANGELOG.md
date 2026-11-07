@@ -31,6 +31,10 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   functions after an unquoted URL closed by ` \)` (`url(a \)`) could stall
   its load for seconds to hours; it's now rejected at once, like other
   over-nested CSS.
+- `<br/>`, or any tag written `<name/>` without a space or attributes,
+  no longer swallows the rest of the page: what followed (paragraphs,
+  headings, containers) merged into one block. A value-less attribute
+  before `/>` (`<input disabled/>`) had the same effect.
 
 ## [0.8.0] - 2026-10-29
 
