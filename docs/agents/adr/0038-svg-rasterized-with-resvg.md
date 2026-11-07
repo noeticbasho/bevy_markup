@@ -7,7 +7,7 @@
 | `Date` | 2026-11-07 17:19 +0400 |
 | `Author` | Claude Opus 5.5 (Anthropic), via Claude Code; direction chosen by Nikita Chashchinskii |
 | `Commit` | `5bae780 Fix the Mutants workflow: cap test memory and use 8 shards` + uncommitted (this ADR, revised after the probe); revised again at `d1eae43` + uncommitted step 1 (the recursion-depth check, §5) |
-| `Status` | Proposed (steps 1–2 implemented: `.svg` images, `<img>` redrawn at its displayed size; step 3, inline `<svg>`, open) |
+| `Status` | Proposed (steps 1–3 implemented: `.svg` images, `<img>` redrawn at its displayed size, inline `<svg>`) |
 | `Related` | ADR 0028 (roadmap item 12: "decide the shape first"), 0002 (library shape, minimal Bevy features), 0036 (in-domain crates replacing maintained code); review_0003 G19 (no remote loads); [probe report](../performance/adr-0038-probe.md) (the evidence for §2, §3 and §5) |
 
 ## Context
@@ -170,19 +170,47 @@ put-back, the pinned size, the intrinsic aspect.
 ### 4. Inline `<svg>` is a replaced inline element
 
 Within the same feature, the walk treats `<svg>` like `<img>`: an inline
-run (`InlineBox` + `InlineImage`) whose image the build draws:
+run (`InlineBox` + `InlineImage`) whose image the build draws. As
+implemented in step 3:
 
-- The subtree's source text (the rendered HTML slice that `tl` parsed)
-  goes to usvg. usvg sees exactly what the author wrote, so the walk
-  doesn't need to understand SVG.
-- `currentColor` takes the cascade's computed `color` (set as the root's
-  `color` before parsing). `svg { color: … }`, `:hover` and themes then
-  recolor icons the way browsers do, through the existing restyle.
-- Width and height follow the CSS `width`/`height` the way `<img>` does
-  (`size_images`), with the `<svg>`'s own `width`/`height`/`viewBox` as
-  the intrinsic size.
-- The raster is keyed by a hash of (source text, color, pixel size), so
-  a skeleton-reused subtree (ADR 0021) reuses its image.
+- **The source.** `tag.raw()`, the element's span in the rendered HTML,
+  goes to usvg, so the walk doesn't need to understand SVG; its children
+  are never walked as text. `prepare_inline` adds what HTML lets the
+  author omit and XML needs: `xmlns`, and `xmlns:xlink` when the text
+  uses `xlink:`. It also sets `color` to the element's computed CSS color
+  (`rgba(…)`), unless the author wrote one.
+- **Well-formed XML only.** usvg parses XML. An unquoted attribute, an
+  unclosed tag or `&nbsp;` makes the element show nothing (debug log).
+  Finding this exposed bug_0185: `tl` read `<rect/>` as an unclosed
+  element named `rect/` and swallowed the document after it. All `tl`
+  input is now normalized first (UPSTREAM U21).
+- **`currentColor`** follows the cascade, so `svg { color: … }`, `:hover`
+  and themes recolor icons through the existing restyle. The color is
+  part of the cache key (the text), so each color is its own drawing.
+- **Sizing:** CSS `width`/`height` as for `<img>` (`size_images`), else
+  the document's own size (usvg's `Tree::size`: `width`/`height`, else
+  the `viewBox`). Browsers default a size-less inline SVG to 300 × 150,
+  or stretch a `viewBox`-only one to the container; bevy_markup uses the
+  `viewBox` size. The intrinsic size comes from the parsed tree when the
+  build collects the element (`ImageRun::intrinsic`), so the box is sized
+  in that build.
+- **When it's drawn.** `InlineSvgs` (a `Mutex`-guarded cache keyed by
+  the prepared text) reserves an image handle.
+  - Text up to 64 KiB is parsed during the build. A document estimated
+    under `INLINE_SYNC_COST` (2²⁰ units, ~1–4 ms) is drawn then too, and
+    `finish_inline_svgs` (after `Build`, before `size_images`) inserts it
+    the same frame. `a_recolor_shows_no_blank_frame` fails with 6 blank
+    frames when every draw goes to a task.
+  - Larger or costlier documents draw on the `AsyncComputeTaskPool`.
+    Their insertion is followed by a `Modified` event, which restyles the
+    UI as an `<img>` load does.
+- **Sharing and lifetime.** Elements with the same text share one image.
+  Entries no `InlineImage` has shown for 120 frames are dropped.
+  `finish_inline_svgs` gives each parsed document an `SvgDocument`, and
+  `rasterize_svg_images` finds it through `InlineSvgs::document_of`, so
+  inline SVG is redrawn at its displayed size like an `<img>` (§3).
+- **Without the feature** an `<svg>` is walked through as before (an
+  unknown inline element whose text shows).
 
 Deliberate limit: page CSS doesn't reach inside the SVG. A rule like
 `.icon path { fill: red }` doesn't apply. Only the inherited `color` (via
@@ -191,7 +219,19 @@ SVG's own `<style>` and attributes do apply (usvg handles them).
 
 `<svg>` written as raw HTML in Markdown passes through the conversion
 unchanged (`md.rs`: raw HTML passes through), so it works in `.md`
-templates too.
+templates too. A blank line inside it ends CommonMark's raw HTML block.
+
+Tests (`html_ui` `inline_svg`, `svg::tests`):
+- in text, with a `<text>` child that must not leak;
+- `currentColor` and a restyle, plus a no-blank-frame recolor;
+- in a container, CSS-sized;
+- `xlink:` without its namespace;
+- malformed and hostile documents skipped;
+- in Markdown;
+- the `UiScale` redraw.
+
+Falsified: without the cascade color, three tests fail; with the
+children walked, six; without the collect-time intrinsic size, one.
 
 ### 5. Safety limits
 
@@ -281,8 +321,10 @@ SVG is untrusted input, like every other loader input here. The probe
 - **Remote paths.** `.svg` assets go through the existing `is_remote`
   refusal like any other image.
 - **Fuzzing.** A fuzz target `svg` over the loader's parse, budget and
-  raster. Seed it with the probe's cases, minimized. The `html` target's
-  inputs then exercise inline `<svg>` too.
+  raster. Seed it with the probe's cases, minimized. It also runs each
+  input through the inline-`<svg>` preparation (`prepare_inline`) and
+  draws that; the `html` target doesn't build, so it never reaches inline
+  `<svg>`.
 
 ### 6. Verification
 

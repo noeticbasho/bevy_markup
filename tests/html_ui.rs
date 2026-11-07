@@ -10730,3 +10730,242 @@ mod svg_display_size {
         );
     }
 }
+
+/// ADR 0038 §4: an inline `<svg>` is one inline image, drawn from the
+/// element's own source text.
+#[cfg(feature = "svg")]
+mod inline_svg {
+    use super::*;
+    use bevy::ui::widget::InlineImage;
+
+    /// Every inline image's (pixel size, first pixel).
+    fn images(ui: &mut TestUi) -> Vec<(UVec2, [u8; 4])> {
+        let world = ui.world_mut();
+        let mut spans = world.query::<&InlineImage>();
+        let handles: Vec<Handle<Image>> =
+            spans.iter(world).map(|image| image.image.clone()).collect();
+        let assets = world.resource::<Assets<Image>>();
+        handles
+            .iter()
+            .filter_map(|handle| {
+                let image = assets.get(handle)?;
+                let data = image.data.as_ref()?;
+                Some((image.size(), [data[0], data[1], data[2], data[3]]))
+            })
+            .collect()
+    }
+
+    fn page(name: &str, html: &str, css: &str) -> TestUi {
+        let mut ui = TestUi::new(
+            name,
+            &[
+                ("page.html", html),
+                ("style.css", css),
+                ("green.css", "p { color: #00ff00 }"),
+            ],
+        )
+        .stylesheet("style.css")
+        .spawn("page.html", TemplateContext::new(), Node::default());
+        ui.settle();
+        ui
+    }
+
+    /// In a paragraph: an image between the text runs, sized from the
+    /// SVG's own width/height, its `currentColor` the paragraph's red. Its
+    /// children (a `<text>`, the whitespace) are never text runs.
+    #[test]
+    fn an_inline_svg_is_an_image_in_the_text() {
+        let mut ui = page(
+            "inline-svg",
+            r#"<p>Before <svg width="20" height="10"> <rect width="20" height="10" fill="currentColor"/> <text>hidden</text> </svg> after</p>"#,
+            "p { color: #ff0000 }",
+        );
+        ui.assert_dump(
+            r#"
+html-ui
+  p
+    "Before " default 16px #ff0000
+    "" img 20x10
+    " after" default 16px #ff0000
+"#,
+        );
+        assert_eq!(
+            images(&mut ui),
+            vec![(UVec2::new(20, 10), [255, 0, 0, 255])]
+        );
+    }
+
+    /// Frames, after everything ran, in which an `InlineImage` pointed at
+    /// no image (a blank frame).
+    #[derive(Resource, Default)]
+    struct Blank(usize);
+
+    fn record_blank(
+        mut blank: ResMut<Blank>,
+        spans: Query<&InlineImage>,
+        images: Res<Assets<Image>>,
+    ) {
+        if spans.iter().any(|image| !images.contains(&image.image)) {
+            blank.0 += 1;
+        }
+    }
+
+    /// The cascade's color is part of the drawing: a restyle to green draws
+    /// it green, and no frame shows an empty image in between (a cheap
+    /// document is drawn during the build and inserted the same frame).
+    #[test]
+    fn current_color_follows_the_cascade() {
+        let mut ui = page(
+            "inline-svg-color",
+            r#"<p><svg width="4" height="4"><rect width="4" height="4" fill="currentColor"/></svg></p>"#,
+            "p { color: #ff0000 }",
+        );
+        assert_eq!(images(&mut ui), vec![(UVec2::new(4, 4), [255, 0, 0, 255])]);
+        ui.app_mut()
+            .init_resource::<Blank>()
+            .add_systems(Last, record_blank);
+        let green = ui.load::<Stylesheet>("green.css");
+        ui.world_mut().resource_mut::<DefaultStylesheet>().0 = Some(green);
+        ui.settle();
+        assert_eq!(images(&mut ui), vec![(UVec2::new(4, 4), [0, 255, 0, 255])]);
+        assert_eq!(ui.world_mut().resource::<Blank>().0, 0, "blank frames");
+    }
+
+    /// A recolor never shows a blank frame. The document (a 128 px blur,
+    /// ~0.3M units: under the 1M drawn during the build, but milliseconds
+    /// of work) is drawn while the build collects and inserted the same
+    /// frame. Drawn on a task instead, the build's frame would show an
+    /// image that isn't there yet.
+    #[test]
+    fn a_recolor_shows_no_blank_frame() {
+        let mut ui = page(
+            "inline-svg-blank",
+            r#"<p><svg width="128" height="128"><filter id="f"><feGaussianBlur stdDeviation="4"/></filter><rect width="128" height="128" fill="currentColor" filter="url(#f)"/></svg></p>"#,
+            "p { color: #ff0000 }",
+        );
+        for _ in 0..500 {
+            if !images(&mut ui).is_empty() {
+                break;
+            }
+            ui.update(1);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert_eq!(images(&mut ui).len(), 1);
+        ui.app_mut()
+            .init_resource::<Blank>()
+            .add_systems(Last, record_blank);
+        let green = ui.load::<Stylesheet>("green.css");
+        ui.world_mut().resource_mut::<DefaultStylesheet>().0 = Some(green);
+        ui.settle();
+        assert_eq!(ui.world_mut().resource::<Blank>().0, 0, "blank frames");
+    }
+
+    /// Directly in a container, like an `<img>`: an anonymous block; CSS
+    /// `width` scales it with the intrinsic aspect (20×10 → 40×20).
+    #[test]
+    fn an_inline_svg_in_a_container_and_sized_by_css() {
+        let mut ui = page(
+            "inline-svg-container",
+            r#"<div><svg class="big" width="20" height="10"><rect width="20" height="10"/></svg></div>"#,
+            "svg.big { width: 40px }",
+        );
+        ui.assert_dump(
+            r#"
+html-ui
+  div
+    -
+      "" img 40x20
+"#,
+        );
+    }
+
+    /// `xlink:href` without a declared `xlink` namespace (HTML doesn't
+    /// need one) still draws: the namespace is added.
+    #[test]
+    fn xlink_references_draw_without_a_declared_namespace() {
+        let mut ui = page(
+            "inline-svg-xlink",
+            r##"<p><svg width="4" height="4"><defs><rect id="r" width="4" height="4" fill="#0000ff"/></defs><use xlink:href="#r"/></svg></p>"##,
+            "",
+        );
+        assert_eq!(images(&mut ui), vec![(UVec2::new(4, 4), [0, 0, 255, 255])]);
+    }
+
+    /// Not XML (an unquoted attribute) or refused (a `<use>` cycle): the
+    /// element shows nothing and the rest of the page builds (the text
+    /// around it merges into one run, as around any empty element).
+    #[test]
+    fn broken_or_hostile_inline_svg_is_skipped() {
+        let mut ui = page(
+            "inline-svg-broken",
+            r##"<p>A <svg width=4 height="4"><rect/></svg> B</p><p>C <svg width="4" height="4"><g id="a"><use href="#b"/></g><g id="b"><use href="#a"/></g></svg> D</p>"##,
+            "p { color: #ffffff }",
+        );
+        ui.assert_dump(
+            r#"
+html-ui
+  p
+    "A B" default 16px #ffffff
+  p
+    "C D" default 16px #ffffff
+"#,
+        );
+        assert!(images(&mut ui).is_empty());
+    }
+
+    /// Raw HTML in a Markdown template passes through: an inline `<svg>`
+    /// there draws too.
+    #[test]
+    fn an_inline_svg_in_markdown() {
+        let mut ui = TestUi::new(
+            "inline-svg-markdown",
+            &[(
+                "page.md",
+                "Icon: <svg width=\"6\" height=\"3\"><rect width=\"6\" height=\"3\" fill=\"currentColor\"/></svg> done\n",
+            ), ("style.css", "p { color: #ff0000 }")],
+        )
+        .stylesheet("style.css")
+        .spawn("page.md", TemplateContext::new(), Node::default());
+        ui.settle();
+        assert_eq!(images(&mut ui), vec![(UVec2::new(6, 3), [255, 0, 0, 255])]);
+    }
+
+    /// The display-size redraw (§3) applies to inline SVG too: `UiScale` 2
+    /// draws the 20×10 element with 40×20 pixels in its 20×10 box.
+    #[test]
+    fn inline_svg_is_redrawn_at_its_displayed_size() {
+        let mut ui = TestUi::with_layout(
+            "inline-svg-scale",
+            &[
+                (
+                    "page.html",
+                    r#"<p><svg width="20" height="10"><rect width="20" height="10"/></svg></p>"#,
+                ),
+                ("style.css", "p { color: #ffffff }"),
+            ],
+            UVec2::new(200, 100),
+        )
+        .stylesheet("style.css")
+        .spawn("page.html", TemplateContext::new(), Node::default());
+        ui.world_mut().insert_resource(UiScale(2.0));
+        ui.settle();
+        for _ in 0..500 {
+            if images(&mut ui)
+                .first()
+                .is_some_and(|(size, _)| *size == UVec2::new(40, 20))
+            {
+                break;
+            }
+            ui.update(1);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert_eq!(
+            images(&mut ui).first().map(|(size, _)| *size),
+            Some(UVec2::new(40, 20))
+        );
+        let world = ui.world_mut();
+        let mut boxes = world.query::<&bevy::text::InlineBox>();
+        let sizes: Vec<Vec2> = boxes.iter(world).map(|box_| box_.size).collect();
+        assert_eq!(sizes, vec![Vec2::new(20.0, 10.0)]);
+    }
+}

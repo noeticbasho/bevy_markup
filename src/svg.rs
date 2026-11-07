@@ -26,6 +26,37 @@
 //! One drawing per document and size is shared by every `<img>` showing
 //! it. CSS `border-image`/`background-image` SVGs are drawn at `1.0` only.
 //!
+//! # Inline `<svg>`
+//!
+//! An `<svg>` written in a template is one inline image, like an `<img>`:
+//!
+//! ```html
+//! <p>Gold <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12"
+//!   r="10" fill="currentColor"/></svg> 120</p>
+//! ```
+//!
+//! ```css
+//! .icon { width: 16px; color: gold; }
+//! .icon:hover { color: white; }
+//! ```
+//!
+//! - Its source text is the document, as the template rendered it. It
+//!   must be well-formed XML (quoted attributes, closed or self-closed
+//!   tags, no HTML-only entities like `&nbsp;`); one that isn't shows
+//!   nothing. `xmlns` (and `xmlns:xlink`) may be left out, as in HTML.
+//! - `currentColor` is the element's computed CSS `color`, so CSS
+//!   recolors it (`:hover`, themes) like text. Other page CSS doesn't reach
+//!   inside it; the SVG's own attributes and `<style>` do.
+//! - It's sized like an `<img>`: CSS `width`/`height`, else the document's
+//!   own `width`/`height`, else its `viewBox` (not the browser's 300 × 150
+//!   default or its stretch to the container).
+//! - Each distinct text is drawn once; elements showing the same text
+//!   share the image, and it's redrawn at its displayed size like an
+//!   `<img>`. A small document is drawn during the build (a recolor shows
+//!   no blank frame); a large or costly one on a background task.
+//! - In Markdown, it's raw HTML: a blank line inside it ends the raw HTML
+//!   block (CommonMark), so write it without blank lines.
+//!
 //! Static SVG only: no animation, no scripts. Text inside an SVG (`<text>`)
 //! isn't drawn (the feature builds resvg without its font stack).
 //!
@@ -678,6 +709,253 @@ pub(crate) struct SvgRasters {
     refused: std::collections::HashSet<(AssetId<SvgDocument>, UVec2)>,
 }
 
+/// Inline `<svg>` documents (ADR 0038 §4), keyed by their prepared source
+/// text ([`prepare_inline`]): each distinct text is parsed once and drawn
+/// once at its intrinsic size; every element showing it shares the image.
+/// The build asks for an image while it collects (`Styler::inline_svg_of`)
+/// and gets a handle reserved in `Assets<Image>` plus the intrinsic size,
+/// so the inline box is sized in that same build. A cheap document is
+/// drawn right away and inserted by [`finish_inline_svgs`] in the same
+/// frame (a `:hover` recolor shows no blank frame); a costly or large one
+/// draws on the `AsyncComputeTaskPool`, and its insertion is a `Modified`
+/// event, which restyles the UI as an `<img>` load does.
+#[derive(Resource, Default)]
+pub(crate) struct InlineSvgs {
+    inner: std::sync::Mutex<InlineInner>,
+}
+
+#[derive(Default)]
+struct InlineInner {
+    entries: std::collections::HashMap<String, InlineEntry>,
+    /// Drawn during the build, inserted by `finish_inline_svgs`.
+    ready: Vec<(AssetId<Image>, Image)>,
+    drawing: Vec<(
+        String,
+        bevy::tasks::Task<Result<(Image, std::sync::Arc<usvg::Tree>), String>>,
+    )>,
+}
+
+struct InlineEntry {
+    image: Handle<Image>,
+    /// `None` until a large document's task has parsed it.
+    intrinsic: Option<Vec2>,
+    tree: Option<std::sync::Arc<usvg::Tree>>,
+    /// For the display-size redraw (`rasterize_svg_images`).
+    document: Option<Handle<SvgDocument>>,
+    /// Frames in a row no `InlineImage` showed it.
+    unused: u32,
+}
+
+/// Inline source text up to this size is parsed during the build; larger
+/// text is parsed on a task (the build doesn't stall on it).
+const INLINE_SYNC_BYTES: usize = 64 * 1024;
+/// A document estimated to cost up to this many units (~1–4 ms, probe
+/// report §7) is drawn during the build; a costlier one on a task.
+const INLINE_SYNC_COST: u64 = 1 << 20;
+/// Frames an unused inline image is kept (a restyle that re-collects the
+/// element finds it again); then it's dropped.
+const INLINE_KEEP_FRAMES: u32 = 120;
+
+/// An inline `<svg>`'s source as an SVG document: the element's own text
+/// (`raw`, as the template rendered it), with what HTML supplies and XML
+/// needs added to its start tag: the SVG namespace (and `xlink`'s, when
+/// the text uses `xlink:`), and `color` set to the element's computed CSS
+/// color, so `currentColor` follows the cascade (`svg { color: … }`,
+/// `:hover`, themes). Attributes the author wrote are kept; an author's
+/// `color` attribute wins, as in a browser. `None` if `raw` doesn't start
+/// with an `<svg` start tag.
+pub(crate) fn prepare_inline(raw: &str, color: Option<[u8; 4]>) -> Option<String> {
+    let rest = raw.strip_prefix("<svg")?;
+    if !rest.starts_with(|c: char| c.is_ascii_whitespace() || c == '>' || c == '/') {
+        return None;
+    }
+    let start_tag = &rest[..rest.find('>')?];
+    let has = |name: &str| {
+        start_tag
+            .split(|c: char| c.is_ascii_whitespace())
+            .any(|part| part.split('=').next() == Some(name))
+    };
+    let mut added = String::new();
+    if !has("xmlns") {
+        added += r#" xmlns="http://www.w3.org/2000/svg""#;
+    }
+    if raw.contains("xlink:") && !has("xmlns:xlink") {
+        added += r#" xmlns:xlink="http://www.w3.org/1999/xlink""#;
+    }
+    if let Some([r, g, b, a]) = color
+        && !has("color")
+    {
+        let alpha = f32::from(a) / 255.0;
+        added += &format!(" color=\"rgba({r}, {g}, {b}, {alpha})\"");
+    }
+    Some(format!("<svg{added}{rest}"))
+}
+
+impl InlineSvgs {
+    /// The image for a prepared inline document and its intrinsic size
+    /// (`None` while a large document parses). `None` if it doesn't parse
+    /// or is refused (logged once per text at `debug`).
+    pub(crate) fn image(
+        &self,
+        text: String,
+        images: &Assets<Image>,
+    ) -> Option<(Handle<Image>, Option<Vec2>)> {
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if let Some(entry) = inner.entries.get_mut(&text) {
+            entry.unused = 0;
+            return Some((entry.image.clone(), entry.intrinsic));
+        }
+        let image = images.reserve_handle();
+        let mut entry = InlineEntry {
+            image: image.clone(),
+            intrinsic: None,
+            tree: None,
+            document: None,
+            unused: 0,
+        };
+        if text.len() <= INLINE_SYNC_BYTES {
+            let tree = match parse(text.as_bytes()) {
+                Ok(tree) => std::sync::Arc::new(tree),
+                Err(err) => {
+                    debug!("inline svg skipped: {err}");
+                    return None;
+                }
+            };
+            let (width, height, _) = raster_size(&tree, 1.0, MAX_SVG_SIDE).ok()?;
+            entry.intrinsic = Some(Vec2::new(width as f32, height as f32));
+            let cheap = estimate_cost(&tree, width, height, INLINE_SYNC_COST) <= INLINE_SYNC_COST;
+            if cheap {
+                match draw(&tree, width, height, Limits::DEFAULT) {
+                    Ok((drawn, _)) => inner.ready.push((image.id(), drawn)),
+                    Err(err) => {
+                        debug!("inline svg skipped: {err}");
+                        return None;
+                    }
+                }
+            } else {
+                let task_tree = tree.clone();
+                let task = bevy::tasks::AsyncComputeTaskPool::get().spawn(async move {
+                    draw(&task_tree, width, height, Limits::DEFAULT)
+                        .map(|(image, _)| (image, task_tree))
+                        .map_err(|err| err.to_string())
+                });
+                inner.drawing.push((text.clone(), task));
+            }
+            entry.tree = Some(tree);
+        } else {
+            let task_text = text.clone();
+            let task = bevy::tasks::AsyncComputeTaskPool::get().spawn(async move {
+                let tree = parse(task_text.as_bytes()).map_err(|err| err.to_string())?;
+                let (width, height, _) =
+                    raster_size(&tree, 1.0, MAX_SVG_SIDE).map_err(|err| err.to_string())?;
+                let tree = std::sync::Arc::new(tree);
+                draw(&tree, width, height, Limits::DEFAULT)
+                    .map(|(image, _)| (image, tree))
+                    .map_err(|err| err.to_string())
+            });
+            inner.drawing.push((text.clone(), task));
+        }
+        let intrinsic = entry.intrinsic;
+        inner.entries.insert(text, entry);
+        Some((image, intrinsic))
+    }
+
+    /// The parsed document behind an inline image, for the redraw.
+    pub(crate) fn document_of(&self, image: AssetId<Image>) -> Option<Handle<SvgDocument>> {
+        let inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        inner
+            .entries
+            .values()
+            .find(|entry| entry.image.id() == image)
+            .and_then(|entry| entry.document.clone())
+    }
+}
+
+/// After the build: inserts the inline images it drew, finishes the drawing
+/// tasks, gives each parsed inline document an [`SvgDocument`] (for the
+/// display-size redraw), and drops entries no `InlineImage` has shown for
+/// [`INLINE_KEEP_FRAMES`] frames.
+pub(crate) fn finish_inline_svgs(
+    inline: Res<InlineSvgs>,
+    mut images: ResMut<Assets<Image>>,
+    mut documents: ResMut<Assets<SvgDocument>>,
+    spans: Query<(&bevy::ui::widget::InlineImage, Option<&SvgRaster>)>,
+) {
+    let mut inner = inline
+        .inner
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    for (id, image) in std::mem::take(&mut inner.ready) {
+        let _ = images.insert(id, image);
+    }
+    let mut finished = Vec::new();
+    inner.drawing.retain_mut(
+        |(text, task)| match bevy::tasks::futures::check_ready(task) {
+            Some(result) => {
+                finished.push((text.clone(), result));
+                false
+            }
+            None => true,
+        },
+    );
+    for (text, result) in finished {
+        let Some(entry) = inner.entries.get_mut(&text) else {
+            continue;
+        };
+        match result {
+            Ok((image, tree)) => {
+                let id = entry.image.id();
+                entry.intrinsic = Some(image.size().as_vec2());
+                entry.tree = Some(tree);
+                let _ = images.insert(id, image);
+                // `Modified`, which restyles the UI showing it (its box
+                // size wasn't known when the build collected it).
+                let _ = images.get_mut(id);
+            }
+            Err(err) => debug!("inline svg not drawn: {err}"),
+        }
+    }
+    let shown: std::collections::HashSet<AssetId<Image>> = spans
+        .iter()
+        .flat_map(|(image, raster)| {
+            [
+                Some(image.image.id()),
+                raster.map(|raster| raster.source.id()),
+            ]
+        })
+        .flatten()
+        .collect();
+    let drawing: std::collections::HashSet<String> =
+        inner.drawing.iter().map(|(text, _)| text.clone()).collect();
+    for (text, entry) in inner.entries.iter_mut() {
+        if entry.document.is_none()
+            && let Some(tree) = &entry.tree
+        {
+            entry.document = Some(documents.add(SvgDocument { tree: tree.clone() }));
+        }
+        if shown.contains(&entry.image.id()) || drawing.contains(text) {
+            entry.unused = 0;
+        } else {
+            entry.unused += 1;
+        }
+    }
+    inner
+        .entries
+        .retain(|_, entry| entry.unused <= INLINE_KEEP_FRAMES);
+}
+
+/// Where a span's [`SvgDocument`] comes from.
+enum DocumentSource {
+    Path(bevy::asset::AssetPath<'static>),
+    Inline(Handle<SvgDocument>),
+}
+
 /// Draws each SVG `<img>` at the pixel size it's shown at (its inline
 /// box × the target's scale factor, `UiScale` included), so it stays sharp
 /// under HiDPI, `UiScale` and CSS sizes larger than its own. Draws run on
@@ -690,6 +968,7 @@ pub(crate) struct SvgRasters {
 pub(crate) fn rasterize_svg_images(
     mut commands: Commands,
     server: Res<AssetServer>,
+    inline: Res<InlineSvgs>,
     mut images: ResMut<Assets<Image>>,
     documents: Res<Assets<SvgDocument>>,
     mut rasters: ResMut<SvgRasters>,
@@ -740,16 +1019,26 @@ pub(crate) fn rasterize_svg_images(
             }
             _ => image.image.clone(),
         };
-        let is_svg = source
-            .path()
-            .and_then(|path| path.path().extension())
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("svg"));
-        if !is_svg {
+        // An `<img src="….svg">` (its document loads by the same path), or
+        // an inline `<svg>` (its document is the cache's).
+        let document = match source.path() {
+            Some(path)
+                if path
+                    .path()
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("svg")) =>
+            {
+                Some(DocumentSource::Path(path.clone_owned()))
+            }
+            Some(_) => None,
+            None => inline.document_of(source.id()).map(DocumentSource::Inline),
+        };
+        let Some(document) = document else {
             if raster.is_some() {
                 commands.entity(entity).remove::<SvgRaster>();
             }
             continue;
-        }
+        };
         let Some(intrinsic) = images.get(&source).map(|image| image.size().as_vec2()) else {
             continue;
         };
@@ -757,10 +1046,13 @@ pub(crate) fn rasterize_svg_images(
             Some(raster) if raster.source == source => raster,
             _ => {
                 // A new `<img>`, or its `src` changed: start over.
-                let path = source.path().expect("svg path").clone_owned();
+                let document = match document {
+                    DocumentSource::Path(path) => server.load(path),
+                    DocumentSource::Inline(document) => document,
+                };
                 commands.entity(entity).insert(SvgRaster {
                     source,
-                    document: server.load(path),
+                    document,
                     intrinsic,
                     shown: None,
                     wanted: None,
@@ -1056,6 +1348,35 @@ mod tests {
         let at = ((y * raster.width + x) * 4) as usize;
         let data = raster.image.data.as_ref().expect("CPU data kept");
         data[at..at + 4].try_into().unwrap()
+    }
+
+    /// What an inline `<svg>` needs before XML parses it (ADR 0038 §4).
+    #[test]
+    fn inline_text_gets_namespaces_and_the_cascade_color() {
+        let red = Some([255, 0, 0, 255]);
+        assert_eq!(
+            prepare_inline("<svg width=\"8\"><rect/></svg>", red).unwrap(),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" color=\"rgba(255, 0, 0, 1)\" width=\"8\"><rect/></svg>"
+        );
+        // The author's namespace and color stay; nothing is added twice.
+        assert_eq!(
+            prepare_inline(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" color=\"blue\"/>",
+                red
+            )
+            .unwrap(),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" color=\"blue\"/>"
+        );
+        // `xlink:` in the text needs its namespace declared.
+        let with_xlink = prepare_inline("<svg><use xlink:href=\"#a\"/></svg>", None).unwrap();
+        assert!(
+            with_xlink.contains("xmlns:xlink=\"http://www.w3.org/1999/xlink\""),
+            "{with_xlink}"
+        );
+        assert!(parse(with_xlink.as_bytes()).is_ok());
+        // Only an `<svg` start tag.
+        assert!(prepare_inline("<svgx>", red).is_none());
+        assert!(prepare_inline("<p>", red).is_none());
     }
 
     #[test]

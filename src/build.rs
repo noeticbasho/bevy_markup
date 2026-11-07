@@ -163,6 +163,10 @@ struct ImageRun {
     image: Handle<Image>,
     width: Option<ImageSize>,
     height: Option<ImageSize>,
+    /// The intrinsic size when it's known before the image is in
+    /// `Assets<Image>`: an inline `<svg>`'s, from its parsed document
+    /// (ADR 0038 §4; the image is inserted after the build).
+    intrinsic: Option<Vec2>,
 }
 
 /// An `<img>`'s `width`/`height` attribute value.
@@ -200,7 +204,10 @@ impl ImageRun {
     /// layout time). `None` also while the image is still loading (its load
     /// restyles the UI, which sizes the box).
     fn box_size(&self, images: &Assets<Image>) -> Option<Vec2> {
-        let size = images.get(&self.image)?.size().as_vec2();
+        let size = match self.intrinsic {
+            Some(size) => size,
+            None => images.get(&self.image)?.size().as_vec2(),
+        };
         match (self.width, self.height) {
             (None, None) => Some(size),
             _ => None,
@@ -637,6 +644,10 @@ pub(crate) struct Styler<'a> {
     pub(crate) server: Option<&'a AssetServer>,
     /// The template's asset path: `<img src="…">` resolves against it.
     pub(crate) template: Option<AssetPath<'static>>,
+    /// Inline `<svg>` documents (ADR 0038 §4). `None` where images can't
+    /// be added (the fuzzing harness): inline `<svg>` is then skipped.
+    #[cfg(feature = "svg")]
+    pub(crate) inline_svgs: Option<&'a crate::svg::InlineSvgs>,
 }
 
 impl Styler<'_> {
@@ -779,6 +790,25 @@ impl Styler<'_> {
                 debug!("html img: {src} skipped ({error})");
             })
             .ok()?;
+        let (width, height) = self.image_size(tag, element, state, ancestors, element_state);
+        Some(ImageRun {
+            image: self.server?.load(resolved),
+            width,
+            height,
+            intrinsic: None,
+        })
+    }
+
+    /// An `<img>`'s or inline `<svg>`'s CSS `width`/`height` (px, `%`;
+    /// other units skipped).
+    fn image_size(
+        &self,
+        tag: &tl::HTMLTag,
+        element: &HtmlElement,
+        state: Pseudo,
+        ancestors: &[Ancestor],
+        element_state: &ElementState,
+    ) -> (Option<ImageSize>, Option<ImageSize>) {
         let inline = cascade::inline_style(tag);
         let declared =
             self.styles
@@ -793,10 +823,37 @@ impl Styler<'_> {
                 }
             })
         };
+        (
+            size(declared.layout.width, "width"),
+            size(declared.layout.height, "height"),
+        )
+    }
+
+    /// An inline `<svg>` (ADR 0038 §4): the element's source text, as the
+    /// template rendered it, drawn into an image whose `currentColor` is
+    /// the element's computed `color`. Sized like an `<img>`: CSS
+    /// `width`/`height`, else the document's intrinsic size. `None` when
+    /// it doesn't parse or is refused (the element then shows nothing).
+    #[cfg(feature = "svg")]
+    fn inline_svg_of(
+        &self,
+        tag: &tl::HTMLTag,
+        element: &HtmlElement,
+        color: Color,
+        state: Pseudo,
+        ancestors: &[Ancestor],
+        element_state: &ElementState,
+    ) -> Option<ImageRun> {
+        let inline = self.inline_svgs?;
+        let raw = tag.raw().as_utf8_str();
+        let text = crate::svg::prepare_inline(&raw, Some(color.to_srgba().to_u8_array()))?;
+        let (image, intrinsic) = inline.image(text, self.images)?;
+        let (width, height) = self.image_size(tag, element, state, ancestors, element_state);
         Some(ImageRun {
-            image: self.server?.load(resolved),
-            width: size(declared.layout.width, "width"),
-            height: size(declared.layout.height, "height"),
+            image,
+            width,
+            height,
+            intrinsic,
         })
     }
 
@@ -958,6 +1015,8 @@ pub(crate) fn root_style(
         images,
         server,
         template: None,
+        #[cfg(feature = "svg")]
+        inline_svgs: None,
     }
     .style_of(
         root,
@@ -992,6 +1051,8 @@ pub(crate) struct BuildAssets<'w> {
     images: Res<'w, Assets<Image>>,
     templates: Res<'w, Assets<HtmlTemplate>>,
     rem_size: Res<'w, RemSize>,
+    #[cfg(feature = "svg")]
+    inline_svgs: Res<'w, crate::svg::InlineSvgs>,
 }
 
 /// ADR 0031: the windowing params (the system is at Bevy's 16-param
@@ -1042,6 +1103,8 @@ pub(crate) fn build_html_ui(
         images,
         templates,
         rem_size,
+        #[cfg(feature = "svg")]
+        inline_svgs,
     } = assets;
     // Removals aren't `Ref` changes, so they're read separately.
     let removed_outlines: HashSet<Entity> = removed_outlines.read().collect();
@@ -1320,6 +1383,8 @@ pub(crate) fn build_html_ui(
             images: &images,
             server: Some(&server),
             template,
+            #[cfg(feature = "svg")]
+            inline_svgs: Some(&inline_svgs),
         };
 
         let mut root_box = styler.box_of(
@@ -6295,7 +6360,7 @@ fn collect_node(
         // An `<img>` directly in a container (raw HTML or Markdown): an
         // anonymous block carrying its image run — the same treatment a text
         // piece gets. In a block, `push_runs` handles it inline instead.
-        if element.tag == "img" {
+        if element.tag == "img" || (cfg!(feature = "svg") && element.tag == "svg") {
             let mut runs = Vec::new();
             let mut reactive = own_reactive;
             // ADR 0031: an `<img>`'s anonymous block outside the band.
@@ -6659,7 +6724,9 @@ fn is_walked_through(ctx: &Ctx, handle: tl::NodeHandle) -> bool {
         return false;
     };
     let name = tag.name().as_utf8_str().to_ascii_lowercase();
-    !CONTAINERS.contains(&name.as_str())
+    // An inline `<svg>` is an item (one image, ADR 0038 §4), not walked.
+    !(cfg!(feature = "svg") && name == "svg")
+        && !CONTAINERS.contains(&name.as_str())
         && !matches!(
             name.as_str(),
             "h1" | "h2"
@@ -6897,7 +6964,11 @@ fn run_walk<'a>(
                 } else {
                     chain.clone()
                 };
-                if tag.name().as_utf8_str() == *"img" {
+                if tag.name().as_utf8_str() == *"img"
+                    || (cfg!(feature = "svg") && tag.name().as_utf8_str() == *"svg")
+                {
+                    // An inline `<svg>` is one image too (ADR 0038 §4):
+                    // its children are never walked as text.
                     // The run's size styles from the image's CSS — reactive
                     // to a flip like any other run (ADR 0029).
                     if let Some(element) = &element {
@@ -7167,10 +7238,32 @@ fn push_image_run(
     ancestors: &[Ancestor],
     element_state: &ElementState,
 ) {
-    let Some(image) = element.as_ref().and_then(|element| {
+    let Some(element) = element.as_ref() else {
+        return;
+    };
+    let image = if tag.name().as_utf8_str() == "svg" {
+        #[cfg(feature = "svg")]
+        {
+            // `currentColor` is the element's own computed color.
+            let inline = cascade::inline_style(tag);
+            let own = ctx.styler.style_of(
+                element,
+                style,
+                state,
+                inline.as_ref(),
+                ancestors,
+                element_state,
+            );
+            ctx.styler
+                .inline_svg_of(tag, element, own.color, state, ancestors, element_state)
+        }
+        #[cfg(not(feature = "svg"))]
+        None
+    } else {
         ctx.styler
             .image_of(tag, element, state, ancestors, element_state)
-    }) else {
+    };
+    let Some(image) = image else {
         return;
     };
     runs.push(Run {
@@ -7520,6 +7613,8 @@ mod ua_default_tests {
             images: &images,
             server: None,
             template: None,
+            #[cfg(feature = "svg")]
+            inline_svgs: None,
         };
         let defaults = Style {
             color: DEFAULT_COLOR,

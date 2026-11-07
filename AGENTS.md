@@ -139,7 +139,17 @@ src/
                    pruned each frame; `rasterize_svg_images` after `size_images`, before
                    `UiSystems::Prepare`: puts the raster back the same frame the build writes
                    the 1× source, pins `InlineImage` width/height to the box; `size_images`
-                   takes the aspect from `SvgRaster::intrinsic`
+                   takes the aspect from `SvgRaster::intrinsic`. Inline `<svg>` (ADR 0038 §4):
+                   `push_runs` and the container branch treat it like `<img>` (an item, its
+                   children never walked; `is_walked_through` excludes it); `inline_svg_of`
+                   sends `tag.raw()` through `prepare_inline` (xmlns, xmlns:xlink, `color`
+                   = the computed CSS color) to `InlineSvgs` (keyed by that text; parsed
+                   and, under `INLINE_SYNC_COST`, drawn during the build into a reserved
+                   handle that `finish_inline_svgs` inserts the same frame — no blank
+                   frame on a recolor; larger or costlier text on a task, inserted with a
+                   `Modified` that restyles); `ImageRun::intrinsic` sizes the box at
+                   collect; entries unshown for 120 frames are dropped; the redraw finds
+                   inline documents via `InlineSvgs::document_of`
 examples/
                    One directory per example (`<name>/main.rs`, which cargo finds as the
                    example `<name>`), each with a README.md: a screenshot, what it shows,

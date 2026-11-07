@@ -121,6 +121,8 @@ pub fn cascade(css: &str) -> Result<String, String> {
         images: &assets,
         server: None,
         template: None,
+        #[cfg(feature = "svg")]
+        inline_svgs: None,
     };
 
     let elements = [
@@ -478,6 +480,14 @@ pub fn svg(source: &[u8]) -> Result<String, String> {
         side,
         cost: crate::svg::MAX_SVG_COST / (full / u64::from(side).pow(2)),
     };
+    // The inline-`<svg>` path too (ADR 0038 §4): the same bytes as an
+    // element's source text, prepared (namespaces, the cascade color).
+    if let Some(prepared) = std::str::from_utf8(source)
+        .ok()
+        .and_then(|text| crate::svg::prepare_inline(text, Some([255, 0, 0, 255])))
+    {
+        let _ = crate::svg::rasterize(prepared.as_bytes(), 1.0, limits);
+    }
     let raster = crate::svg::rasterize(source, 1.0, limits).map_err(|err| err.to_string())?;
     Ok(format!(
         "{}x{} cost {}",

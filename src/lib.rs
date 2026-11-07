@@ -354,11 +354,19 @@ impl Plugin for BevyMarkupPlugin {
             .init_asset::<svg::SvgDocument>()
             .init_asset_loader::<svg::SvgDocumentLoader>()
             .init_resource::<svg::SvgRasters>()
+            .init_resource::<svg::InlineSvgs>()
             .add_systems(
                 PostUpdate,
-                svg::rasterize_svg_images
-                    .after(build::size_images)
-                    .before(UiSystems::Prepare),
+                (
+                    // Inline `<svg>` images drawn during the build go into
+                    // `Assets<Image>` before Bevy's UI reads them.
+                    svg::finish_inline_svgs
+                        .after(HtmlUiSystems::Build)
+                        .before(build::size_images),
+                    svg::rasterize_svg_images
+                        .after(build::size_images)
+                        .before(UiSystems::Prepare),
+                ),
             );
         #[cfg(feature = "text-input")]
         {

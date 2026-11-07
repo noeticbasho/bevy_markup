@@ -14,3 +14,4 @@
 ## [2026-11-07 14:57] update | ADR 0039: CSS nesting pre-scan walks cssparser's tokens (replaces the hand-written scan); SDLC pointers updated
 ## [2026-11-07 15:07] update | ADR 0038 step 1: svg feature (loader, depth check, cost budget, fuzz target, tests); UPSTREAM U17-U19
 ## [2026-11-07 15:25] update | ADR 0038 step 2: <img> SVGs redrawn at displayed size; renderer panics guarded (resvg #1185, U20)
+## [2026-11-07 16:37] update | ADR 0038 step 3: inline <svg> as a replaced inline image (currentColor from CSS); found bug_0185
