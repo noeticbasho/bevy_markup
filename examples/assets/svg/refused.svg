@@ -1,0 +1,1 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><!-- A <use> cycle: usvg would expand it until its depth limit, past a 2 MB stack. bevy_markup refuses it before usvg runs. --><g id="a"><use href="#b"/></g><g id="b"><use href="#a"/></g></svg>

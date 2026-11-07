@@ -196,6 +196,11 @@ name = "svg-divan"
 harness = false
 required-features = ["fuzzing"]
 
+# The SVG example (ADR 0038) needs the `svg` feature.
+[[example]]
+name = "svg"
+required-features = ["svg"]
+
 # The example needs Bevy's file watcher; skipped without the feature.
 [[example]]
 name = "hot-reload"

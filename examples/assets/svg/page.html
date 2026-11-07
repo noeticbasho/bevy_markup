@@ -1,0 +1,35 @@
+<html class="page">
+  <h1 data-l10n-id="svg-title">SVG in bevy_markup</h1>
+  <div class="toolbar">
+    <button class="tool" data-on-click="theme" autofocus><svg width="18" height="18" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="10" r="2" fill="currentColor"/><circle cx="14" cy="8" r="2" fill="currentColor"/><circle cx="16" cy="14" r="2" fill="currentColor"/></svg> <span data-l10n-id="svg-theme" data-l10n-args='{{ {"theme": theme} | json }}'>Theme</span></button>
+    <button class="tool" data-on-click="scale"><svg width="18" height="18" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M14.5 14.5L21 21M7 10h6M10 7v6" stroke="currentColor" stroke-width="2" fill="none"/></svg> <span data-l10n-id="svg-scale" data-l10n-args='{{ {"scale": scale} | json }}'>Scale</span></button>
+    <button class="tool" data-on-click="language"><svg width="18" height="18" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" stroke="currentColor" stroke-width="1.5" fill="none"/></svg> <span data-l10n-id="svg-language">Language</span></button>
+  </div>
+  <div class="grid">
+    <section class="card framed">
+      <h2 data-l10n-id="svg-inline-title">Inline icons</h2>
+      <p data-l10n-id="svg-inline-body">Inline svg in the template. Its currentColor is the CSS color: the theme and hover recolor it.</p>
+      <p class="icons">{% for size in [16, 24, 32, 48] %}<svg class="icon" style="width: {{ size }}px" viewBox="0 0 24 24"><path d="M12 2l3 7h7l-5.5 4.5 2 7.5-6.5-4.5-6.5 4.5 2-7.5L2 9h7z" fill="currentColor"/></svg> {% endfor %}</p>
+    </section>
+    <section class="card framed">
+      <h2 data-l10n-id="svg-sizes-title">One file, every size</h2>
+      <p data-l10n-id="svg-sizes-body">The same star.svg as an img at four CSS sizes, each drawn again at its displayed pixels.</p>
+      <p class="sizes"><img class="s16" src="icons/star.svg"> <img class="s32" src="icons/star.svg"> <img class="s64" src="icons/star.svg"> <img class="s96" src="icons/star.svg"></p>
+    </section>
+    <section class="card patterned">
+      <h2 data-l10n-id="svg-css-title">CSS images</h2>
+      <p data-l10n-id="svg-css-body">This card's background is a tiled SVG; the cards around it are framed by an SVG border-image. Both stay sharp at any scale.</p>
+    </section>
+    <section class="card framed">
+      <h2 data-l10n-id="svg-text-title">Text</h2>
+      <p data-l10n-id="svg-text-body">SVG text needs the svg-text feature; it uses the fonts registered with bevy_markup, else Bevy's default font.</p>
+      <p class="badge"><img class="badge" src="badge.svg"></p>
+    </section>
+    <section class="card framed">
+      <h2 data-l10n-id="svg-refused-title">Refused</h2>
+      <p data-l10n-id="svg-refused-body">refused.svg is a use cycle that would crash the parser: it's refused before parsing, so nothing shows here and the page is unharmed.</p>
+      <p class="refused"><img src="refused.svg"></p>
+    </section>
+  </div>
+  <p class="status" data-l10n-id="svg-status" data-l10n-args='{{ {"scale": scale} | json }}'>UiScale</p>
+</html>

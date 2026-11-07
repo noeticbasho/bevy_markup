@@ -70,7 +70,7 @@ jobs:
       # The loader's unit tests (2 MB-stack soundness, budget, resolver)
       # and the headless SVG vectors.
       - name: Tests with svg
-        run: cargo test --features svg --lib --test html_ui
+        run: cargo test --features svg --lib --test html_ui --test content_lint
       - name: Tests with svg-text
         run: cargo test --features svg-text --lib --test html_ui
       # The hot-reload and demo dev-tools examples are gated behind those

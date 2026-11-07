@@ -269,6 +269,35 @@ Tests (`html_ui` `svg_css_images`, `UiScale` 2):
 Without the mode scaling two tests fail; without the put-back, one.
 `.slice.ron` frames (`NineSliceFrame`, app nodes) are still 1×.
 
+### 10. The `svg` example (added 2026-11-07)
+
+`examples/svg/` (`required-features = ["svg"]`; `svg-text` for its
+badge) shows every path on one page:
+- inline icons recolored by the theme's context `var()`s and `:hover`;
+- `star.svg` as `<img>` at 16–96 px;
+- `frame.svg` as `border-image` and `tile.svg` as a tiled
+  `background-image`;
+- `badge.svg` with `<text>`;
+- `refused.svg`, a `<use>` cycle;
+- a `UiScale` button (1×, 1.5×, 2×).
+
+The content lint renders it in every theme × scale context, but only
+with `--features svg`: without the feature its sheet's SVG `url()`s
+never load, and `settle()` never returns for a sheet whose `url()` image
+fails. CI's svg step runs the lint.
+
+Its first run (`--offscreen`) panicked at startup, which found bug_0187:
+the plugin's `init_asset::<Image>()` (and `<Font>` under `svg-text`)
+replaced the stores `ImagePlugin`/`TextPlugin` had made. It's now
+registered only when absent.
+
+Checked in the running example, through the harness's `game/ui` and
+screenshots: at 1.5× every SVG is drawn again at the new density, with
+frame corners and rivets at their logical size. The harness's
+`game/keyboard` doesn't reach `just_pressed` hotkeys: it writes
+`ButtonInput` outside the frame, and Bevy clears `just_pressed` in
+`PreUpdate`. So the scale change was driven by clicking the button.
+
 ### 9. Testbench scenarios and profiling (added 2026-11-07)
 
 With `--features svg`, the testbench has three SVG scenarios:

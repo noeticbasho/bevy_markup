@@ -9,6 +9,11 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
 ## [Unreleased]
 
 ### Added
+- **`svg` example** (`--features svg`, `svg-text` for its text badge):
+  inline `<svg>` icons recolored by the theme and `:hover`, one SVG file
+  as `<img>` at four sizes, an SVG `border-image` and tiled
+  `background-image`, SVG `<text>`, a hostile SVG that's refused, and a
+  `UiScale` button that redraws everything at 1×, 1.5× and 2×.
 - **SVG images** (the new `svg` cargo feature): `.svg` files load as
   ordinary `Image`s, drawn on the CPU by resvg, so `<img src="icon.svg">`,
   `border-image: url(frame.svg) 8` (slices in the SVG's px),

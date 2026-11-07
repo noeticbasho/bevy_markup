@@ -259,6 +259,28 @@ fn grid_names_contexts() -> Vec<Value> {
     ]
 }
 
+/// `examples/svg/main.rs`: each theme at each `UiScale` step.
+#[cfg(feature = "svg")]
+fn svg_contexts() -> Vec<Value> {
+    let themes = [
+        ("#f0b429", "#e6edf3"),
+        ("#7fdb8f", "#e6f3ea"),
+        ("#ff7aa2", "#f3e6ec"),
+    ];
+    let mut contexts = Vec::new();
+    for (theme, (accent, ink)) in themes.iter().enumerate() {
+        for scale in [1.0, 1.5, 2.0] {
+            contexts.push(serde_json::json!({
+                "theme": theme,
+                "scale": scale,
+                "--accent": accent,
+                "--ink": ink,
+            }));
+        }
+    }
+    contexts
+}
+
 /// `examples/combinators/main.rs`: each group selected in turn.
 fn combinators_contexts() -> Vec<Value> {
     [0, 1, 2]
@@ -524,6 +546,16 @@ const PAGES: &[Page] = &[
         locales: "calc/locales",
         unlocalized: None,
     },
+    // Its stylesheet's `url()`s are SVGs: without the feature they never
+    // load, and a UI with a missing `url()` image never settles.
+    #[cfg(feature = "svg")]
+    Page {
+        template: "svg/page.html",
+        contexts: svg_contexts,
+        stylesheets: &["svg/style.css"],
+        locales: "svg/locales",
+        unlocalized: None,
+    },
     Page {
         template: "combinators/panel.html",
         contexts: combinators_contexts,
@@ -780,6 +812,11 @@ fn every_template_is_listed() {
         .filter(|name| !PAGES.iter().any(|page| page.template == name))
         .collect();
     let on_disk: BTreeSet<String> = on_disk.difference(&libraries).cloned().collect();
+    // The svg example's page is listed only with the feature (see PAGES).
+    let on_disk: BTreeSet<String> = on_disk
+        .into_iter()
+        .filter(|path| cfg!(feature = "svg") || !path.starts_with("svg/"))
+        .collect();
     let listed: BTreeSet<String> = PAGES.iter().map(|page| page.template.to_owned()).collect();
     let mut problems: Vec<String> = on_disk
         .difference(&listed)

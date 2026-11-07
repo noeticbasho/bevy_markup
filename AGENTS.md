@@ -293,6 +293,13 @@ examples/
                    the context and Tera `{% if submitted %}` swaps the form
                    for a receipt; "edit again" clears it; Space / Y =
                    language
+  svg/             ADR 0038 (`--features svg`, `svg-text` for the badge): inline `<svg>` icons
+                   (toolbar buttons and a row of sizes; `currentColor` from the cascade, so
+                   `:hover` and the theme's context `var()`s recolor them), `star.svg` as
+                   `<img>` at 16–96 px (display-size redraws), `frame.svg` as `border-image`,
+                   `tile.svg` as tiled `background-image`, `badge.svg` with SVG `<text>`,
+                   `refused.svg` (a `<use>` cycle, refused); T / X theme, S / B `UiScale`
+                   1/1.5/2×, L / Y language
   testbench/       main.rs + scenarios.rs: an interactive torture bench (scenario list,
                    size, churn, live frame/build numbers, pass/fail checks). Workloads are
                    generated into an in-memory asset source (`testbench://`, a `Dir` +
@@ -445,6 +452,8 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
   inputs/          profile.html, style.css (input + focus ring), locales/{en-US,de}
   links/           report.html, style.css (a:hover/:focus-visible), locales/{en-US,de}
   forms/           signup.html, style.css, locales/{en-US,de}
+  svg/             page.html, style.css, icons/star.svg, frame.svg, tile.svg, badge.svg,
+                   refused.svg, locales/{en-US,de}
   testbench/       shell.html, style.css, locales/{en-US,de} (`markdown: true`: shell.ftl +
                    workload.ftl, the generated workloads' messages)
   shared/          reused across examples: components.html (Tera 2 component

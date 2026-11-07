@@ -231,6 +231,7 @@ cargo run --example live         # data rendered every frame, updated in place; 
 cargo run --example world        # styled, localized nameplates over 3D units (HtmlWorldAnchor)
 cargo run --example inline       # inline styling, text decoration, images, elliptical corners, position: fixed
 cargo run --example markdown     # localized Markdown documents
+cargo run --example svg --features svg-text   # inline <svg> (currentColor), <img> SVGs, SVG frames, text, a refused file
 cargo run --example demo         # themes, languages, scrolling, 9-slice frames, DOM outlines
 ```
 
