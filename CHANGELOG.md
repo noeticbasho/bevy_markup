@@ -17,7 +17,8 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   (`load_with_settings::<Image, SvgLoaderSettings>`) draws them larger.
   An `<img>` SVG is redrawn at the size it's shown at (its CSS size ×
   the display's scale factor and `UiScale`), so it stays sharp; CSS
-  `border-image`/`background-image` SVGs are drawn at their own size.
+  `border-image`/`background-image` SVGs are drawn at the display's
+  scale factor too (frame corners and background tiles keep their size).
   Inline `<svg>` in templates (HTML or Markdown) draws too, as one inline
   image sized like an `<img>`; its `currentColor` is the element's CSS
   `color`, so `svg { color: … }`, `:hover` and themes recolor it. It must

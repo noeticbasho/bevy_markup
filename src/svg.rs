@@ -24,7 +24,10 @@
 //! SVG is drawn again at the pixels it covers (the box × the scale factor,
 //! `UiScale` included), off the main thread, and swapped in when ready.
 //! One drawing per document and size is shared by every `<img>` showing
-//! it. CSS `border-image`/`background-image` SVGs are drawn at `1.0` only.
+//! it. A CSS `border-image`/`background-image` SVG is drawn at the node's
+//! scale factor (HiDPI, `UiScale`) with the same geometry: a frame's corners
+//! and a background's tiles keep their logical size, a stretched background
+//! is drawn at the node's pixels.
 //!
 //! # Inline `<svg>`
 //!
@@ -104,6 +107,7 @@ use std::fmt;
 use bevy::asset::{AssetLoader, LoadContext, RenderAssetUsages, io::Reader};
 use bevy::image::Image;
 use bevy::prelude::*;
+use bevy::ui::widget::NodeImageMode;
 use resvg::{tiny_skia, usvg};
 // usvg's own roxmltree: the document handed to `Tree::from_xmltree` is
 // parsed by the parser usvg was built with, so the two can't be different
@@ -1047,6 +1051,55 @@ pub(crate) fn finish_inline_svgs(
         .retain(|_, entry| entry.unused <= INLINE_KEEP_FRAMES);
 }
 
+/// On an element whose CSS `border-image`/`background-image` is an SVG:
+/// the 1× image and mode the build gave it, and the sharper raster shown
+/// instead (ADR 0038 §7). Like [`SvgRaster`], put back the same frame the
+/// build re-inserts the 1× `ImageNode`.
+#[derive(Component)]
+pub(crate) struct SvgFrame {
+    source: Handle<Image>,
+    document: Handle<SvgDocument>,
+    mode: NodeImageMode,
+    shown: Option<(UVec2, Handle<Image>)>,
+    wanted: Option<UVec2>,
+}
+
+/// `mode` for an image `scale`× the size it was written for, drawn with the
+/// same logical geometry. Bevy reads slice insets in image px both to cut
+/// the texture and to size the corners on screen (× `min(node / image,
+/// max_corner_scale)`), and tiles at image size × `stretch_value`: insets
+/// × scale with the corner cap ÷ scale, and tile stretch ÷ scale, cut the
+/// same regions and draw them at the same size.
+pub(crate) fn scale_mode(mode: &NodeImageMode, scale: f32) -> NodeImageMode {
+    let tile = |mode: SliceScaleMode| match mode {
+        SliceScaleMode::Tile { stretch_value } => SliceScaleMode::Tile {
+            stretch_value: stretch_value / scale,
+        },
+        stretch => stretch,
+    };
+    match mode {
+        NodeImageMode::Sliced(slicer) => NodeImageMode::Sliced(TextureSlicer {
+            border: BorderRect {
+                min_inset: slicer.border.min_inset * scale,
+                max_inset: slicer.border.max_inset * scale,
+            },
+            center_scale_mode: tile(slicer.center_scale_mode),
+            sides_scale_mode: tile(slicer.sides_scale_mode),
+            max_corner_scale: slicer.max_corner_scale / scale,
+        }),
+        NodeImageMode::Tiled {
+            tile_x,
+            tile_y,
+            stretch_value,
+        } => NodeImageMode::Tiled {
+            tile_x: *tile_x,
+            tile_y: *tile_y,
+            stretch_value: stretch_value / scale,
+        },
+        other => other.clone(),
+    }
+}
+
 /// Where a span's [`SvgDocument`] comes from.
 enum DocumentSource {
     Path(bevy::asset::AssetPath<'static>),
@@ -1078,6 +1131,16 @@ pub(crate) fn rasterize_svg_images(
         Option<&mut SvgRaster>,
     )>,
     blocks: Query<&ComputedNode>,
+    mut frames: Query<
+        (
+            Entity,
+            &mut ImageNode,
+            &ComputedNode,
+            Option<&mut SvgFrame>,
+            Option<&crate::build::CssRoot>,
+        ),
+        Or<(With<crate::build::CssFrame>, With<crate::build::CssRoot>)>,
+    >,
 ) {
     // Finished draws.
     let finished: Vec<_> = rasters
@@ -1240,6 +1303,106 @@ pub(crate) fn rasterize_svg_images(
             rasters.drawing.insert(key, task);
         }
     }
+    // CSS `border-image`/`background-image` SVGs (ADR 0038 §7): drawn at
+    // their intrinsic size × the node's scale factor (a sliced or tiled
+    // image keeps its logical geometry: the mode's insets, corner cap and
+    // tile size are scaled to match), or at the node's pixels when
+    // stretched over it.
+    for (entity, mut node_image, node, frame, root) in &mut frames {
+        if root.is_some_and(|root| !root.owns_image()) {
+            continue;
+        }
+        let shown_handle = frame
+            .as_ref()
+            .and_then(|frame| frame.shown.as_ref().map(|(_, handle)| handle.clone()));
+        let (source, mode) = match &frame {
+            Some(frame) if shown_handle.as_ref() == Some(&node_image.image) => {
+                (frame.source.clone(), frame.mode.clone())
+            }
+            _ => (node_image.image.clone(), node_image.image_mode.clone()),
+        };
+        let Some(path) = source.path().filter(|path| {
+            path.path()
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("svg"))
+        }) else {
+            if frame.is_some() {
+                commands.entity(entity).remove::<SvgFrame>();
+            }
+            continue;
+        };
+        let Some(intrinsic) = images.get(&source).map(|image| image.size().as_vec2()) else {
+            continue;
+        };
+        let mut frame = match frame {
+            Some(frame) if frame.source == source => frame,
+            _ => {
+                commands.entity(entity).insert(SvgFrame {
+                    document: server.load(path.clone_owned()),
+                    source,
+                    mode,
+                    shown: None,
+                    wanted: None,
+                });
+                continue;
+            }
+        };
+        // The build re-inserts the 1x image on an update: keep its mode.
+        if node_image.image == frame.source {
+            frame.mode = mode.clone();
+        }
+        let scale = 1.0 / node.inverse_scale_factor().max(f32::EPSILON);
+        let target = match mode {
+            NodeImageMode::Stretch | NodeImageMode::Auto => node.size(),
+            _ => intrinsic * scale,
+        };
+        let target = UVec2::new(
+            (target.x.ceil() as u32).clamp(1, MAX_SVG_SIDE),
+            (target.y.ceil() as u32).clamp(1, MAX_SVG_SIDE),
+        );
+        let document = frame.document.id();
+        if target == intrinsic.as_uvec2() || !target.cmpgt(UVec2::ZERO).all() {
+            if frame.shown.take().is_some() {
+                node_image.image = frame.source.clone();
+                node_image.image_mode = frame.mode.clone();
+            }
+            continue;
+        }
+        if let Some((size, shown)) = frame.shown.clone() {
+            in_use.insert((document, size));
+            let scaled = scale_mode(&frame.mode, size.x as f32 / intrinsic.x);
+            if node_image.image != shown || node_image.image_mode != scaled {
+                node_image.image = shown;
+                node_image.image_mode = scaled;
+            }
+            if size == target {
+                continue;
+            }
+        }
+        let key = (document, target);
+        in_use.insert(key);
+        if frame.wanted != Some(target) {
+            frame.wanted = Some(target);
+            continue;
+        }
+        if let Some(handle) = rasters.ready.get(&key).cloned() {
+            node_image.image = handle.clone();
+            node_image.image_mode = scale_mode(&frame.mode, target.x as f32 / intrinsic.x);
+            frame.shown = Some((target, handle));
+        } else if !rasters.refused.contains(&key) && !rasters.drawing.contains_key(&key) {
+            let Some(document) = documents.get(&frame.document) else {
+                continue;
+            };
+            let tree = document.tree.clone();
+            let task = bevy::tasks::AsyncComputeTaskPool::get().spawn(async move {
+                draw(&tree, target.x, target.y, Limits::DEFAULT)
+                    .map(|(image, _)| image)
+                    .map_err(|err| err.to_string())
+            });
+            rasters.drawing.insert(key, task);
+        }
+    }
+
     rasters.ready.retain(|key, _| in_use.contains(key));
     rasters.refused.retain(|key| in_use.contains(key));
 }

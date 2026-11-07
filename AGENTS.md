@@ -158,7 +158,12 @@ src/
                    frame on a recolor; larger or costlier text on a task, inserted with a
                    `Modified` that restyles); `ImageRun::intrinsic` sizes the box at
                    collect; entries unshown for 120 frames are dropped; the redraw finds
-                   inline documents via `InlineSvgs::document_of`
+                   inline documents via `InlineSvgs::document_of`. CSS images (ADR 0038 §7):
+                   the same system takes `CssFrame` entities and roots whose `CssRoot`
+                   `owns_image`: sliced/tiled drawn at intrinsic × scale factor with
+                   `scale_mode` (insets × s, `max_corner_scale` and tile `stretch_value`
+                   ÷ s: same geometry), stretched at the node's px; `SvgFrame` keeps
+                   the 1× mode and puts the raster back after the build's re-insert
 examples/
                    One directory per example (`<name>/main.rs`, which cargo finds as the
                    example `<name>`), each with a README.md: a screenshot, what it shows,

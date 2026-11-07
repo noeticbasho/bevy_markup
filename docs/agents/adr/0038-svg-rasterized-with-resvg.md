@@ -233,6 +233,42 @@ Tests (`html_ui` `inline_svg`, `svg::tests`):
 Falsified: without the cascade color, three tests fail; with the
 children walked, six; without the collect-time intrinsic size, one.
 
+### 7. CSS-loaded SVGs at the scale factor (added 2026-11-07)
+
+`border-image` and `background-image` SVGs were drawn at 1× and blurred
+on HiDPI or under `UiScale`. The redraw system now also takes
+`ImageNode`s the build owns: `CssFrame` entities, and roots whose
+`CssRoot` owns the image. An app's own `ImageNode` is left alone.
+
+- **Sliced or tiled:** drawn at intrinsic size × the node's scale factor
+  (`1 / ComputedNode::inverse_scale_factor`).
+- **Stretched:** drawn at the node's physical size.
+
+Bevy's slicer (`bevy_ui_render` `compute_texture_slices`) reads the slice
+insets in image px twice: as `inset / image_size` to cut the texture, and
+as `inset × min(node / image, max_corner_scale)` to size the corners on
+screen. Tiles are drawn at `image × stretch_value`. So for a raster `s`×
+larger, `scale_mode` multiplies the insets by `s` and divides
+`max_corner_scale` and every tile `stretch_value` by `s`. That cuts the
+same regions and draws them at the same logical size, with `s`× the
+pixels. Only `NodeImageMode::Auto` sizes a node from its image
+(`update_image_content_size_system`), and the build never uses it, so
+layout is unaffected.
+
+As for `<img>`, the build re-inserts the 1× `ImageNode` on every update;
+`SvgFrame` keeps the 1× mode, and the system restores the raster and the
+scaled mode the same frame.
+
+Tests (`html_ui` `svg_css_images`, `UiScale` 2):
+- a 40×20 frame with 25% slices draws at 80×40, insets 10/5 → 20/10,
+  corner cap 0.5, and no frame shows the 1× image across a restyle;
+- a tiled background draws 2× with `stretch_value` 0.5;
+- a stretched background draws at 200×100 for a 100×50 node;
+- scale factor 1 is untouched.
+
+Without the mode scaling two tests fail; without the put-back, one.
+`.slice.ron` frames (`NineSliceFrame`, app nodes) are still 1×.
+
 ### 6. SVG `<text>`: the `svg-text` feature (added 2026-11-07)
 
 usvg converts `<text>` to outlines while it parses, so the fonts must be
@@ -462,9 +498,6 @@ Limits).
   renders nothing without the `text` feature.
 - Open:
   - SVG `<text>` with system font families (§6: font files only).
-  - CSS-loaded SVGs (`border-image`, `background-image`) stay at 1× and
-    blur on HiDPI. Re-rasterizing them needs the slice numbers scaled by
-    the raster/intrinsic ratio inside `sliced_image`.
   - Page CSS reaching inside inline `<svg>` (usvg's
     `Options::style_sheet` could carry the matching rules).
   - Whether `svg` should join a future default feature set.

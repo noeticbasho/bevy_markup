@@ -11119,3 +11119,152 @@ mod svg_text {
         assert!(inked(&mut ui).iter().all(|&count| count > 20));
     }
 }
+
+/// ADR 0038 §7: CSS `border-image`/`background-image` SVGs are drawn at the
+/// node's scale factor, with the same logical geometry.
+#[cfg(feature = "svg")]
+mod svg_css_images {
+    use super::*;
+
+    const FRAME: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 20"><rect x="2" y="2" width="36" height="16" fill="none" stroke="#843" stroke-width="4"/></svg>"##;
+    const TILE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><circle cx="4" cy="4" r="3" fill="#36c"/></svg>"##;
+
+    #[derive(Resource, Default)]
+    struct Smallest(Option<u32>, bool);
+
+    /// Per frame: whether any CSS image shrank after growing (the build's
+    /// 1x image showing through a restyle).
+    fn record(mut seen: ResMut<Smallest>, nodes: Query<&ImageNode>, images: Res<Assets<Image>>) {
+        for node in &nodes {
+            if let Some(image) = images.get(&node.image) {
+                let width = image.size().x;
+                if seen.0.is_some_and(|largest| width < largest) {
+                    seen.1 = true;
+                }
+                seen.0 = Some(seen.0.map_or(width, |largest| largest.max(width)));
+            }
+        }
+    }
+
+    fn page(name: &str, css: &str, ui_scale: f32) -> TestUi {
+        let mut ui = TestUi::with_layout(
+            name,
+            &[
+                ("frame.svg", FRAME),
+                ("tile.svg", TILE),
+                ("page.html", r#"<div class="box"><p>x</p></div>"#),
+                ("style.css", css),
+                ("other.css", &format!("{css} p {{ color: #00ff00 }}")),
+            ],
+            UVec2::new(400, 300),
+        )
+        .stylesheet("style.css")
+        .spawn("page.html", TemplateContext::new(), Node::default());
+        ui.world_mut().insert_resource(UiScale(ui_scale));
+        ui.app_mut()
+            .init_resource::<Smallest>()
+            .add_systems(Last, record);
+        ui.settle();
+        ui
+    }
+
+    /// The `.box` element's image: its pixel size and mode.
+    fn shown(ui: &mut TestUi) -> Option<(UVec2, bevy::ui::widget::NodeImageMode)> {
+        let world = ui.world_mut();
+        let mut nodes = world.query::<(&ImageNode, &HtmlElement)>();
+        let (node, _) = nodes
+            .iter(world)
+            .find(|(_, element)| element.classes.iter().any(|class| class == "box"))?;
+        let size = world.resource::<Assets<Image>>().get(&node.image)?.size();
+        Some((size, node.image_mode.clone()))
+    }
+
+    fn until(ui: &mut TestUi, size: UVec2) -> bevy::ui::widget::NodeImageMode {
+        for _ in 0..500 {
+            if let Some((shown, mode)) = shown(ui)
+                && shown == size
+            {
+                return mode;
+            }
+            ui.update(1);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        panic!("never showed {size}: {:?}", shown(ui));
+    }
+
+    const FRAMED: &str = "html { color: #ffffff } .box { border-image: url(frame.svg) 25% stretch; border-width: 4px; width: 100px; height: 50px }";
+
+    /// `UiScale` 2: the 40x20 frame is drawn at 80x40; its 25% slices (5 of
+    /// the height, 10 of the width, in the SVG's px) double in the image
+    /// and the corner cap halves, so the corners stay 10x5 logical px. A
+    /// restyle re-inserts the 1x image and no frame shows it.
+    #[test]
+    fn a_border_image_svg_is_drawn_at_the_scale_factor() {
+        let mut ui = page("svg-css-frame", FRAMED, 2.0);
+        let mode = until(&mut ui, UVec2::new(80, 40));
+        let bevy::ui::widget::NodeImageMode::Sliced(slicer) = mode else {
+            panic!("{mode:?}");
+        };
+        assert_eq!(slicer.border.min_inset, Vec2::new(20.0, 10.0));
+        assert_eq!(slicer.border.max_inset, Vec2::new(20.0, 10.0));
+        assert_eq!(slicer.max_corner_scale, 0.5);
+        let other = ui.load::<Stylesheet>("other.css");
+        ui.world_mut().resource_mut::<DefaultStylesheet>().0 = Some(other);
+        ui.settle();
+        ui.update(5);
+        assert_eq!(
+            shown(&mut ui).map(|(size, _)| size),
+            Some(UVec2::new(80, 40))
+        );
+        assert!(
+            !ui.world_mut().resource::<Smallest>().1,
+            "a frame showed the 1x image"
+        );
+    }
+
+    /// A tiled background: twice the pixels, tiles at the same logical
+    /// size (`stretch_value` halves).
+    #[test]
+    fn a_tiled_background_svg_keeps_its_tile_size() {
+        let mut ui = page(
+            "svg-css-tiled",
+            "html { color: #ffffff } .box { background-image: url(tile.svg); background-repeat: repeat; width: 100px; height: 50px }",
+            2.0,
+        );
+        let mode = until(&mut ui, UVec2::new(16, 16));
+        assert_eq!(
+            mode,
+            bevy::ui::widget::NodeImageMode::Tiled {
+                tile_x: true,
+                tile_y: true,
+                stretch_value: 0.5
+            }
+        );
+    }
+
+    /// A stretched background is drawn at the node's pixels: 100x50 at
+    /// `UiScale` 2 is 200x100.
+    #[test]
+    fn a_stretched_background_svg_is_drawn_at_the_node_size() {
+        let mut ui = page(
+            "svg-css-stretched",
+            "html { color: #ffffff } .box { background-image: url(tile.svg); background-repeat: no-repeat; width: 100px; height: 50px }",
+            2.0,
+        );
+        until(&mut ui, UVec2::new(200, 100));
+    }
+
+    /// At scale factor 1 a frame keeps the loaded image and its mode.
+    #[test]
+    fn scale_factor_one_keeps_the_loaded_image() {
+        let mut ui = page("svg-css-one", FRAMED, 1.0);
+        ui.update(20);
+        let (size, mode) = shown(&mut ui).expect("a frame");
+        assert_eq!(size, UVec2::new(40, 20));
+        let bevy::ui::widget::NodeImageMode::Sliced(slicer) = mode else {
+            panic!("{mode:?}");
+        };
+        assert_eq!(slicer.border.min_inset, Vec2::new(10.0, 5.0));
+        assert_eq!(slicer.max_corner_scale, 1.0);
+    }
+}

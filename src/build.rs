@@ -618,6 +618,15 @@ pub(crate) struct CssRoot {
     owned: RootOwned,
 }
 
+impl CssRoot {
+    /// Whether the root rule owns the root's `ImageNode` (its
+    /// `border-image`/`background-image`), as opposed to the app.
+    #[cfg(feature = "svg")]
+    pub(crate) fn owns_image(&self) -> bool {
+        self.owned.image.is_some()
+    }
+}
+
 /// Components the root rule set: `Some(app's)` while CSS owns one (`None`
 /// inside = the app had none, so giving it back removes it).
 #[derive(Default)]
