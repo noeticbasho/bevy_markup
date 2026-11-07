@@ -917,7 +917,20 @@ impl InlineSvgs {
             };
             let (width, height, _) = raster_size(&tree, 1.0, MAX_SVG_SIDE).ok()?;
             entry.intrinsic = Some(Vec2::new(width as f32, height as f32));
-            let cheap = estimate_cost(&tree, width, height, INLINE_SYNC_COST) <= INLINE_SYNC_COST;
+            // Over the hard budget: refused now, no task, no empty image
+            // (the element shows nothing, as a refused `<img>` does).
+            let cost = estimate_cost(&tree, width, height, MAX_SVG_COST);
+            if cost > MAX_SVG_COST {
+                debug!(
+                    "inline svg skipped: {}",
+                    SvgError::TooExpensive {
+                        estimate: cost,
+                        max: MAX_SVG_COST
+                    }
+                );
+                return None;
+            }
+            let cheap = cost <= INLINE_SYNC_COST;
             if cheap {
                 match draw(&tree, width, height, Limits::DEFAULT) {
                     Ok((drawn, _)) => inner.ready.push((image.id(), drawn)),

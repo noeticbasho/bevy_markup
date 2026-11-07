@@ -10891,14 +10891,15 @@ html-ui
         assert_eq!(images(&mut ui), vec![(UVec2::new(4, 4), [0, 0, 255, 255])]);
     }
 
-    /// Not XML (an unquoted attribute) or refused (a `<use>` cycle): the
+    /// Not XML (an unquoted attribute) or refused (a `<use>` cycle, the
+    /// render budget): the
     /// element shows nothing and the rest of the page builds (the text
     /// around it merges into one run, as around any empty element).
     #[test]
     fn broken_or_hostile_inline_svg_is_skipped() {
         let mut ui = page(
             "inline-svg-broken",
-            r##"<p>A <svg width=4 height="4"><rect/></svg> B</p><p>C <svg width="4" height="4"><g id="a"><use href="#b"/></g><g id="b"><use href="#a"/></g></svg> D</p>"##,
+            r##"<p>A <svg width=4 height="4"><rect/></svg> B</p><p>C <svg width="4" height="4"><g id="a"><use href="#b"/></g><g id="b"><use href="#a"/></g></svg> D</p><p>E <svg width="64" height="64"><filter id="f"><feTurbulence baseFrequency="0.01" numOctaves="1000000"/></filter><rect width="64" height="64" filter="url(#f)"/></svg> F</p>"##,
             "p { color: #ffffff }",
         );
         ui.assert_dump(
@@ -10908,9 +10909,16 @@ html-ui
     "A B" default 16px #ffffff
   p
     "C D" default 16px #ffffff
+  p
+    "E F" default 16px #ffffff
 "#,
         );
         assert!(images(&mut ui).is_empty());
+        // Not even an empty image: the over-budget one (a million noise
+        // octaves) is refused while the build collects it, not on a task.
+        let world = ui.world_mut();
+        let mut spans = world.query::<&InlineImage>();
+        assert_eq!(spans.iter(world).count(), 0);
     }
 
     /// Raw HTML in a Markdown template passes through: an inline `<svg>`

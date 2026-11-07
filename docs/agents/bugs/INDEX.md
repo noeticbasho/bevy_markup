@@ -215,6 +215,7 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0183](bug_0183.md) | The CSS nesting pre-scan took a name ending in `url` for a URL token and skipped the rest of the text | `src/cascade.rs` (`nesting_over_limit`) | high | fixed (branch `fix/css-url-prescan`): names read as cssparser reads them | nightly cargo-fuzz `css` timeouts |
 | [bug_0184](bug_0184.md) | The CSS nesting pre-scan read `\)` after an unquoted URL's whitespace as an escape and skipped the rest of the text | `src/cascade.rs` (`nesting_over_limit`) | high | fixed: unquoted URLs end as cssparser ends them | the bug_0183 pre-scan property (random seed) |
 | [bug_0185](bug_0185.md) | `<br/>` (any `<name/>`) nested the rest of the document inside it | `src/template.rs`, `src/build.rs`; upstream astral-tl | high | fixed: documents and translations normalized before `tl` | an ADR 0038 step-3 SVG test, narrowed with `tl` probes |
+| [bug_0186](bug_0186.md) | A refused inline `<svg>` reserved its box and an empty image | `src/svg.rs` (`InlineSvgs::image`) | low | fixed: refused at collect time | the testbench's `svg-bombs` scenario |
 
 ## Discovery session metadata: bug_0001–0005
 
