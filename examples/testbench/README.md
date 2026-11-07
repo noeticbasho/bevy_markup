@@ -12,6 +12,8 @@ own work is timed per call, in the real Bevy frame loop.
 # Interactive, with live profiling: run `hotpath console` in a second terminal
 # (cargo install hotpath --features=tui), then:
 cargo run --release --example testbench --features hotpath
+# The SVG scenarios (ADR 0038) need the feature (svg-text for SVG text):
+cargo run --release --example testbench --features hotpath,svg
 
 # Scripted: one scenario, a fixed size, a bounded headless run; the checks'
 # final states are logged ("testbench: final …") and the hotpath report
@@ -52,6 +54,8 @@ fixed.
 | | calc() layout | N cards sized by mixed-unit `calc()` | built, budget |
 | | Selector list | N rows in a container, plus a list and a table, styled by structural pseudo-classes, `+`/`~`, `[data-*]` and `:not()` (ADR 0028/0030); ~1 % of the rows change per frame | built, reuse, budget |
 | | Text features | `text-align`, `line-height`, `letter-spacing`, `text-transform`, `white-space`, list markers, a table, a tiled `background-image` and an `overflow: auto` panel whose class flips every frame (ADR 0027/0028) | built, auto-scroll, budget |
+| | SVG icons (`--features svg`) | N rows, each with an inline `<svg>` whose `currentColor` follows the row's state: the churn recolours icons, each new colour a new drawing (ADR 0038 §4) | built, SVGs drawn, budget |
+| | SVG images (`--features svg`) | N `<img>` rows of one SVG file at a CSS width that steps every 30 frames (12 → 36 px): bursts of display-size redraws, one shared drawing per size (§3) | built, SVGs drawn, budget |
 | Security | Nested CSS rules | 20 000 nested rules: the sheet's load fails cleanly (bug_0106) | sheet refused, built |
 | | Deep DOM | 5 000 nested elements: content past 100 levels is dropped | built |
 | | var() bombs | 2 000-link chains, doubling fallbacks, cycles, nested functions (bug_0092) | built |
@@ -64,6 +68,7 @@ fixed.
 | | Sibling bombs | one container of N siblings under `~`, `:nth-child`, `:last-of-type` rules while the `.hot` element moves (bug_0134) | built |
 | | Entity bombs | 50 000 references without `;` (bug_0135), a 100 000-letter name, references in attributes, `&#+65;` (bug_0146) | built, references decode |
 | | Function bombs | 30 nested `light-dark(` and 30 nested `calc()` around a `var()`, in a stylesheet and in `style` attributes: refused or dropped at once by the paren guard, where lightningcss took minutes to hours (bug_0179) | sheet refused, attribute dropped, built |
+| | SVG bombs (`--features svg`) | 300 chained patterns, a `<use>` cycle, a million noise octaves, 2 000 nested groups and a billion laughs, as `<img>` files and inline (ADR 0038 §5; bug_0186 found here) | built, hostile SVGs refused, budget |
 | | Selector engine | `:not\0()` (bug_0180), the forms parcel's matcher panics on (`:has()`, `:nth-child(2 of .a)`, `:nth-col()`, nested `&` rules), nested `:not()` and a far sibling combinator skip their rules while the sheet loads; `:nth-child(0)` no longer colours the root; `:is()`, `:only-of-type` and `^=` match (ADR 0034) | built, rules |
 | Correctness | Reuse vs fresh build | random edits (change, insert, remove, move, highlight) every frame; every 20 frames the churn holds and the UI is compared with a fresh build of the same state | twins match |
 | | Indented vs flat | an indented and a flat Markdown template of the same document must build the same UI | twins match |

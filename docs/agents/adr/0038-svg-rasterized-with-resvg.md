@@ -269,6 +269,35 @@ Tests (`html_ui` `svg_css_images`, `UiScale` 2):
 Without the mode scaling two tests fail; without the put-back, one.
 `.slice.ron` frames (`NineSliceFrame`, app nodes) are still 1×.
 
+### 9. Testbench scenarios and profiling (added 2026-11-07)
+
+With `--features svg`, the testbench has three SVG scenarios:
+- **perf, `svg-icons`:** N rows with an inline `<svg>` whose
+  `currentColor` follows the row's state.
+- **perf, `svg-images`:** N `<img>` rows of one SVG file at a CSS width
+  that steps every 30 frames: redraw bursts.
+- **security, `svg-bombs`:** the probe report's hostile constructs as
+  `<img>` files and inline.
+
+Two new checks: `svg-drawn` (every inline image of the main UI shows a
+drawn image) and `svg-refused` (no hostile SVG produced an image, and
+every `<img>` one failed its load).
+
+The SVG systems and hot internals carry `#[hotpath::measure]`:
+`rasterize_svg_images`, `finish_inline_svgs`, `sync_svg_fonts`,
+`InlineSvgs::image`, `parse_with`, `recursion_depth`, `estimate_cost` and
+`draw`.
+
+First run (release, `--size 500 --no-render --exit-after 600`):
+- every check passed, worst frames 16.7–21.8 ms against the 250 ms
+  budget;
+- in `svg-icons`, `rasterize_svg_images` and `finish_inline_svgs`
+  averaged about 20 µs per frame each (≈0.1% of the run).
+
+The first `svg-bombs` run found bug_0186: an inline SVG over the render
+budget was refused only on its draw task, after the build had already
+sized its box. It's now refused while the build collects it.
+
 ### 8. Benchmarks (added 2026-11-07)
 
 `benches/svg.rs` (criterion) and `benches/svg-divan.rs` (divan,

@@ -17,3 +17,4 @@
 ## [2026-11-07 16:37] update | ADR 0038 step 3: inline <svg> as a replaced inline image (currentColor from CSS); found bug_0185
 ## [2026-11-07 17:13] update | ADR 0038 §6: svg-text feature (SVG <text> with FontFamilies fonts, redraw on font arrival)
 ## [2026-11-07 17:18] update | ADR 0038 §7: CSS border-image/background-image SVGs drawn at the scale factor
+## [2026-11-07 17:36] update | ADR 0038 §9: testbench SVG scenarios (svg-icons, svg-images, svg-bombs) and hotpath on SVG code; bug_0186

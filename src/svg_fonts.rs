@@ -128,6 +128,7 @@ pub(crate) fn has_text(source: &[u8]) -> bool {
 /// uses (or Bevy's default font) loads; on a real change, reloads the
 /// `.svg` files with text and restyles the UIs (inline `<svg>` keys its
 /// drawing by the set's generation, so a restyle draws it again).
+#[hotpath::measure]
 pub(crate) fn sync_svg_fonts(
     fonts: Res<crate::svg::SvgFonts>,
     mut families: ResMut<FontFamilies>,

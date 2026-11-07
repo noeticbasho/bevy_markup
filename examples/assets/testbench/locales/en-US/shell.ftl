@@ -22,6 +22,9 @@ tb-sc-reuse-vs-fresh = Reuse vs fresh build
 tb-sc-indent-vs-flat = Indented vs flat
 tb-sc-selector-list = Selector list
 tb-sc-text-features = Text features
+tb-sc-svg-icons = SVG icons
+tb-sc-svg-images = SVG images
+tb-sc-svg-bombs = SVG bombs
 tb-sc-selector-bombs = Selector bombs
 tb-sc-sibling-bombs = Sibling bombs
 tb-sc-entity-bombs = Entity bombs
@@ -52,6 +55,9 @@ tb-desc-reuse-vs-fresh = A UI mutated at random every frame is compared with a f
 tb-desc-indent-vs-flat = An indented and a flat Markdown template of the same document must build the same UI.
 tb-desc-selector-list = N rows in a container, plus a list and a table, styled by structural pseudo-classes, sibling combinators, attribute selectors and :not(); about one row in a hundred changes per frame, and the unchanged rows must keep reusing.
 tb-desc-text-features = text-align, line-height, letter-spacing, text-transform and white-space on N rows in an overflow: auto panel with a tiled background image, plus list markers and a table.
+tb-desc-svg-icons = N rows, each with an inline SVG icon whose currentColor follows the row's state: the churn recolours icons through the cascade, each new colour a new drawing (needs --features svg).
+tb-desc-svg-images = N rows of the same &lt;img&gt; SVG at a CSS width that steps every 30 frames (12 to 36 px): bursts of display-size redraws, one shared drawing per size (needs --features svg).
+tb-desc-svg-bombs = 300 chained patterns, a &lt;use&gt; cycle, a million noise octaves, 2 000 nested groups and a billion laughs, as &lt;img&gt; files and inline: each refused, the page intact, the frame budget held (ADR 0038; needs --features svg).
 tb-desc-selector-bombs = Extreme An+B offsets, a 10 000-character attribute value, 1 000 sibling rules, nested :not() and combinator characters inside quoted values: nothing panics and the quoted probes still match.
 tb-desc-sibling-bombs = One container of N siblings under ~, :nth-child and :last-of-type rules while the .hot element moves every frame.
 tb-desc-entity-bombs = 50 000 character references without a semicolon, a 100 000-letter name and references in attributes: decoding stays linear and correct.
@@ -192,3 +198,15 @@ tb-check-engine-rules =
         [fail] FAIL
        *[other] WAIT
     } unsupported rules skip, :nth-child(0) matches nothing, Level 4 matches { $detail }
+tb-check-svg-drawn =
+    { $state ->
+        [pass] PASS
+        [fail] FAIL
+       *[other] WAIT
+    } SVGs drawn { $detail }
+tb-check-svg-refused =
+    { $state ->
+        [pass] PASS
+        [fail] FAIL
+       *[other] WAIT
+    } hostile SVGs refused { $detail }

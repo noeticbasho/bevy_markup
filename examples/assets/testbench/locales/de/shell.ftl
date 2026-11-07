@@ -22,6 +22,9 @@ tb-sc-reuse-vs-fresh = Wiederverwendung gegen Neubau
 tb-sc-indent-vs-flat = Eingerückt gegen flach
 tb-sc-selector-list = Selektorliste
 tb-sc-text-features = Texteigenschaften
+tb-sc-svg-icons = SVG-Symbole
+tb-sc-svg-images = SVG-Bilder
+tb-sc-svg-bombs = SVG-Bomben
 tb-sc-selector-bombs = Selektor-Bomben
 tb-sc-sibling-bombs = Geschwister-Bomben
 tb-sc-entity-bombs = Entity-Bomben
@@ -52,6 +55,9 @@ tb-desc-reuse-vs-fresh = Eine UI, die in jedem Frame zufällig verändert wird, 
 tb-desc-indent-vs-flat = Eine eingerückte und eine flache Markdown-Vorlage desselben Dokuments müssen dieselbe UI ergeben.
 tb-desc-selector-list = N Zeilen in einem Container, dazu eine Liste und eine Tabelle, gestaltet mit Struktur-Pseudoklassen, Geschwister-Kombinatoren, Attributselektoren und :not(); pro Frame ändert sich etwa eine von hundert Zeilen, die unveränderten müssen weiter wiederverwendet werden.
 tb-desc-text-features = text-align, line-height, letter-spacing, text-transform und white-space auf N Zeilen in einem overflow: auto-Feld mit gekacheltem Hintergrundbild, dazu Listenmarken und eine Tabelle.
+tb-desc-svg-icons = N Zeilen mit je einem eingebetteten SVG-Symbol, dessen currentColor dem Zustand der Zeile folgt: die Änderungen färben Symbole über die Kaskade um, jede neue Farbe eine neue Zeichnung (braucht --features svg).
+tb-desc-svg-images = N Zeilen desselben &lt;img&gt;-SVG mit einer CSS-Breite, die alle 30 Frames springt (12 bis 36 px): Schübe von Neuzeichnungen in Anzeigegröße, eine geteilte Zeichnung pro Größe (braucht --features svg).
+tb-desc-svg-bombs = 300 verkettete Muster, ein &lt;use&gt;-Zyklus, eine Million Rausch-Oktaven, 2 000 verschachtelte Gruppen und eine Milliarde Lacher, als &lt;img&gt;-Dateien und eingebettet: jedes abgelehnt, die Seite intakt, das Frame-Budget gehalten (ADR 0038; braucht --features svg).
 tb-desc-selector-bombs = Extreme An+B-Werte, ein Attributwert mit 10 000 Zeichen, 1 000 Geschwisterregeln, verschachtelte :not() und Kombinator-Zeichen in Werten in Anführungszeichen: nichts stürzt ab, und die Prüf-Elemente passen weiterhin.
 tb-desc-sibling-bombs = Ein Container mit N Geschwistern unter Regeln mit ~, :nth-child und :last-of-type, während das .hot-Element in jedem Frame wandert.
 tb-desc-entity-bombs = 50 000 Zeichenreferenzen ohne Semikolon, ein Name aus 100 000 Buchstaben und Referenzen in Attributen: die Dekodierung bleibt linear und korrekt.
@@ -192,3 +198,15 @@ tb-check-engine-rules =
         [fail] FEHLER
        *[other] WARTE
     } nicht unterstützte Regeln entfallen, :nth-child(0) passt auf nichts, Level 4 passt { $detail }
+tb-check-svg-drawn =
+    { $state ->
+        [pass] OK
+        [fail] FEHLER
+       *[other] WARTE
+    } SVGs gezeichnet { $detail }
+tb-check-svg-refused =
+    { $state ->
+        [pass] OK
+        [fail] FEHLER
+       *[other] WARTE
+    } feindliche SVGs abgelehnt { $detail }

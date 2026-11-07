@@ -301,9 +301,10 @@ examples/
                    `is="stage"` element (an app node there would be reconciled away).
                    Groups: performance (big document, all dirty, restyle storm, indented
                    Markdown, localized rows, many UIs, calc(), selector list, text
-                   features), security (nested rules, deep DOM, var()/grid/Markdown/
-                   selector/sibling/entity bombs, hostile args, args-JSON injection,
-                   remote sources), correctness (`TwinKind`: a fresh twin for reuse and
+                   features; with `--features svg`: SVG icons, SVG images), security
+                   (nested rules, deep DOM, var()/grid/Markdown/selector/sibling/entity
+                   bombs, hostile args, args-JSON injection, remote sources; with `svg`:
+                   SVG bombs, the `svg-refused` check), correctness (`TwinKind`: a fresh twin for reuse and
                    selectors, a forced full restyle under focus churn, a reversed-order
                    twin compared per row; plus `reuse` via `Skeleton::last_reuse`,
                    `quiet` (idle: no build/restyle/`Node` write), `linear` (N vs 4N,

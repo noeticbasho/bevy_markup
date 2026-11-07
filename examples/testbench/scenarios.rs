@@ -23,6 +23,10 @@ pub const GROUPS: [(&str, &[&str]); 3] = [
             "calc-layout",
             "selector-list",
             "text-features",
+            #[cfg(feature = "svg")]
+            "svg-icons",
+            #[cfg(feature = "svg")]
+            "svg-images",
         ],
     ),
     (
@@ -41,6 +45,8 @@ pub const GROUPS: [(&str, &[&str]); 3] = [
             "entity-bombs",
             "function-bombs",
             "selector-engine",
+            #[cfg(feature = "svg")]
+            "svg-bombs",
         ],
     ),
     (
@@ -212,6 +218,68 @@ pub struct Plan {
     /// instead of a column.
     pub row: bool,
     pub checks: &'static [&'static str],
+}
+
+/// ADR 0038's inline `<svg>`: a star icon whose `currentColor` follows the
+/// row's state (the churn's `hot` flips recolor icons through the cascade).
+#[cfg(feature = "svg")]
+const SVG_ICON: &str = r#"<svg width="14" height="14" viewBox="0 0 24 24"><path d="M12 2l3 7h7l-5.5 4.5 2 7.5-6.5-4.5-6.5 4.5 2-7.5L2 9h7z" fill="currentColor"/></svg>"#;
+
+#[cfg(feature = "svg")]
+const SVG_CSS: &str = "\
+.row .k { color: #7fdbff; }
+.row.hot .k { color: #ff6b6b; }
+img.i { width: 14px; }
+";
+
+/// `svg-images`: every row's `<img>` is the same SVG file at a CSS width
+/// the context steps every 30 frames (12 → 36 px): a burst of display-size
+/// redraws, one shared drawing per size.
+#[cfg(feature = "svg")]
+const SVG_IMAGES_HTML: &str = "{% for row in rows %}<div class=\"row\" id=\"row-{{ row.id }}\"><p class=\"k\"><img class=\"i\" src=\"icon.svg\" style=\"width: {{ size }}px\"> {{ row.name }}</p><p class=\"v\">{{ row.value }}</p></div>\n{% endfor %}";
+
+/// The probe report's hostile SVGs (ADR 0038 §5): each must be refused
+/// (the load fails, an inline one draws nothing) while the page builds and
+/// the frame budget holds. `inline` is the same document as inline markup.
+#[cfg(feature = "svg")]
+fn svg_bombs() -> Vec<(&'static str, String)> {
+    let svg = |body: String| {
+        format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">{body}</svg>"#)
+    };
+    let mut patterns =
+        String::from("<pattern id='p0' width='8' height='8' patternUnits='userSpaceOnUse'/>");
+    for i in 1..300 {
+        patterns += &format!(
+            "<pattern id='p{i}' width='8' height='8' patternUnits='userSpaceOnUse'><rect width='8' height='8' fill='url(#p{})'/></pattern>",
+            i - 1
+        );
+    }
+    patterns += "<rect width='8' height='8' fill='url(#p299)'/>";
+    vec![
+        // 300 chained patterns: past the recursion-depth bound (usvg alone
+        // overflows a 2 MB stack at ~120).
+        ("chain.svg", svg(patterns)),
+        // Mutually recursive `<use>`: usvg would expand it to its depth limit.
+        ("cycle.svg", svg("<g id='a'><use href='#b'/></g><g id='b'><use href='#a'/></g>".into())),
+        // A million noise octaves: refused by the render-cost estimate.
+        (
+            "cost.svg",
+            svg("<filter id='f'><feTurbulence baseFrequency='0.01' numOctaves='1000000'/></filter><rect width='64' height='64' filter='url(#f)'/>".into()),
+        ),
+        // 2 000 nested groups: past the depth bound.
+        ("nest.svg", svg("<g>".repeat(2000) + &"</g>".repeat(2000))),
+        // A billion laughs: roxmltree's entity limits.
+        (
+            "laughs.svg",
+            format!(
+                "<!DOCTYPE svg [<!ENTITY l0 \"lol\">{}]>{}",
+                (1..10)
+                    .map(|i| format!("<!ENTITY l{i} \"{}\">", format!("&l{};", i - 1).repeat(10)))
+                    .collect::<String>(),
+                svg("<rect width='8' height='8' id='&l9;'/>".into())
+            ),
+        ),
+    ]
 }
 
 /// The workloads' shared stylesheet.
@@ -747,6 +815,60 @@ pub fn plan(scenario: &str, dir: &Dir, prefix: &str) -> Plan {
                 &["built", "auto-scroll", "budget"],
             )
         }
+        #[cfg(feature = "svg")]
+        "svg-icons" => {
+            let html = ROWS_HTML.replace(
+                "<p class=\"k\">{{ row.name }}</p>",
+                &format!("<p class=\"k\">{SVG_ICON} {{{{ row.name }}}}</p>"),
+            );
+            let css = format!("{BENCH_CSS}{SVG_CSS}");
+            let paths = write(dir, prefix, &[("rows.html", html), ("bench.css", css)]);
+            column(
+                vec![main(&paths[0], &paths[1], Role::Main)],
+                &["built", "svg-drawn", "budget"],
+            )
+        }
+        #[cfg(feature = "svg")]
+        "svg-images" => {
+            let icon = SVG_ICON.replacen("<svg", r#"<svg xmlns="http://www.w3.org/2000/svg""#, 1);
+            let css = format!("{BENCH_CSS}{SVG_CSS}");
+            let paths = write(
+                dir,
+                prefix,
+                &[
+                    ("rows.html", SVG_IMAGES_HTML.into()),
+                    ("bench.css", css),
+                    ("icon.svg", icon),
+                ],
+            );
+            column(
+                vec![main(&paths[0], &paths[1], Role::Main)],
+                &["built", "svg-drawn", "budget"],
+            )
+        }
+        #[cfg(feature = "svg")]
+        "svg-bombs" => {
+            let bombs = svg_bombs();
+            // Each as an `<img>` file, and the ones that are plain markup
+            // (no DTD) inline too.
+            let mut html = String::from("<p>Hostile SVGs: each refused, the page intact.</p>");
+            for (name, source) in &bombs {
+                html += &format!("<p>{name}: <img src=\"{name}\"></p>");
+                if !source.starts_with("<!DOCTYPE") {
+                    let inline = source.replacen(r#" xmlns="http://www.w3.org/2000/svg""#, "", 1);
+                    html += &format!("<p>inline {name}: {inline}</p>");
+                }
+            }
+            html += "<p>After the hostile SVGs.</p>";
+            let mut files: Vec<(&str, String)> = bombs.into_iter().collect();
+            files.insert(0, ("bench.css", BENCH_CSS.into()));
+            files.insert(0, ("page.html", html));
+            let paths = write(dir, prefix, &files);
+            column(
+                vec![probe(&paths[0], &paths[1], "svg-bombs", json!({}))],
+                &["built", "svg-refused", "budget"],
+            )
+        }
         "order-independence" => {
             let css = format!("{BENCH_CSS}{ORDER_CSS}");
             let paths = write(
@@ -1128,6 +1250,10 @@ pub fn context(scenario: &str, model: &Model, role: Role) -> Value {
         Role::Card(index) => {
             let row = &model.rows[index.min(model.rows.len().saturating_sub(1))];
             json!({ "id": index, "value": row.value })
+        }
+        // `svg-images`: the `<img>` width steps every 30 frames.
+        _ if scenario == "svg-images" => {
+            json!({ "rows": model.rows, "tick": model.tick, "size": 12 + (model.tick / 30 % 4) * 8 })
         }
         _ if scenario == "restyle-storm" => {
             json!({ "rows": model.rows, "tick": model.tick, "--accent": model.accent() })

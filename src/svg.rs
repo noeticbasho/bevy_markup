@@ -342,6 +342,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<usvg::Tree, SvgError> {
 }
 
 /// [`parse`] with the fonts `<text>` resolves against.
+#[hotpath::measure]
 pub(crate) fn parse_with(bytes: &[u8], fonts: &SvgFonts) -> Result<usvg::Tree, SvgError> {
     guarded(|| parse_unguarded(bytes, fonts))
 }
@@ -428,6 +429,7 @@ const MAX_REFERENCES: usize = 1 << 20;
 /// A cycle is an error: usvg drops some cyclic links but expands `<use>`
 /// cycles until its depth limit, which is past the stack. Iterative
 /// throughout (Kahn's algorithm), so the check itself can't overflow.
+#[hotpath::measure]
 pub(crate) fn recursion_depth(
     document: &roxmltree::Document,
     max_references: usize,
@@ -654,6 +656,7 @@ pub(crate) fn rasterize_with(
 
 /// Budgets and draws a parsed SVG into a `width`×`height` image (both at
 /// most `limits.side`); the image and the cost estimate it was allowed on.
+#[hotpath::measure]
 pub(crate) fn draw(
     tree: &usvg::Tree,
     width: u32,
@@ -879,6 +882,7 @@ impl InlineSvgs {
     /// The image for a prepared inline document and its intrinsic size
     /// (`None` while a large document parses). `None` if it doesn't parse
     /// or is refused (logged once per text at `debug`).
+    #[hotpath::measure(impl_type = "InlineSvgs")]
     pub(crate) fn image(
         &self,
         text: String,
@@ -995,6 +999,7 @@ impl InlineSvgs {
 /// tasks, gives each parsed inline document an [`SvgDocument`] (for the
 /// display-size redraw), and drops entries no `InlineImage` has shown for
 /// [`INLINE_KEEP_FRAMES`] frames.
+#[hotpath::measure]
 pub(crate) fn finish_inline_svgs(
     inline: Res<InlineSvgs>,
     mut images: ResMut<Assets<Image>>,
@@ -1128,6 +1133,7 @@ enum DocumentSource {
 /// Runs after the build and `size_images` and before `UiSystems::Prepare`,
 /// so a build that writes the 1× source back is undone the same frame.
 #[allow(clippy::type_complexity)]
+#[hotpath::measure]
 pub(crate) fn rasterize_svg_images(
     mut commands: Commands,
     server: Res<AssetServer>,
@@ -1443,6 +1449,7 @@ const MAX_COST_DEPTH: u32 = 512;
 /// that layer; a clip path or mask allocates another layer of the same
 /// size and draws its content into it. The weights per filter primitive
 /// are the measured scaling laws of probe §4.
+#[hotpath::measure]
 pub(crate) fn estimate_cost(tree: &usvg::Tree, width: u32, height: u32, max: u64) -> u64 {
     let size = tree.size();
     let mut walk = CostWalk {

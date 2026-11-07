@@ -76,7 +76,7 @@ jobs:
       # The hot-reload and demo dev-tools examples are gated behind those
       # features and skipped by --all-targets.
       - name: Gated examples compile
-        run: cargo check --examples --features hot-reload,dev-tools,text-input
+        run: cargo check --examples --features hot-reload,dev-tools,text-input,svg-text
       # Example `#[cfg(test)]` modules run under plain `cargo test` only
       # for examples marked `test = true` in Cargo.toml (grid-names, which
       # also runs the shared input module's tests). hot-reload needs its

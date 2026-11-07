@@ -1110,6 +1110,7 @@ fn check_scenario(
     paint: Query<(Option<&TextColor>, Option<&BackgroundColor>)>,
     scaling: Res<Scaling>,
     boxes: Query<(&ComputedNode, &UiGlobalTransform)>,
+    #[cfg(feature = "svg")] svg: (Query<&bevy::ui::widget::InlineImage>, Res<Assets<Image>>),
 ) {
     let now = frames.0;
     let since = now.saturating_sub(bench.started);
@@ -1315,6 +1316,55 @@ fn check_scenario(
             // write after it settles (the change-loop class: a write that
             // re-triggers its own trigger — review_0005 I09's promotion,
             // review_0003 G15). The churn writes identical contexts.
+            // ADR 0038: every inline image of the main UI (inline `<svg>`
+            // icons, `<img>` SVGs) shows a drawn image.
+            #[cfg(feature = "svg")]
+            "svg-drawn" => {
+                let (inline_images, images) = &svg;
+                let shown: Vec<bool> = main_ui
+                    .into_iter()
+                    .flat_map(|ui| tree.iter_descendants_depth_first(ui))
+                    .filter_map(|entity| inline_images.get(entity).ok())
+                    .map(|image| images.contains(&image.image))
+                    .collect();
+                let drawn = shown.iter().filter(|drawn| **drawn).count();
+                if shown.is_empty() {
+                    ("wait", String::new())
+                } else if drawn == shown.len() {
+                    ("pass", format!("({drawn} images)"))
+                } else if since > 300 {
+                    ("fail", format!("({drawn} of {} images)", shown.len()))
+                } else {
+                    ("wait", format!("({drawn} of {} images)", shown.len()))
+                }
+            }
+            // ADR 0038 §5: no hostile SVG produced an image; every `<img>`
+            // one failed its load (inline ones show no image at all).
+            #[cfg(feature = "svg")]
+            "svg-refused" => {
+                let (inline_images, images) = &svg;
+                let handles: Vec<&Handle<Image>> = probe("svg-bombs")
+                    .into_iter()
+                    .flat_map(|(ui, ..)| tree.iter_descendants_depth_first(ui))
+                    .filter_map(|entity| inline_images.get(entity).ok())
+                    .map(|image| &image.image)
+                    .collect();
+                let drawn = handles
+                    .iter()
+                    .filter(|handle| images.contains(**handle))
+                    .count();
+                let failed = handles
+                    .iter()
+                    .filter(|handle| server.load_state(**handle).is_failed())
+                    .count();
+                if drawn > 0 {
+                    ("fail", format!("({drawn} drawn)"))
+                } else if !handles.is_empty() && failed == handles.len() {
+                    ("pass", format!("({failed} refused)"))
+                } else {
+                    ("wait", format!("({failed} of {} refused)", handles.len()))
+                }
+            }
             "quiet" => {
                 if check.state == "fail" {
                     (check.state, check.detail.clone())
