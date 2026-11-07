@@ -290,3 +290,24 @@ The cargo-fuzz `svg` target draws within a 256 px side and a
 proportional budget, and asserts each input finishes within 5 s: a miss
 of the estimate by more than ~1000× fails it. First run: 144,475 inputs
 in 180 s, no failures.
+
+## 8. Panics in the renderer (step 2)
+
+A step-2 test drew a 16 × 16 SVG with `feTurbulence numOctaves="100"`
+and saw no image: resvg 0.49 panicked (`filter/turbulence.rs:234`,
+`attempt to add with overflow`) on Bevy's IO thread. That's upstream
+#1185 (UPSTREAM U20). Release builds wrap instead of panicking.
+
+**Loaders are already safe.** `bevy_asset` 0.20.1 runs every loader under
+`catch_unwind` (`server/mod.rs:1494`) and reports `AssetLoaderPanic`, so
+the load fails rather than hanging. Removing bevy_markup's own guard
+leaves `an_svg_that_panics_the_renderer_fails_its_load` passing, which
+confirms this.
+
+**Redraw tasks are not.** A probe spawned a panicking task on the
+`AsyncComputeTaskPool` and polled it with `bevy::tasks::futures::check_ready`
+under `catch_unwind`. The poller panicked: a task's panic propagates to
+whoever polls it. Unguarded, a redraw would crash the app's main thread
+inside `rasterize_svg_images`. `svg::guarded` wraps usvg's parse and
+resvg's draw, so the task returns `SvgError::Panicked`.
+`a_renderer_panic_is_an_error` fails without the guard (checked).

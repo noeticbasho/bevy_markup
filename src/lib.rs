@@ -350,7 +350,16 @@ impl Plugin for BevyMarkupPlugin {
             .init_resource::<bevy::input_focus::directional_navigation::AutoNavigationConfig>();
         #[cfg(feature = "svg")]
         app.init_asset::<Image>()
-            .init_asset_loader::<svg::SvgLoader>();
+            .init_asset_loader::<svg::SvgLoader>()
+            .init_asset::<svg::SvgDocument>()
+            .init_asset_loader::<svg::SvgDocumentLoader>()
+            .init_resource::<svg::SvgRasters>()
+            .add_systems(
+                PostUpdate,
+                svg::rasterize_svg_images
+                    .after(build::size_images)
+                    .before(UiSystems::Prepare),
+            );
         #[cfg(feature = "text-input")]
         {
             // The widget's keyboard editing keys off Bevy's

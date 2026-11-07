@@ -15,6 +15,9 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   `background-image: url(…)` and `*.slice.ron` images accept SVG.
   Images are drawn at the document's intrinsic size; `SvgLoaderSettings`
   (`load_with_settings::<Image, SvgLoaderSettings>`) draws them larger.
+  An `<img>` SVG is redrawn at the size it's shown at (its CSS size ×
+  the display's scale factor and `UiScale`), so it stays sharp; CSS
+  `border-image`/`background-image` SVGs are drawn at their own size.
   Static SVG only, and `<text>` inside an SVG isn't drawn. The loader
   treats files as untrusted:
   - `<image href>` is never resolved, so an SVG can't read other files;

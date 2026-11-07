@@ -7,7 +7,7 @@
 | `Date` | 2026-11-07 17:19 +0400 |
 | `Author` | Claude Opus 5.5 (Anthropic), via Claude Code; direction chosen by Nikita Chashchinskii |
 | `Commit` | `5bae780 Fix the Mutants workflow: cap test memory and use 8 shards` + uncommitted (this ADR, revised after the probe); revised again at `d1eae43` + uncommitted step 1 (the recursion-depth check, §5) |
-| `Status` | Proposed |
+| `Status` | Proposed (steps 1–2 implemented: `.svg` images, `<img>` redrawn at its displayed size; step 3, inline `<svg>`, open) |
 | `Related` | ADR 0028 (roadmap item 12: "decide the shape first"), 0002 (library shape, minimal Bevy features), 0036 (in-domain crates replacing maintained code); review_0003 G19 (no remote loads); [probe report](../performance/adr-0038-probe.md) (the evidence for §2, §3 and §5) |
 
 ## Context
@@ -120,22 +120,52 @@ After layout, a system `rasterize_svg_images` (`PostUpdate`, after
 - swaps the drawn handle while keeping the logical box at the size the
   1× image would give.
 
-Requirement: the swap must survive restyles. `update_spec` re-inserts an
-element's spec components, and the `AGENTS.md` gotcha "App-written
-`Node` fields don't survive on elements" describes the loop that a naive
-swap would cause (restyle resets the handle, the system swaps it back,
-and the change triggers the next restyle). So the build must own the
-mapping: the spec keeps the source handle, and the raster choice lives in
-a component that `update_spec` leaves alone. The same applies to
-`size_images`'s writes today.
+How the swap survives the build (as implemented in step 2). When the
+build updates a span it writes the 1× source back into `InlineImage`
+(`update_spec`'s `put`, only when it differs). The loop the `AGENTS.md`
+gotcha describes ("App-written `Node` fields don't survive") can't
+start: the gotcha's loop needs a write that triggers a restyle, and an
+`InlineImage` write triggers none.
+- `rasterize_svg_images` runs after `size_images` and before
+  `UiSystems::Prepare`. Bevy reads `InlineImage` in
+  `update_inline_image_boxes` (`UiSystems::Content`), so whenever the
+  build writes the source back, the system restores the raster in the
+  same frame and no frame shows the 1× image. Its state lives in an
+  `SvgRaster` component the spec never writes: the source, the intrinsic
+  size, the shown raster, and last frame's wanted size.
+- The swap pins `InlineImage::width`/`height` to the box's logical size;
+  otherwise Bevy sizes the box from the raster's pixels.
+- `size_images` takes the aspect ratio from `SvgRaster::intrinsic`, not
+  from the raster's rounded pixel size: at 33.3% of 400 px the raster is
+  134 × 34, and its own aspect would move the box from 33.3 to 33.8 px.
 
-Rasterization runs as a task off the main thread (a budgeted raster
-can still take tens of milliseconds, §5) and swaps the handle when it
-finishes; until then the previous raster stays on screen. Rasters are
-not redrawn while a size is still changing, for example during a window
-drag. The redraw waits until the size has held for a frame.
-[INFERENCE: one frame of hysteresis is enough; measure on
-implementation.]
+Draws run as `AsyncComputeTaskPool` tasks (a budgeted draw can still take
+tens of milliseconds, §5); until one finishes, the previous image stays
+on screen.
+- A size is drawn once it has held for a frame (`SvgRaster::wanted`),
+  not on every step of a resize. [INFERENCE: one frame is enough; not
+  measured during a real window drag.]
+- The cache (`SvgRasters`) keys finished draws, draws in flight and
+  sizes the budget refused by (document, pixel size). Entries no span
+  uses are dropped every frame.
+- `SvgDocument` has its own loader, so an `<img>` SVG is parsed twice
+  (once for the 1× image, once for the document), both on IO threads.
+- usvg and resvg run under `svg::guarded` (`catch_unwind`). Polling a
+  panicked task re-raises the panic in the poller, here the main thread,
+  and resvg still panics on some input where overflow checks are on
+  (#1185, UPSTREAM U20; probe §8).
+
+Tests, on the layout harness (`html_ui` `svg_display_size`):
+- a CSS width of 4× is drawn at 128 × 32 in a 128 × 32 box;
+- a restyle never shows the 1× image, checked by a recorder system in
+  `Last`, every frame;
+- the intrinsic size keeps the loaded image;
+- `UiScale` 2 draws 64 × 16 into a 32 × 8 box;
+- a `%` width keeps the intrinsic aspect;
+- a size the budget refuses keeps the 1× image.
+
+Each of the three mechanisms was removed once and its test failed: the
+put-back, the pinned size, the intrinsic aspect.
 
 ### 4. Inline `<svg>` is a replaced inline element
 

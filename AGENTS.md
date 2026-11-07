@@ -42,7 +42,7 @@ never reach library users. A missing feature shows up in `cargo check --lib`.
 | `ActiveLocale(Option<Handle<LocaleBundle>>)` | Resource | Fluent bundle; `None` = no localization; swap = language |
 | `FontFamilies` / `FontFaces` / `GenericFamily` | Resource + types | CSS `font-family` name → faces: font files or system families (any `FontSource`; for system families bold/italic are requested via `TextFont` weight/style), + generic keyword mapping. A CSS list resolves to every registered family in order and composes Bevy 0.20's per-glyph fallback list (ADR 0015) |
 | `HtmlTemplate`, `Stylesheet`, `NineSlice`, `LocaleBundle` | Assets | `.html`/`.htm`/`.md`/`.markdown`, `.css`, `*.slice.ron`, `*.ftl.ron` |
-| `SvgLoaderSettings { scale }` | Loader settings (`svg` feature) | `.svg` → `Image` (`svg.rs` `SvgLoader`, ADR 0038): drawn on the CPU at intrinsic size × `scale`, ≤ `MAX_SVG_SIDE` per side; refusing `<image href>` resolver, `recursion_depth` check (≤ 256, U17), render-cost budget (`MAX_SVG_COST`); typed `Image` loads coexist with other crates' `.svg` loaders |
+| `SvgLoaderSettings { scale }` | Loader settings (`svg` feature) | `.svg` → `Image` (`svg.rs` `SvgLoader`, ADR 0038): drawn on the CPU at intrinsic size × `scale` (an `<img>` redrawn at its displayed px), ≤ `MAX_SVG_SIDE` per side; refusing `<image href>` resolver, `recursion_depth` check (≤ 256, U17), render-cost budget (`MAX_SVG_COST`); typed `Image` loads coexist with other crates' `.svg` loaders |
 | `NineSliceFrame(Handle<NineSlice>)` | Component | 9-slice image as a node's border-box background (non-HTML nodes; HTML uses CSS `border-image`) |
 | `HtmlCustomElementsExt::define_html_element(name, system)`, `ElementConnected { entity, root, name, dataset }` | App ext, system input | `is="<name>"` customized built-ins: the system (`In<ElementConnected>`, `data-*` attributes as `dataset`) runs on every spawn of the element, in document order, before `HtmlUiBuilt`; not on restyles |
 | `HtmlWorldAnchor { target, offset, pivot, camera }`, `HtmlWorldAnchorView { distance, on_screen }` | Component | keeps a UI root's `pivot` (fraction of its size, default bottom center) over `target`'s translation + `offset` projected through `camera` / its `UiTargetCamera` / the default UI camera (viewport-relative and `UiScale`-divided: offset viewports and scale factors read correctly); owns its `Visibility` (hidden behind the camera, off screen, or over an invisible target); despawned with `target`; `place_world_anchored`, `PostUpdate` before `UiSystems::Prepare` (last frame's transforms) |
@@ -131,7 +131,15 @@ src/
                    U19), `raster_size` (side cap before allocating: tiny-skia aborts on a failed
                    allocation), `estimate_cost` (resvg's layer/filter/mask/clip model, early exit
                    at `MAX_SVG_COST`; calibrated in docs/agents/performance/adr-0038-probe.md §7),
-                   straight-alpha `Rgba8UnormSrgb` output
+                   straight-alpha `Rgba8UnormSrgb` output; `guarded` turns a usvg/resvg panic
+                   into an error (resvg #1185, U20: a panicked AsyncCompute task re-panics
+                   its poller). `<img>` redraw (ADR 0038 §3): `SvgDocument` (own typed loader,
+                   not a label), `SvgRaster` on the span (source, intrinsic, shown raster,
+                   one-frame `wanted` hysteresis), `SvgRasters` cache keyed (document, px)
+                   pruned each frame; `rasterize_svg_images` after `size_images`, before
+                   `UiSystems::Prepare`: puts the raster back the same frame the build writes
+                   the 1× source, pins `InlineImage` width/height to the box; `size_images`
+                   takes the aspect from `SvgRaster::intrinsic`
 examples/
                    One directory per example (`<name>/main.rs`, which cargo finds as the
                    example `<name>`), each with a README.md: a screenshot, what it shows,

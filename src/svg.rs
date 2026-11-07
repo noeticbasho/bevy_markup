@@ -20,6 +20,12 @@
 //! (`asset_server.load_with_settings::<Image, SvgLoaderSettings>(path, |s|
 //! s.scale = 2.0)`); CSS-loaded images always use `1.0`.
 //!
+//! An `<img>` stays sharp at any size: once its box has been laid out, the
+//! SVG is drawn again at the pixels it covers (the box × the scale factor,
+//! `UiScale` included), off the main thread, and swapped in when ready.
+//! One drawing per document and size is shared by every `<img>` showing
+//! it. CSS `border-image`/`background-image` SVGs are drawn at `1.0` only.
+//!
 //! Static SVG only: no animation, no scripts. Text inside an SVG (`<text>`)
 //! isn't drawn (the feature builds resvg without its font stack).
 //!
@@ -138,11 +144,24 @@ impl AssetLoader for SvgLoader {
 pub(crate) enum SvgError {
     Parse(usvg::Error),
     Scale(f32),
-    TooExpensive { estimate: u64, max: u64 },
-    Allocation { width: u32, height: u32 },
-    TooDeep { depth: u32, max: u32 },
+    TooExpensive {
+        estimate: u64,
+        max: u64,
+    },
+    Allocation {
+        width: u32,
+        height: u32,
+    },
+    TooDeep {
+        depth: u32,
+        max: u32,
+    },
     ReferenceCycle,
-    TooManyReferences { max: usize },
+    TooManyReferences {
+        max: usize,
+    },
+    /// usvg or resvg panicked (caught by [`guarded`]).
+    Panicked(String),
 }
 
 impl fmt::Display for SvgError {
@@ -172,6 +191,7 @@ impl fmt::Display for SvgError {
             Self::TooManyReferences { max } => {
                 write!(f, "more than {max} url(#…)/href references")
             }
+            Self::Panicked(message) => write!(f, "the SVG renderer panicked: {message}"),
         }
     }
 }
@@ -224,6 +244,32 @@ fn options() -> usvg::Options<'static> {
 /// (`Tree::from_xmltree`). One parse, so the check and usvg can't disagree
 /// about the document's structure (a DTD entity expanding into markup, say).
 pub(crate) fn parse(bytes: &[u8]) -> Result<usvg::Tree, SvgError> {
+    guarded(|| parse_unguarded(bytes))
+}
+
+/// Runs usvg or resvg work, turning a panic into [`SvgError::Panicked`].
+/// Both still panic on some inputs where overflow checks are on (debug
+/// builds, fuzzing): resvg 0.49's `feTurbulence` adds past `i32::MAX`
+/// after enough octaves (resvg #1185, UPSTREAM U20). Bevy already turns a
+/// panicking asset loader into a failed load (`AssetLoaderPanic`), but the
+/// redraws of [`rasterize_svg_images`] run as `AsyncComputeTaskPool`
+/// tasks, and polling a task that panicked re-raises the panic in the
+/// poller: the app's main thread (checked with a probe, ADR 0038 probe
+/// report §8). Here it's an error: the size isn't redrawn. (With `panic =
+/// "abort"` nothing can catch it, but such builds normally have overflow
+/// checks off, and the arithmetic wraps.)
+fn guarded<T>(work: impl FnOnce() -> Result<T, SvgError>) -> Result<T, SvgError> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).unwrap_or_else(|payload| {
+        let message = payload
+            .downcast_ref::<&str>()
+            .map(|message| message.to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "(no message)".to_string());
+        Err(SvgError::Panicked(message))
+    })
+}
+
+fn parse_unguarded(bytes: &[u8]) -> Result<usvg::Tree, SvgError> {
     if bytes.starts_with(&[0x1f, 0x8b]) {
         return Err(SvgError::Parse(usvg::Error::SvgzFeatureNotEnabled));
     }
@@ -486,7 +532,38 @@ pub(crate) fn raster_size(
 pub(crate) fn rasterize(bytes: &[u8], scale: f32, limits: Limits) -> Result<Raster, SvgError> {
     let tree = parse(bytes)?;
     let (width, height, downscaled) = raster_size(&tree, scale, limits.side)?;
-    let cost = estimate_cost(&tree, width, height, limits.cost);
+    let (image, cost) = draw(&tree, width, height, limits)?;
+    Ok(Raster {
+        image,
+        width,
+        height,
+        downscaled,
+        cost,
+    })
+}
+
+/// Budgets and draws a parsed SVG into a `width`×`height` image (both at
+/// most `limits.side`); the image and the cost estimate it was allowed on.
+pub(crate) fn draw(
+    tree: &usvg::Tree,
+    width: u32,
+    height: u32,
+    limits: Limits,
+) -> Result<(Image, u64), SvgError> {
+    guarded(|| draw_unguarded(tree, width, height, limits))
+}
+
+fn draw_unguarded(
+    tree: &usvg::Tree,
+    width: u32,
+    height: u32,
+    limits: Limits,
+) -> Result<(Image, u64), SvgError> {
+    let (width, height) = (
+        width.clamp(1, limits.side.max(1)),
+        height.clamp(1, limits.side.max(1)),
+    );
+    let cost = estimate_cost(tree, width, height, limits.cost);
     if cost > limits.cost {
         return Err(SvgError::TooExpensive {
             estimate: cost,
@@ -527,13 +604,231 @@ pub(crate) fn rasterize(bytes: &[u8], scale: f32, limits: Limits) -> Result<Rast
         // slices read the image's size.
         RenderAssetUsages::default(),
     );
-    Ok(Raster {
-        image,
-        width,
-        height,
-        downscaled,
-        cost,
-    })
+    Ok((image, cost))
+}
+
+/// A parsed `.svg`, for drawing it again at another size (ADR 0038 §3).
+/// Its own asset type behind its own loader, loaded typed: a labeled
+/// sub-asset of the `Image` load would be found by extension alone, and
+/// another crate's `.svg` loader registered after ours would take it
+/// (probe report §1).
+#[derive(Asset, TypePath)]
+pub(crate) struct SvgDocument {
+    tree: std::sync::Arc<usvg::Tree>,
+}
+
+/// Loads `.svg` files as [`SvgDocument`]s, with the same checks as
+/// [`SvgLoader`] (the depth bound, the refusing resolver).
+#[derive(Default, TypePath)]
+pub(crate) struct SvgDocumentLoader;
+
+impl AssetLoader for SvgDocumentLoader {
+    type Asset = SvgDocument;
+    type Settings = ();
+    type Error = BevyError;
+
+    async fn load(
+        &self,
+        reader: &mut dyn Reader,
+        _settings: &(),
+        load_context: &mut LoadContext<'_>,
+    ) -> Result<SvgDocument, BevyError> {
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).await?;
+        let tree = parse(&bytes).map_err(|err| format!("svg {}: {err}", load_context.path()))?;
+        Ok(SvgDocument {
+            tree: std::sync::Arc::new(tree),
+        })
+    }
+
+    fn extensions(&self) -> &[&str] {
+        &["svg"]
+    }
+}
+
+/// On an `<img>` span showing an SVG: what the build put there and what
+/// is drawn instead (ADR 0038 §3). The build writes the 1× `source`
+/// whenever it updates the span; [`rasterize_svg_images`] puts the raster
+/// back in the same frame, before Bevy's UI systems read it.
+#[derive(Component)]
+pub(crate) struct SvgRaster {
+    /// The 1× image the build writes (`Handle<Image>` of the `.svg`).
+    source: Handle<Image>,
+    document: Handle<SvgDocument>,
+    /// The source's size: the SVG's intrinsic size in CSS px. `size_images`
+    /// keeps the aspect ratio from this, not from the raster's rounded size.
+    pub intrinsic: Vec2,
+    /// The raster on screen and its pixel size.
+    shown: Option<(UVec2, Handle<Image>)>,
+    /// The size asked for last frame: a size is drawn once it holds for a
+    /// frame, not on every step of a resize.
+    wanted: Option<UVec2>,
+}
+
+/// Rasters of [`SvgDocument`]s by pixel size: drawn ones (shared by every
+/// span showing that document at that size), draws in flight, and sizes
+/// the budget refused. Entries no span uses are dropped each frame.
+#[derive(Resource, Default)]
+pub(crate) struct SvgRasters {
+    ready: std::collections::HashMap<(AssetId<SvgDocument>, UVec2), Handle<Image>>,
+    drawing: std::collections::HashMap<
+        (AssetId<SvgDocument>, UVec2),
+        bevy::tasks::Task<Result<Image, String>>,
+    >,
+    refused: std::collections::HashSet<(AssetId<SvgDocument>, UVec2)>,
+}
+
+/// Draws each SVG `<img>` at the pixel size it's shown at (its inline
+/// box × the target's scale factor, `UiScale` included), so it stays sharp
+/// under HiDPI, `UiScale` and CSS sizes larger than its own. Draws run on
+/// the `AsyncComputeTaskPool`; until one finishes the previous image stays.
+/// The swapped image keeps the box's logical size in `InlineImage`'s
+/// `width`/`height`, or Bevy would size the box from the raster's pixels.
+/// Runs after the build and `size_images` and before `UiSystems::Prepare`,
+/// so a build that writes the 1× source back is undone the same frame.
+#[allow(clippy::type_complexity)]
+pub(crate) fn rasterize_svg_images(
+    mut commands: Commands,
+    server: Res<AssetServer>,
+    mut images: ResMut<Assets<Image>>,
+    documents: Res<Assets<SvgDocument>>,
+    mut rasters: ResMut<SvgRasters>,
+    mut spans: Query<(
+        Entity,
+        &ChildOf,
+        &mut bevy::ui::widget::InlineImage,
+        &bevy::text::InlineBox,
+        Option<&mut SvgRaster>,
+    )>,
+    blocks: Query<&ComputedNode>,
+) {
+    // Finished draws.
+    let finished: Vec<_> = rasters
+        .drawing
+        .iter_mut()
+        .filter_map(|(key, task)| {
+            bevy::tasks::futures::check_ready(task).map(|result| (*key, result))
+        })
+        .collect();
+    for (key, result) in finished {
+        rasters.drawing.remove(&key);
+        match result {
+            Ok(image) => {
+                let handle = images.add(image);
+                rasters.ready.insert(key, handle);
+            }
+            Err(err) => {
+                debug!("svg: not redrawn at {}x{}: {err}", key.1.x, key.1.y);
+                rasters.refused.insert(key);
+            }
+        }
+    }
+
+    let mut in_use = std::collections::HashSet::new();
+    for (entity, parent, mut image, inline_box, raster) in &mut spans {
+        // What the build put there: the raster's source if the span still
+        // shows (or was reset to) it, else whatever it holds now.
+        let source = match &raster {
+            Some(raster)
+                if image.image == raster.source
+                    || raster
+                        .shown
+                        .as_ref()
+                        .is_some_and(|(_, shown)| image.image == *shown) =>
+            {
+                raster.source.clone()
+            }
+            _ => image.image.clone(),
+        };
+        let is_svg = source
+            .path()
+            .and_then(|path| path.path().extension())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("svg"));
+        if !is_svg {
+            if raster.is_some() {
+                commands.entity(entity).remove::<SvgRaster>();
+            }
+            continue;
+        }
+        let Some(intrinsic) = images.get(&source).map(|image| image.size().as_vec2()) else {
+            continue;
+        };
+        let mut raster = match raster {
+            Some(raster) if raster.source == source => raster,
+            _ => {
+                // A new `<img>`, or its `src` changed: start over.
+                let path = source.path().expect("svg path").clone_owned();
+                commands.entity(entity).insert(SvgRaster {
+                    source,
+                    document: server.load(path),
+                    intrinsic,
+                    shown: None,
+                    wanted: None,
+                });
+                continue;
+            }
+        };
+        let logical = inline_box.size;
+        if !(logical.cmpgt(Vec2::ZERO).all() && logical.is_finite()) {
+            continue;
+        }
+        let inverse_scale = blocks
+            .get(parent.parent())
+            .map_or(1.0, |node| node.inverse_scale_factor())
+            .max(f32::EPSILON);
+        let physical = logical / inverse_scale;
+        let target = UVec2::new(
+            (physical.x.ceil() as u32).clamp(1, MAX_SVG_SIDE),
+            (physical.y.ceil() as u32).clamp(1, MAX_SVG_SIDE),
+        );
+        let document = raster.document.id();
+        // Put the shown raster back if the build reset the span.
+        if let Some((size, shown)) = &raster.shown {
+            in_use.insert((document, *size));
+            let pinned = (Some(logical.x), Some(logical.y));
+            if image.image != *shown || (image.width, image.height) != pinned {
+                image.image = shown.clone();
+                image.width = pinned.0;
+                image.height = pinned.1;
+            }
+        }
+        // Drawn at its own size already: the 1× image serves.
+        if target == intrinsic.as_uvec2() && raster.shown.is_none() {
+            continue;
+        }
+        if raster
+            .shown
+            .as_ref()
+            .is_some_and(|(size, _)| *size == target)
+        {
+            continue;
+        }
+        let key = (document, target);
+        in_use.insert(key);
+        if raster.wanted != Some(target) {
+            raster.wanted = Some(target);
+            continue;
+        }
+        if let Some(handle) = rasters.ready.get(&key).cloned() {
+            image.image = handle.clone();
+            image.width = Some(logical.x);
+            image.height = Some(logical.y);
+            raster.shown = Some((target, handle));
+        } else if !rasters.refused.contains(&key) && !rasters.drawing.contains_key(&key) {
+            let Some(document) = documents.get(&raster.document) else {
+                continue;
+            };
+            let tree = document.tree.clone();
+            let task = bevy::tasks::AsyncComputeTaskPool::get().spawn(async move {
+                draw(&tree, target.x, target.y, Limits::DEFAULT)
+                    .map(|(image, _)| image)
+                    .map_err(|err| err.to_string())
+            });
+            rasters.drawing.insert(key, task);
+        }
+    }
+    rasters.ready.retain(|key, _| in_use.contains(key));
+    rasters.refused.retain(|key| in_use.contains(key));
 }
 
 /// Cost of visiting one node (resvg's per-node setup), in pixel units. Also
@@ -1046,6 +1341,24 @@ mod tests {
                 "{name}: {} levels, depth {depth}: {outcome:?}",
                 levels.len()
             );
+        }
+    }
+
+    /// resvg #1185's overflow (100 octaves of noise) panics where overflow
+    /// checks are on; the draw fails with an error instead of unwinding
+    /// into its caller (for a redraw task: the app's main thread).
+    #[test]
+    fn a_renderer_panic_is_an_error() {
+        let noisy = svg(
+            16,
+            16,
+            "<filter id='f'><feTurbulence baseFrequency='0.05' numOctaves='100'/></filter><rect width='16' height='16' filter='url(#f)'/>",
+        );
+        match draw(&noisy) {
+            Err(SvgError::Panicked(message)) => assert!(message.contains("overflow"), "{message}"),
+            // Without overflow checks the arithmetic wraps and it draws.
+            Ok(_) if !cfg!(debug_assertions) => {}
+            other => panic!("{:?}", other.map(|raster| raster.cost)),
         }
     }
 

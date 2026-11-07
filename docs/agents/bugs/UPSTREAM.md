@@ -33,6 +33,7 @@ the issue may already be fixed or reported.
 | U17 | usvg (resvg) | Converter recursion through references and nesting is unbounded | stack overflow (abort) from a few KB of SVG on a 2 MB thread (`svg` feature) | static recursion-depth check before conversion (`svg::recursion_depth`) | unreported; resvg #1223 (unreleased) bounds XML nesting and `<use>` only |
 | U18 | roxmltree | 0.21.1's tokenizer recursed once per nesting level | stack overflow at ~150 levels in debug on a 2 MB thread (`svg` feature) | version floor `roxmltree >= 0.21.2` | fixed upstream (0.21.2) |
 | U19 | usvg (resvg) | The default `ImageHrefResolver` reads any file path | an SVG reads any file the process can and embeds it (`svg` feature) | a resolver that resolves nothing | unreported (by design; worth a docs warning) |
+| U20 | resvg | `feTurbulence` overflows `i32` after enough octaves (#1185, open; #937 a similar multiply overflow) | panic where overflow checks are on (debug builds, fuzzing): a failed load, or a crash through a redraw task (`svg` feature) | `svg::guarded` (catch_unwind around usvg/resvg) | reported upstream (#1185), open |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -434,6 +435,29 @@ CI clippy command and workspace tests pass on both.
   confines paths to `resources_dir`.
 - **Local workaround:** `svg::options` installs a resolver whose closures
   return `None`.
+
+## U20 — resvg: `feTurbulence` overflows `i32` after enough octaves
+
+- **Project:** linebender/resvg. Affected: 0.49.0. Reported upstream as
+  [#1185](https://github.com/linebender/resvg/issues/1185) ("Panic
+  attempt to multiply with overflow in filter/turbulence.rs", open); #937
+  (a multiply overflow in `lib.rs`) is open too.
+- **Problem:** `filter/turbulence.rs` `noise2` computes
+  `bx0 = (x + 4096) as i32` and `bx1 = bx0 + 1`; each octave doubles `x`,
+  so after enough octaves the cast saturates and `+ 1` overflows. A panic
+  where overflow checks are on; release builds wrap (the lattice index is
+  masked, so the noise is merely wrong).
+- **Reproduction:** draw `<filter id="f"><feTurbulence baseFrequency="0.05"
+  numOctaves="100"/></filter><rect width="16" height="16"
+  filter="url(#f)"/>` in a debug build.
+- **Impact on bevy_markup:** Bevy turns a panicking asset loader into a
+  failed load, but the `<img>` redraws run as `AsyncComputeTaskPool`
+  tasks, and polling a panicked task re-raises the panic in the poller,
+  the app's main thread (probe report §8).
+- **Local workaround:** `svg::guarded` wraps usvg's parse and resvg's
+  draw in `catch_unwind`: the panic becomes `SvgError::Panicked` (the load
+  fails, or the size isn't redrawn). Keep it while resvg can panic on
+  input; it costs nothing on the normal path.
 
 ## Not upstream bugs (recorded so they aren't re-filed)
 

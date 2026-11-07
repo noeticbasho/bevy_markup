@@ -10371,9 +10371,11 @@ mod review_0006 {
 
 /// ADR 0038: with the `svg` feature, `.svg` files load as images wherever
 /// an image path is accepted. The `<img>` keeps the SVG's intrinsic aspect
-/// (32×8: a CSS width of 16px gives 4px); the `border-image`'s `%` slices
-/// resolve against its intrinsic size (40×20: 25% is 5 of the height, 10
-/// of the width), so slice numbers mean the SVG's own px, as in a browser.
+/// (32×8: a CSS width of 16px gives 4px) and is shown by a redraw at those
+/// 16×4 px (§3: an unnamed asset, hence `""` where the dump prints a
+/// path); the `border-image`'s `%` slices resolve against its intrinsic
+/// size (40×20: 25% is 5 of the height, 10 of the width), so slice numbers
+/// mean the SVG's own px, as in a browser.
 #[cfg(feature = "svg")]
 #[test]
 fn svg_images_load_through_img_and_border_image() {
@@ -10397,11 +10399,28 @@ fn svg_images_load_through_img_and_border_image() {
     )
     .stylesheet("style.css")
     .spawn("page.html", TemplateContext::new(), Node::default());
-    ui.settle().assert_dump(
+    ui.settle();
+    // The redraw runs on a task pool: wait for it before the dump.
+    for _ in 0..500 {
+        let world = ui.world_mut();
+        let mut spans = world.query::<&bevy::ui::widget::InlineImage>();
+        let drawn = spans.iter(world).any(|image| {
+            world
+                .resource::<Assets<Image>>()
+                .get(&image.image)
+                .is_some_and(|image| image.size() == UVec2::new(16, 4))
+        });
+        if drawn {
+            break;
+        }
+        ui.update(1);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    ui.assert_dump(
         r#"
 html-ui
   p
-    "icon.svg" img 16x4
+    "" img 16x4
   div.framed border=4,4,4,4 slice=frame.svg 5,10,5,10 stretch
     p
       "In" default 16px #ffffff
@@ -10416,6 +10435,13 @@ html-ui
         .get(&handle)
         .expect("loaded");
     assert_eq!(image.size(), UVec2::new(32, 8));
+    // What the `<img>` shows: the redraw at its 16×4 box.
+    let mut spans = world.query::<&bevy::ui::widget::InlineImage>();
+    let shown: Vec<UVec2> = spans
+        .iter(world)
+        .filter_map(|image| Some(world.resource::<Assets<Image>>().get(&image.image)?.size()))
+        .collect();
+    assert_eq!(shown, vec![UVec2::new(16, 4)]);
 }
 
 /// A hostile SVG (a `<use>` cycle, which usvg would expand past a 2 MB
@@ -10454,4 +10480,227 @@ fn hostile_svg_fails_its_load_and_the_page_builds() {
         dump.contains("\"Before \"") && dump.contains("\" after\""),
         "{dump}"
     );
+}
+
+/// An SVG that panics resvg (resvg #1185's `feTurbulence` overflow, with
+/// overflow checks on) fails its load with an error, and the page still
+/// builds.
+#[cfg(feature = "svg")]
+#[test]
+fn an_svg_that_panics_the_renderer_fails_its_load() {
+    let noisy = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><filter id="f"><feTurbulence baseFrequency="0.05" numOctaves="100"/></filter><rect width="16" height="16" filter="url(#f)"/></svg>"##;
+    let mut ui = TestUi::new(
+        "svg-panic",
+        &[
+            ("noisy.svg", noisy),
+            ("page.html", r#"<p>Before <img src="noisy.svg"> after</p>"#),
+            ("style.css", "html { color: #ffffff }"),
+        ],
+    )
+    .stylesheet("style.css")
+    .spawn("page.html", TemplateContext::new(), Node::default());
+    ui.settle();
+    let handle: Handle<Image> = ui.load("noisy.svg");
+    let mut state = None;
+    for _ in 0..500 {
+        let server = ui.world_mut().resource::<AssetServer>().clone();
+        let now = server.load_state(&handle);
+        if now.is_failed() || now.is_loaded() {
+            state = Some(now);
+            break;
+        }
+        ui.update(1);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let state = state.expect("the load finished");
+    // Without overflow checks the arithmetic wraps and the image loads.
+    assert!(state.is_failed() || !cfg!(debug_assertions), "{state:?}");
+}
+
+/// ADR 0038 §3: an SVG `<img>` is drawn at the pixel size it's shown at,
+/// on the layout harness (scale factor 1, then `UiScale` 2).
+#[cfg(feature = "svg")]
+mod svg_display_size {
+    use super::*;
+    use bevy::text::InlineBox;
+    use bevy::ui::widget::InlineImage;
+
+    /// 32×8 CSS px.
+    const ICON: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="8"><rect width="32" height="8" fill="gold"/></svg>"##;
+
+    /// Per frame, after everything ran: every `<img>`'s image pixel size and
+    /// box. `regressed` is set when a frame shows a smaller image than an
+    /// earlier frame did (the build's 1× source showing through).
+    #[derive(Resource, Default)]
+    struct Shown {
+        last: Vec<(UVec2, Vec2)>,
+        largest: u32,
+        regressed: bool,
+    }
+
+    fn record(
+        mut shown: ResMut<Shown>,
+        spans: Query<(&InlineImage, &InlineBox)>,
+        images: Res<Assets<Image>>,
+    ) {
+        let now: Vec<(UVec2, Vec2)> = spans
+            .iter()
+            .filter_map(|(image, box_)| Some((images.get(&image.image)?.size(), box_.size)))
+            .collect();
+        for (size, _) in &now {
+            if size.x < shown.largest {
+                shown.regressed = true;
+            }
+            shown.largest = shown.largest.max(size.x);
+        }
+        shown.last = now;
+    }
+
+    fn page(name: &str, css: &str, ui_scale: f32) -> TestUi {
+        let mut ui = TestUi::with_layout(
+            name,
+            &[
+                ("icon.svg", ICON),
+                ("page.html", r#"<p><img class="img" src="icon.svg"></p>"#),
+                ("style.css", css),
+                ("other.css", &format!("{css} p {{ color: #00ff00 }}")),
+            ],
+            UVec2::new(400, 300),
+        )
+        .stylesheet("style.css")
+        .spawn(
+            "page.html",
+            TemplateContext::new(),
+            Node {
+                width: Val::Px(400.0),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+        );
+        ui.world_mut().insert_resource(UiScale(ui_scale));
+        ui.app_mut()
+            .init_resource::<Shown>()
+            .add_systems(Last, record);
+        ui.settle();
+        ui
+    }
+
+    /// Updates until the one image shows `size` (draws run on a task pool).
+    fn shows(ui: &mut TestUi, size: UVec2) -> (UVec2, Vec2) {
+        for _ in 0..500 {
+            ui.update(1);
+            let last = ui.world_mut().resource::<Shown>().last.clone();
+            if last.first().is_some_and(|(shown, _)| *shown == size) {
+                return last[0];
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        panic!(
+            "never showed {size}: {:?}",
+            ui.world_mut().resource::<Shown>().last
+        );
+    }
+
+    /// A CSS width four times the intrinsic one: drawn at 128×32, the box
+    /// stays 128×32 (not the raster's size doubled, not the 1× box). A
+    /// restyle rewrites the span's 1× source, and no frame shows it.
+    #[test]
+    fn a_larger_css_size_is_drawn_at_that_size_and_survives_restyles() {
+        let mut ui = page(
+            "svg-css-size",
+            "html { color: #ffffff } img.img { width: 128px }",
+            1.0,
+        );
+        let (size, box_) = shows(&mut ui, UVec2::new(128, 32));
+        assert_eq!((size, box_), (UVec2::new(128, 32), Vec2::new(128.0, 32.0)));
+        let other = ui.load::<Stylesheet>("other.css");
+        ui.world_mut().resource_mut::<DefaultStylesheet>().0 = Some(other);
+        ui.settle();
+        ui.update(5);
+        let shown = ui.world_mut().resource::<Shown>();
+        assert_eq!(
+            shown.last,
+            vec![(UVec2::new(128, 32), Vec2::new(128.0, 32.0))]
+        );
+        assert!(
+            !shown.regressed,
+            "a frame showed the 1x image after the 128px raster"
+        );
+    }
+
+    /// At its own size and scale factor 1 the loaded 1× image serves.
+    #[test]
+    fn the_intrinsic_size_keeps_the_loaded_image() {
+        let mut ui = page("svg-intrinsic", "html { color: #ffffff }", 1.0);
+        ui.update(20);
+        let shown = &ui.world_mut().resource::<Shown>().last;
+        assert_eq!(shown, &vec![(UVec2::new(32, 8), Vec2::new(32.0, 8.0))]);
+    }
+
+    /// `UiScale` 2: the same 32×8 box is drawn with 64×16 pixels.
+    #[test]
+    fn ui_scale_draws_more_pixels_in_the_same_box() {
+        let mut ui = page("svg-ui-scale", "html { color: #ffffff }", 2.0);
+        let (size, box_) = shows(&mut ui, UVec2::new(64, 16));
+        assert_eq!((size, box_), (UVec2::new(64, 16), Vec2::new(32.0, 8.0)));
+    }
+
+    /// A `%` width keeps the intrinsic aspect exactly: `size_images` reads
+    /// it from the SVG, not from the raster's rounded pixels. 33.3% of the
+    /// 400 px column is 133.2 × 33.3, drawn at 134 × 34; with the raster's
+    /// aspect the height would become 133.2 × 34 / 134 = 33.8.
+    #[test]
+    fn a_percent_width_keeps_the_intrinsic_aspect() {
+        let mut ui = page(
+            "svg-percent",
+            "html { color: #ffffff } img.img { width: 33.3% }",
+            1.0,
+        );
+        shows(&mut ui, UVec2::new(134, 34));
+        ui.update(20);
+        let (size, box_) = ui.world_mut().resource::<Shown>().last[0];
+        assert_eq!(size, UVec2::new(134, 34));
+        assert!(
+            (box_ - Vec2::new(133.2, 33.3)).abs().max_element() < 0.01,
+            "{box_}"
+        );
+    }
+
+    /// A size the render budget refuses (200 chained blurs over 2,000 ×
+    /// 2,000 px; cheap at 16 × 16) keeps the 1× image: no endless retries.
+    #[test]
+    fn a_size_over_the_budget_keeps_the_loaded_image() {
+        let blurs = "<feGaussianBlur stdDeviation=\"1\"/>".repeat(200);
+        let noisy = format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><filter id="f">{blurs}</filter><rect width="16" height="16" filter="url(#f)"/></svg>"##
+        );
+        let noisy = noisy.as_str();
+        let mut ui = TestUi::with_layout(
+            "svg-over-budget",
+            &[
+                ("noisy.svg", noisy),
+                ("page.html", r#"<p><img class="img" src="noisy.svg"></p>"#),
+                (
+                    "style.css",
+                    "html { color: #ffffff } img.img { width: 2000px }",
+                ),
+            ],
+            UVec2::new(400, 300),
+        )
+        .stylesheet("style.css")
+        .spawn("page.html", TemplateContext::new(), Node::default());
+        ui.app_mut()
+            .init_resource::<Shown>()
+            .add_systems(Last, record);
+        ui.settle();
+        for _ in 0..100 {
+            ui.update(1);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let shown = &ui.world_mut().resource::<Shown>().last;
+        assert_eq!(
+            shown,
+            &vec![(UVec2::new(16, 16), Vec2::new(2000.0, 2000.0))]
+        );
+    }
 }

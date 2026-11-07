@@ -7192,6 +7192,7 @@ fn push_image_run(
 #[hotpath::measure]
 pub(crate) fn size_images(
     mut images: Query<(
+        Entity,
         &ChildOf,
         &mut InlineBox,
         &mut InlineImage,
@@ -7199,8 +7200,9 @@ pub(crate) fn size_images(
     )>,
     blocks: Query<&ComputedNode>,
     assets: Res<Assets<Image>>,
+    #[cfg(feature = "svg")] svgs: Query<&crate::svg::SvgRaster>,
 ) {
-    for (parent, mut box_, mut image, sized) in &mut images {
+    for (entity, parent, mut box_, mut image, sized) in &mut images {
         // Percentages resolve against the containing block's *used* content
         // box (`size` minus borders and padding — `content_size` is the
         // content-driven size, which is 0 for a block stretched by flex and
@@ -7215,7 +7217,18 @@ pub(crate) fn size_images(
             (block.size.x - inset.min_inset.x - inset.max_inset.x).max(0.0),
             (block.size.y - inset.min_inset.y - inset.max_inset.y).max(0.0),
         );
-        let Some(intrinsic) = assets.get(&image.image).map(|image| image.size().as_vec2()) else {
+        // An SVG drawn at its display size (ADR 0038 §3) keeps the aspect
+        // of its intrinsic size, not of the raster's rounded pixels.
+        #[cfg(feature = "svg")]
+        let svg = svgs.get(entity).ok().map(|raster| raster.intrinsic);
+        #[cfg(not(feature = "svg"))]
+        let svg = {
+            let _ = entity;
+            None
+        };
+        let Some(intrinsic) =
+            svg.or_else(|| assets.get(&image.image).map(|image| image.size().as_vec2()))
+        else {
             continue;
         };
         let resolve = |size: ImageSize, base: f32| match size {
