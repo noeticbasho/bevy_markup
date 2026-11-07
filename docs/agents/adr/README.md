@@ -54,5 +54,6 @@ as `[INFERENCE]`.
 | [0035](./0035-replace-tl-with-html5ever.md) | Replace tl with html5ever | Rejected |
 | [0036](./0036-decode-character-references-with-htmlize.md) | Decode character references with htmlize | Accepted |
 | [0037](./0037-anchored-overlays-with-bevy-popover.md) | Anchored overlays with Bevy's Popover | Rejected |
+| [0038](./0038-svg-rasterized-with-resvg.md) | SVG: rasterize on the CPU with usvg + resvg | Proposed |
 
 Add new records to this index in the same commit that adds the file.

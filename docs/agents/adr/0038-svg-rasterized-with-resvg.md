@@ -1,0 +1,311 @@
+# 38. SVG: rasterize on the CPU with usvg + resvg
+
+| Field | Content |
+|---|---|
+| `ADR` | `0038` |
+| `Title` | SVG: rasterize on the CPU with usvg + resvg |
+| `Date` | 2026-11-07 17:19 +0400 |
+| `Author` | Claude Opus 5.5 (Anthropic), via Claude Code; direction chosen by Nikita Chashchinskii |
+| `Commit` | `5bae780 Fix the Mutants workflow: cap test memory and use 8 shards` + uncommitted (this ADR, revised after the probe) |
+| `Status` | Proposed |
+| `Related` | ADR 0028 (roadmap item 12: "decide the shape first"), 0002 (library shape, minimal Bevy features), 0036 (in-domain crates replacing maintained code); review_0003 G19 (no remote loads); [probe report](../performance/adr-0038-probe.md) (the evidence for §2, §3 and §5) |
+
+## Context
+
+bevy_markup has no SVG support. ADR 0028 lists it as a tier-4 gap ("no
+`<svg>` element handling and no SVG asset path") and leaves the shape
+open: pre-rasterized assets via `<img>` versus a `bevy_svg`-class
+integration.
+
+What is true today:
+
+- Every image the library draws is a `Handle<Image>` loaded by asset path:
+  - `<img src>`: `build.rs` `Styler::image_of` → `self.server.load(resolved)`
+    → `InlineImage` in `spawn_spans`. It refuses `://` and `data:` sources.
+  - `border-image`, `background-image` and `--name: url(…)` in a sheet:
+    `style.rs` `StylesheetLoader` → `load_context.load(path)`, held in
+    `Stylesheet::images`. Remote sources are skipped (`template::is_remote`).
+  - `*.slice.ron` frames: `nine_slice.rs` → `load_context.load(image_path)`.
+- Image *formats* are the app's choice. The library enables no
+  `bevy_image` format feature (`Cargo.toml`: `ui_api`, `default_font`,
+  `bevy_log`, `bevy_picking`). `bevy_image` 0.20.1 has no SVG feature
+  (checked in its `Cargo.toml`), so an `.svg` path loads nothing today.
+- The library leaves rendering to the app (ADR 0002, `AGENTS.md`). Most
+  of the test suite (vectors, properties, stateful, signals, layout) runs
+  headless without a renderer. Only `tests/golden.rs` draws pixels.
+- `size_images` (`build.rs`) already resolves an `<img>`'s CSS
+  `width`/`height` against its containing block each frame. So the
+  displayed logical size of an inline image is known after layout.
+- Content may come from mods or users. Every loader so far treats its
+  input as hostile: nesting caps, remote refusal, fuzz targets.
+
+The user asked for SVG support and first proposed bevy_vello. After the
+comparison below, the decision was to rasterize with usvg + resvg.
+
+## Decision
+
+### 1. Rasterize on the CPU with usvg + resvg, behind an opt-in `svg` feature
+
+Add a cargo feature `svg` that pulls in `resvg` (0.49 at writing; it
+re-exports `usvg` and `tiny-skia`) with `default-features = false`:
+
+- No `text` (fontdb, harfrust, skrifa).
+- No `system-fonts` / `memmap-fonts`.
+- No `raster-images` (gif, webp, jpeg decoders).
+- No `svgz` (flate2).
+
+usvg parses and normalizes the document. resvg draws it into a
+`tiny_skia::Pixmap`, whose premultiplied RGBA8 becomes a Bevy `Image`
+(`Rgba8UnormSrgb`). The output is an ordinary texture, so it goes through
+Bevy UI's existing drawing: z-order, clipping, `opacity` and scroll areas
+apply unchanged on every backend Bevy supports.
+
+The feature stays off by default, like `text-input`: apps that don't use
+SVG pay nothing.
+
+### 2. An `.svg` asset loader that produces `Image`
+
+`src/svg.rs` (new) registers `SvgLoader: AssetLoader<Asset = Image>` for
+the `svg` extension:
+
+- Its settings are `SvgLoaderSettings { scale: f32 }`, default `1.0`.
+- The pixel size is the document's intrinsic size in CSS px (usvg's
+  `Tree::size`: `width`/`height`, else the `viewBox`, else
+  `Options::default_size`) × `scale`, rounded up.
+
+Because the result is a plain `Image`, every existing path accepts SVG
+with no change in `build.rs` or `style.rs`: `<img src="icon.svg">`,
+`border-image: url(frame.svg) 8`, `background-image`, `--icon:
+url(…)`, and `.slice.ron` images.
+
+CSS-loaded images keep `scale = 1`. That way `border-image-slice`
+numbers (image px, `AGENTS.md` "Box properties") and `%` slices mean
+the SVG's own px, as in a browser.
+
+Coexistence with another `.svg` loader (measured with bevy_resvg's real
+`SvgPlugin`, both registration orders; probe §1):
+
+- Typed `load::<Image>` and `load_context.load::<Image>` always reach
+  ours, and bevy_resvg's typed loads reach its own.
+- An **untyped** load, or any **labeled** path, takes whichever loader
+  was registered *last* (`bevy_asset` `AssetLoaders::find`).
+
+The library makes only typed, unlabeled loads, so it is unaffected. Two
+rules follow:
+
+- The loaders never rely on labels (§3).
+- The `svg` feature's docs state Bevy's untyped-load rule for apps that
+  also use another SVG crate.
+
+bevy_svg 0.19 and bevy_vello 0.14 depend on `bevy ^0.19` and can't share
+a Bevy 0.20 app today.
+
+### 3. `<img>` re-rasterizes at its displayed size
+
+A 1× raster blurs at `UiScale` 2, on HiDPI displays, or when CSS sizes
+the image up. For `<img>`, the parsed document is its own asset type,
+`SvgDocument(Arc<usvg::Tree>)`, behind a second loader for `svg` that
+the build loads typed next to the `Image`. It is not a labeled sub-asset
+of the `Image` load: a labeled path skips type matching, and it failed
+with `MissingLabel` whenever bevy_resvg registered after us (probe §1).
+After layout, a system `rasterize_svg_images` (`PostUpdate`, after
+`size_images`):
+
+- computes each SVG `<img>`'s physical size: its displayed logical size
+  × the target's scale factor (which already includes `UiScale`);
+- when that differs from its current raster, draws a raster of that
+  size into a cache keyed by (document asset id, pixel size). Entities
+  showing one SVG at the same size share a handle; unused rasters drop
+  with their handles;
+- swaps the drawn handle while keeping the logical box at the size the
+  1× image would give.
+
+Requirement: the swap must survive restyles. `update_spec` re-inserts an
+element's spec components, and the `AGENTS.md` gotcha "App-written
+`Node` fields don't survive on elements" describes the loop that a naive
+swap would cause (restyle resets the handle, the system swaps it back,
+and the change triggers the next restyle). So the build must own the
+mapping: the spec keeps the source handle, and the raster choice lives in
+a component that `update_spec` leaves alone. The same applies to
+`size_images`'s writes today.
+
+Rasterization runs as a task off the main thread (a budgeted raster
+can still take tens of milliseconds, §5) and swaps the handle when it
+finishes; until then the previous raster stays on screen. Rasters are
+not redrawn while a size is still changing, for example during a window
+drag. The redraw waits until the size has held for a frame.
+[INFERENCE: one frame of hysteresis is enough; measure on
+implementation.]
+
+### 4. Inline `<svg>` is a replaced inline element
+
+Within the same feature, the walk treats `<svg>` like `<img>`: an inline
+run (`InlineBox` + `InlineImage`) whose image the build draws:
+
+- The subtree's source text (the rendered HTML slice that `tl` parsed)
+  goes to usvg. usvg sees exactly what the author wrote, so the walk
+  doesn't need to understand SVG.
+- `currentColor` takes the cascade's computed `color` (set as the root's
+  `color` before parsing). `svg { color: … }`, `:hover` and themes then
+  recolor icons the way browsers do, through the existing restyle.
+- Width and height follow the CSS `width`/`height` the way `<img>` does
+  (`size_images`), with the `<svg>`'s own `width`/`height`/`viewBox` as
+  the intrinsic size.
+- The raster is keyed by a hash of (source text, color, pixel size), so
+  a skeleton-reused subtree (ADR 0021) reuses its image.
+
+Deliberate limit: page CSS doesn't reach inside the SVG. A rule like
+`.icon path { fill: red }` doesn't apply. Only the inherited `color` (via
+`currentColor`) and the box size cross the boundary. Styles inside the
+SVG's own `<style>` and attributes do apply (usvg handles them).
+
+`<svg>` written as raw HTML in Markdown passes through the conversion
+unchanged (`md.rs`: raw HTML passes through), so it works in `.md`
+templates too.
+
+### 5. Safety limits
+
+SVG is untrusted input, like every other loader input here. The probe
+(§2–§4) measured what each limit has to stop.
+
+- **No external resources.** `Options::image_href_resolver` is replaced
+  by one whose two closures return `None`, and `resources_dir` stays
+  `None`. usvg's default string resolver `std::fs::read`s any path:
+  - absolute paths;
+  - relative ones against the process cwd, or against `resources_dir`
+    with no `..` containment.
+
+  It embeds bitmaps and renders SVGs from them, `raster-images` or not.
+  Under `strace`, the refusing resolver made every case read nothing.
+  `<use>`, CSS `@import`/`url()`, `xml-stylesheet` and external entities
+  never read files with either resolver. `data:` URLs are refused too in
+  the first version: a `data:` SVG fan-out costs parse time in
+  proportion to its size (probe §3), and nothing needs it yet.
+- **Pixel cap, checked before allocating.** No raster exceeds
+  `MAX_SVG_PIXELS` (16,777,216: 4096 × 4096). Larger requests scale down
+  in proportion, with a one-time warn. The cap must be applied before
+  `Pixmap::new`: a 100,000 × 100,000 request **aborted the process**
+  (allocation failure) instead of returning `None`.
+- **A render budget from the parsed tree.** The pixel cap doesn't
+  bound filters. Files under 45 KB took 2–15 s, or more than 30 s and up
+  to 4.7 GB, inside it (probe §4). `resvg::render` can't be cancelled,
+  so the loader estimates the cost from the `usvg::Tree` before
+  rendering. The estimate is the raster area × the sum over the tree of:
+  - each filter primitive's weight, scaled by its filter region
+    relative to the element's box: `feTurbulence` × `numOctaves`,
+    `feMorphology` × radius², `feConvolveMatrix` × order², others × 1;
+  - one unit per isolated group (opacity, filter, mask, clip path),
+    times its nesting depth.
+
+  Those are the scaling laws measured in probe §4. A document over
+  `MAX_SVG_COST` fails its load with an error naming the cause. The
+  constant is set during implementation from a benchmark, aiming at a
+  worst-case raster in the tens of milliseconds at the pixel cap
+  [INFERENCE: the cost model's weights hold across primitives; a
+  property test checks estimate vs measured time].
+- **Parse limits: usvg's own suffice.** roxmltree rejects entity loops
+  (depth 10, 255 references per entity). usvg rejects nesting deeper
+  than 1024 and trees over 1,000,000 nodes counted after `<use>`
+  expansion. That stopped a 10⁷-node `<use>` bomb in 0.06 s and 100,000
+  nested groups in 5 ms with no stack overflow. Memory stays
+  proportional to input size, so no pre-check like `nesting_over_limit`
+  is added.
+- **Remote paths.** `.svg` assets go through the existing `is_remote`
+  refusal like any other image.
+- **Fuzzing.** A fuzz target `svg` over the loader's parse, budget and
+  raster. Seed it with the probe's cases, minimized. The `html` target's
+  inputs then exercise inline `<svg>` too.
+
+### 6. Verification
+
+- Loader unit tests: intrinsic size from `width`/`height` vs `viewBox`,
+  `scale`, the pixel cap, a refused `<image href>`.
+- Headless vectors (`tests/html_ui.rs`): CPU rasterization needs no
+  renderer, so `TestUi` can assert the loaded image's size and the
+  inline box. A layout vector `layout_svg` checks `<img src=x.svg>` and
+  inline `<svg>` rects against Chromium via the existing layout oracle
+  (`scripts/browser_oracle.py`). The intrinsic-sizing rules
+  (`width`/`height`/`viewBox`, one CSS dimension preserving the ratio)
+  are exactly what a browser can arbitrate.
+- A golden scene `tests/golden/svg/`: committed SVGs with fills,
+  strokes, a gradient, `currentColor` and an SVG `border-image`.
+- `content_lint`'s CSS `url()` check already covers `.svg` URLs.
+
+### Implementation order
+
+1. Feature, loader, safety limits, fuzz target. This makes `<img>` and
+   CSS `url()` SVGs work at 1×.
+2. Display-size re-rasterization for `<img>` (§3).
+3. Inline `<svg>` (§4).
+
+Each step ships on its own with its vectors, a CHANGELOG line and the
+`AGENTS.md` updates (Public API row for `SvgLoaderSettings`, Layout,
+Limits).
+
+## Alternatives considered
+
+- **bevy_vello (with vello_svg).** This was the user's first proposal.
+  Its newest release, 0.14, targets Bevy 0.19, and nothing supports Bevy
+  0.20 (README compatibility table, read 2026-11-07). Vello renders with
+  GPU compute shaders in its own pass, which brings these problems:
+  - It needs WebGPU on the web; there's no WebGL2 path.
+  - It needs a renderer, so the headless test layers can't see it.
+  - It draws outside Bevy UI's z-order and clipping. [INFERENCE: not
+    prototyped.]
+  - The library would depend on rendering, which ADR 0002 leaves to the
+    app.
+
+  Its README calls SVG support "limited", and vello_svg parses with usvg
+  anyway, so it adds a renderer without adding SVG coverage. Worth
+  revisiting only for animated vector content (Lottie via velato), as a
+  separate backend behind its own feature.
+- **bevy_svg (0.19).** It draws SVGs as meshes for sprites and 3D: its
+  features enable `bevy_sprite` (`2d`) and `bevy_pbr` (`3d`). It doesn't
+  produce UI images. It tessellates with lyon (`lyon_tessellation` among
+  its crates.io dependencies) and depends on `bevy ^0.19`, so it can't
+  share a Bevy 0.20 app today.
+- **bevy_resvg (3.0.1).** Same engine, and it supports Bevy 0.20. Read
+  in source (probe §5):
+  - Its loader is crate-private and produces `SvgAsset(Arc<Tree>)`, not
+    `Image`, and its rasterizer is crate-private too. The public surface
+    is its plugin and its `Svg` / `UiSvg` components.
+  - It needs Bevy's `bevy_sprite_render` (a renderer dependency) and
+    `resvg ^0.48` with default features (system fonts, raster decoders).
+  - It parses with usvg's default resolver, which reads files (§5).
+
+  There is nothing to reuse behind the library's `Handle<Image>` paths.
+- **Status quo: apps pre-rasterize to PNG.** No dependency, but no
+  sharp scaling, no `currentColor` theming and no inline SVG. Keeping
+  this means closing ADR 0028 item 12 as "won't do".
+- **Hand-write a rasterizer or a narrower SVG subset.** This is the
+  kind of code ADR 0036 replaced with a maintained crate, and SVG is far
+  larger than the entity table was.
+
+## Consequences
+
+- SVG icons, frames and backgrounds work through the paths authors
+  already use, in every renderer Bevy supports, and testable headlessly.
+- New dependency tree under `svg` only: resvg, usvg, tiny-skia,
+  roxmltree, kurbo, svgtypes and their dependencies. Compile time and
+  binary size need measuring in step 1 (cold build of `--features svg`
+  vs without, `cargo bloat` or the release `.rlib` sizes).
+- CPU cost at load and on each re-rasterization. Measure a large icon
+  sheet and a full-window SVG background at 4K in step 2 (criterion,
+  next to the existing benches). Raster memory grows with the number of
+  distinct display sizes. Loaders run on Bevy's `IoTaskPool`, so a slow
+  SVG holds an IO thread and delays other loads, not frames.
+- The render budget rejects some legitimate heavy SVGs (deep filter
+  stacks at large sizes). Each rejection is a load error naming the
+  cause, and `MAX_SVG_COST` is one constant to revisit.
+- Static SVG only: no SMIL animation, no scripts. `<text>` inside SVG
+  renders nothing without the `text` feature.
+- Open:
+  - SVG `<text>`: feed usvg's fontdb from the `FontFamilies` faces' loaded
+    bytes, so SVG text uses the app's fonts. Its own feature
+    (`svg-text`) or part of `svg`, decided then.
+  - CSS-loaded SVGs (`border-image`, `background-image`) stay at 1× and
+    blur on HiDPI. Re-rasterizing them needs the slice numbers scaled by
+    the raster/intrinsic ratio inside `sliced_image`.
+  - Page CSS reaching inside inline `<svg>` (usvg's
+    `Options::style_sheet` could carry the matching rules).
+  - Whether `svg` should join a future default feature set.

@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Derived from | `AGENTS.md`, ADRs 0001, 0002, 0004, 0028, 0035–0037 |
+| Derived from | `AGENTS.md`, ADRs 0001, 0002, 0004, 0028, 0035–0038 |
 | Source state | `dffb748`, 2026-10-29 |
 
 ## Project Reality
@@ -27,6 +27,7 @@
 - Application input bindings stay in apps; the library offers `HtmlFocus` (directional and Tab) instead (ADR 0008).
 - `tl`'s tag soup kept over html5ever: a spec parser costs 6–9× on the per-change parse, 10–20 % of a changing frame (ADR 0035).
 - Overlays stay separate roots placed by the crate, not Bevy `Popover` children: a child node collapses a text block's layout (ADR 0037).
+- SVG (proposed): rasterized on the CPU by usvg + resvg into plain `Image`s behind an opt-in `svg` feature, not drawn by a GPU vector renderer (bevy_vello): no renderer dependency, headless-testable, every backend (ADR 0038).
 
 ## Sources
 
@@ -39,3 +40,4 @@
 - @docs/agents/adr/0035-replace-tl-with-html5ever.md
 - @docs/agents/adr/0036-decode-character-references-with-htmlize.md
 - @docs/agents/adr/0037-anchored-overlays-with-bevy-popover.md
+- @docs/agents/adr/0038-svg-rasterized-with-resvg.md
