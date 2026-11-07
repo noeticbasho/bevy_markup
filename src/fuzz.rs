@@ -508,3 +508,53 @@ pub fn svg_estimate(source: &[u8]) -> Result<(u32, u32, u64), String> {
         crate::svg::estimate_cost(&tree, width, height, u64::MAX),
     ))
 }
+
+/// A parsed SVG, for the benchmarks' stage measurements
+/// (`benches/svg.rs`, `benches/svg-divan.rs`).
+pub struct SvgTree(resvg::usvg::Tree);
+
+impl SvgTree {
+    /// The intrinsic size the loader draws at (scale 1).
+    pub fn intrinsic(&self) -> (u32, u32) {
+        let (width, height, _) = crate::svg::raster_size(&self.0, 1.0, crate::svg::MAX_SVG_SIDE)
+            .unwrap_or((1, 1, false));
+        (width, height)
+    }
+}
+
+/// The loader's parse: roxmltree, the recursion-depth bound, usvg.
+pub fn svg_parse(source: &[u8]) -> Result<SvgTree, String> {
+    crate::svg::parse(source)
+        .map(SvgTree)
+        .map_err(|err| err.to_string())
+}
+
+/// Only the XML parse and the recursion-depth bound (what the check adds
+/// before usvg runs).
+pub fn svg_depth(source: &str) -> Result<u32, String> {
+    let options = roxmltree::ParsingOptions {
+        allow_dtd: true,
+        ..roxmltree::ParsingOptions::default()
+    };
+    let document =
+        roxmltree::Document::parse_with_options(source, options).map_err(|err| err.to_string())?;
+    crate::svg::recursion_depth(&document, 1 << 20).map_err(|err| err.to_string())
+}
+
+/// The render-cost estimate at `width`×`height`.
+pub fn svg_cost(tree: &SvgTree, width: u32, height: u32) -> u64 {
+    crate::svg::estimate_cost(&tree.0, width, height, u64::MAX)
+}
+
+/// The budgeted draw at `width`×`height` (the loader's and the redraw's
+/// work), returning the image's byte count.
+pub fn svg_draw(tree: &SvgTree, width: u32, height: u32) -> Result<usize, String> {
+    crate::svg::draw(&tree.0, width, height, crate::svg::Limits::DEFAULT)
+        .map(|(image, _)| image.data.map_or(0, |data| data.len()))
+        .map_err(|err| err.to_string())
+}
+
+/// An inline `<svg>`'s preparation (namespaces, the cascade color).
+pub fn svg_prepare_inline(raw: &str) -> Option<String> {
+    crate::svg::prepare_inline(raw, Some([255, 0, 0, 255]))
+}

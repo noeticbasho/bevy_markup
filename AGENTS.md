@@ -380,8 +380,10 @@ tests/
                    tests, Fluent oracle references current
   nightly.yml      golden images (Ubuntu lavapipe), browser oracle vs current Chrome, 15 min
                    cargo-fuzz per target, other fuzz drivers build, criterion + divan
-                   benchmarks (reports as artifacts, not a gate; fuzz on pinned
-                   BEVY_MARKUP_NIGHTLY)
+                   benchmarks (`pipeline`/`pipeline-divan`, and `svg`/`svg-divan` with
+                   `--features fuzzing`: the SVG stages through `fuzz::svg_*` glue plus
+                   inline/`<img>` frame workloads, `benches/shared/svg.rs`; reports as
+                   artifacts, not a gate; fuzz on pinned BEVY_MARKUP_NIGHTLY)
   mutants.yml      twice-weekly mutation testing, 8 shards, --in-place, fast settings, informational
   cache.yml        builds the shared `mutants`, `fuzz` and `bench` (both harnesses)
                    dependency caches once (push to main, daily); scheduled jobs only

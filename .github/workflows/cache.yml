@@ -54,7 +54,9 @@ jobs:
             libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev libfontconfig-dev
       - name: Compile the bench targets (criterion and divan)
         if: steps.cache.outputs.cache-hit != 'true'
-        run: cargo bench --no-run
+        run: |
+          cargo bench --no-run
+          cargo bench --no-run --features fuzzing --bench svg --bench svg-divan
 
   mutants:
     name: Mutants build (profile mutants, dynamic Bevy)

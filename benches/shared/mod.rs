@@ -8,6 +8,9 @@
 // dead code instead of per-target cfgs.
 #![allow(dead_code)]
 
+/// The SVG benches' documents and workloads (`svg`, `svg-divan`).
+pub(crate) mod svg;
+
 use bevy::asset::AssetMetaCheck;
 use bevy::asset::uuid::Uuid;
 use bevy::camera::{ComputedCameraValues, RenderTarget, RenderTargetInfo};

@@ -46,6 +46,12 @@ jobs:
         # `shell: bash` gives `-e -o pipefail`: a panicking bench fails the
         # step instead of `tee`'s exit status masking it.
         run: cargo bench --bench pipeline-divan -- --max-time 2 | tee target/divan.txt
+      # ADR 0038: the SVG stages and frame workloads (both harnesses).
+      - name: Run the SVG criterion suite
+        run: cargo bench --features fuzzing --bench svg -- --warm-up-time 0.5 --measurement-time 2
+      - name: Run the SVG divan suite (allocation counts)
+        shell: bash
+        run: cargo bench --features fuzzing --bench svg-divan -- --max-time 2 | tee target/divan-svg.txt
       - name: Upload the reports
         if: always()
         uses: actions/upload-artifact@v7
@@ -57,7 +63,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: divan-report
-          path: target/divan.txt
+          path: |
+            target/divan.txt
+            target/divan-svg.txt
 
   golden:
     # Restores the `dev` cache the CI `test` job saves: needs CI's

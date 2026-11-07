@@ -183,6 +183,19 @@ harness = false
 name = "pipeline-divan"
 harness = false
 
+# SVG (ADR 0038): the loader's stages (through the doc-hidden glue in
+# `bevy_markup::fuzz`, hence `fuzzing`, which implies `svg`) and inline /
+# `<img>` frame workloads; criterion and divan, as for the pipeline.
+[[bench]]
+name = "svg"
+harness = false
+required-features = ["fuzzing"]
+
+[[bench]]
+name = "svg-divan"
+harness = false
+required-features = ["fuzzing"]
+
 # The example needs Bevy's file watcher; skipped without the feature.
 [[example]]
 name = "hot-reload"

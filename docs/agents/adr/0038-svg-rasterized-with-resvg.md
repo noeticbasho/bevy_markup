@@ -269,6 +269,38 @@ Tests (`html_ui` `svg_css_images`, `UiScale` 2):
 Without the mode scaling two tests fail; without the put-back, one.
 `.slice.ron` frames (`NineSliceFrame`, app nodes) are still 1×.
 
+### 8. Benchmarks (added 2026-11-07)
+
+`benches/svg.rs` (criterion) and `benches/svg-divan.rs` (divan,
+allocation counts) measure the loader's stages through doc-hidden glue in
+`bevy_markup::fuzz` (`svg_depth`, `svg_parse`, `svg_cost`, `svg_draw`,
+`svg_prepare_inline`; hence `--features fuzzing`). They also measure
+frame workloads on the shared headless app: inline icons idle, inline
+icons recolored every frame (each a new drawing), and `<img>` SVGs idle
+after their redraw. Both run nightly next to the pipeline suites.
+
+First run (release, best of criterion's samples, Ryzen 7 9800X3D):
+
+| Stage | icon | illustration (40 groups) | drop-shadowed 512² | 30-pattern chain |
+|---|---|---|---|---|
+| depth check (incl. the XML parse) | 0.78 µs | 21.5 µs | 1.2 µs | 14.7 µs |
+| full parse | 3.5 µs | 135 µs | 4.2 µs | 57 µs |
+| cost estimate | 11 ns | 0.68 µs | 19 ns | 0.23 µs |
+| draw 1× | 7.9 µs | 2.9 ms | 16 ms | 53 µs |
+| draw 2× | 28 µs | 9.9 ms | 67 ms | 143 µs |
+
+Notes on the table:
+- The depth check's own share of a parse is less than its column: in the
+  real path its XML parse is the one usvg reuses.
+- Drawing dominates whenever there are filters or many layers, which is
+  what the render budget bounds.
+
+| Frame workload | 120 | 600 |
+|---|---|---|
+| inline icons, idle | 0.14 ms | 0.27 ms |
+| inline icons, all recolored per frame | 1.2 ms | 4.8 ms |
+| `<img>` SVGs, idle after redraw | 0.15 ms | 0.30 ms |
+
 ### 6. SVG `<text>`: the `svg-text` feature (added 2026-11-07)
 
 usvg converts `<text>` to outlines while it parses, so the fonts must be
