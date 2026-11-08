@@ -94,10 +94,41 @@ pub(crate) fn bounds(
     document: &roxmltree::Document,
     max_references: usize,
 ) -> Result<Bounds, SvgError> {
+    check_values(document)?;
     let mut graph = Graph::new(document, max_references)?;
     let order = graph.order().ok_or(SvgError::ReferenceCycle)?;
     graph.inherit(&order, max_references)?;
     graph.measure()
+}
+
+/// Refuses values usvg would panic on while converting.
+///
+/// `feTurbulence`'s `baseFrequency` (UPSTREAM U26): usvg reads it as an
+/// `f32` list, where a number past `f32::MAX` becomes infinity, checks only
+/// its sign and unwraps `PositiveF32::new`, which is `None` for infinity
+/// (release builds panic too). Only the element's own attribute counts: it
+/// isn't a presentation attribute, so CSS can't set it. Any non-finite
+/// number refuses, also in a list usvg would ignore (wrong length, a bad
+/// entry): an over-refusal of documents nobody writes.
+fn check_values(document: &roxmltree::Document) -> Result<(), SvgError> {
+    for element in document.descendants().filter(|node| node.is_element()) {
+        if element.tag_name().name() != "feTurbulence" {
+            continue;
+        }
+        let Some(value) = element.attribute("baseFrequency") else {
+            continue;
+        };
+        let finite = svgtypes::NumberListParser::from(value)
+            .all(|number| number.map_or(true, |number| (number as f32).is_finite()));
+        if !finite {
+            return Err(SvgError::OutOfRange {
+                element: "feTurbulence",
+                attribute: "baseFrequency",
+                value: value.chars().take(64).collect(),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// What an element is, for the work model.
@@ -754,6 +785,16 @@ fn arc_curves(
     if from == to {
         return whole(subdivisions(radii.0.abs().max(radii.1.abs())));
     }
+    // The simplifier starts the arc where kurbo's previous cubic ended, a
+    // rounding error from `from`. The sweep angle below is computed from
+    // the exact point, and a radius large against the chord amplifies that
+    // error into any sweep up to a full turn: `A1e92 1e9 0 1 1 0 0` after
+    // an arc ending at `(1e9, 0)` is one cubic from the exact point and
+    // 3·10¹⁵ from the simplifier's (`(1e9 + 5e-6, -2.9e-6)`). So a radius
+    // (as kurbo scales it to the chord) past `EXACT_SWEEP_SUBDIVISIONS`
+    // counts the full turn, which bounds every sweep. Below it, a
+    // misjudged sweep is off by at most that many cubics: like a few line
+    // segments.
     let (mut rx, mut ry) = (radii.0.abs(), radii.1.abs());
     let xr = x_rotation % (2.0 * PI);
     let (sin_phi, cos_phi) = xr.sin_cos();
@@ -766,6 +807,10 @@ fn arc_curves(
         let scale = rf.sqrt();
         rx *= scale;
         ry *= scale;
+    }
+    let full_turn = subdivisions(rx.max(ry));
+    if !(full_turn <= EXACT_SWEEP_SUBDIVISIONS) {
+        return whole(full_turn);
     }
     let rxry = rx * ry;
     let rxpy = rx * p_y;
@@ -793,6 +838,10 @@ fn arc_curves(
         whole(n)
     }
 }
+
+/// The largest full-turn subdivision count for which [`arc_curves`]
+/// trusts the exact sweep angle (a radius up to about 1.5·10⁶).
+const EXACT_SWEEP_SUBDIVISIONS: f64 = 16.0;
 
 /// `n` rounded up, with a margin for the simplifier's rounding (see
 /// [`arc_curves`]); infinite past any count usvg could finish.
@@ -903,7 +952,10 @@ mod tests {
                                     && (!small || segments as usize <= built + 8),
                                 "{d}: counted {segments}, built {built}"
                             );
-                            if single {
+                            // Past `EXACT_SWEEP_SUBDIVISIONS` (radius ~1.5e6)
+                            // an arc counts a whole turn.
+                            let exact_sweep = radius.parse::<f64>().unwrap() <= 1e6;
+                            if single && exact_sweep {
                                 // The margin rounds a whole count (a half
                                 // turn: exactly 2) up by one.
                                 assert!(segments as usize <= built + 1, "{d}");
@@ -917,8 +969,9 @@ mod tests {
             }
         }
         assert!(checked > 700);
+        // 276 of 360 (radii up to 1e6; the rest is the `+ 1` margin).
         assert!(
-            exact * 5 > singles * 4,
+            exact * 4 > singles * 3,
             "{exact} of {singles} single arcs exact"
         );
     }
@@ -929,9 +982,17 @@ mod tests {
         let (segments, squares) = path_segments("M0 0 A1e70 1e70 0 1 1 1e70 0");
         assert!(segments > 1e11 && squares > 1e22, "{segments} {squares}");
         // Past ~1e77, kurbo's `rx·ry` squared overflows f64 and its
-        // arithmetic turns NaN: no cubics at all, here as there.
+        // arithmetic can turn NaN (no cubics); counted as a whole turn
+        // anyway, which is infinite: refused.
         let d = "M0 0 A1e120 1e120 0 1 1 1e120 0";
         assert!(path_segments(d).0 as usize >= simplified(d));
+        assert!(path_segments(d).0.is_infinite());
+        // The simplifier starts an arc where the previous one's last cubic
+        // ended, `(1e9 + 5e-6, -2.9e-6)` here; with `rx = 1e92` that error
+        // makes the sweep ~3·10¹⁵ cubics, where the exact start gives one
+        // (a fuzz find: a 30 GB allocation). Large radii count a whole turn.
+        let (segments, _) = path_segments("M0 0 A1e9 1e9 0 1 1 1e9 0 A1e92 1e9 0 1 1 0 0");
+        assert!(segments > 3e15, "{segments}");
         // A zero radius is a line, as in kurbo.
         assert_eq!(path_segments("M0 0 A0 5 0 1 1 9 9").0, 2.0);
     }

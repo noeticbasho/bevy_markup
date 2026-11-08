@@ -135,7 +135,9 @@ src/
                    (parent → child, url(#…)/href references, `<style>` rules matched by simplecss
                    like usvg, and — added by a topological inheritance walk — shape/text →
                    inherited paint server or marker, so a pattern inheriting itself is a cycle,
-                   bug_0191). `depth`: longest weighted path, ≤ `MAX_DEPTH` 256 units ≈ 800 KB
+                   bug_0191). First `check_values` refuses values usvg would panic on
+                   (`feTurbulence` `baseFrequency` not finite as `f32`: `OutOfRange`,
+                   U26, bug_0192). `depth`: longest weighted path, ≤ `MAX_DEPTH` 256 units ≈ 800 KB
                    debug stack (usvg's converter overflows a 2 MB thread on a few KB of
                    references, UPSTREAM U17). `work`: Σ instances × own work, instances = paths
                    from the root with edge multiplicities (`<use>` copies 1, marker = the shape's
@@ -155,6 +157,11 @@ src/
                    U19), `raster_size` (side cap before allocating: tiny-skia aborts on a failed
                    allocation), `estimate_cost` (resvg's layer/filter/mask/clip model, early exit
                    at `MAX_SVG_COST`; calibrated in docs/agents/performance/adr-0038-probe.md §7),
+                   `check_extent` (before drawing: each path's control bounds, strokes padded,
+                   through every transform resvg applies — groups, clips, masks, `feImage`,
+                   pattern tiles, text outlines — must stay within `MAX_SVG_EXTENT` 2¹⁹ px of
+                   the image, else `TooFarOut`: tiny-skia panics far off the canvas in every
+                   build, U24/U27/U28, bug_0194),
                    straight-alpha `Rgba8UnormSrgb` output; `guarded` turns a usvg/resvg panic
                    into an error (resvg #1185, U20: a panicked AsyncCompute task re-panics
                    its poller). `<img>` redraw (ADR 0038 §3): `SvgDocument` (own typed loader,
@@ -430,7 +437,10 @@ scripts/
                      described under Testing TODO 5)
 fuzz/
   fuzz_targets/      cargo-fuzz targets (`html`, `css`, `ftl`, `svg`) over `bevy_markup::fuzz`
-                     (`svg` is cargo-fuzz only and asserts each input finishes in 5 s)
+                     (`svg` is cargo-fuzz only and asserts each input finishes in 5 s; its
+                     panic hook lets the debug-only upstream panic U20 unwind into
+                     `svg::guarded` — `fuzz::is_known_upstream_debug_panic`, pinned to
+                     resvg 0.49.0 — every other panic aborts, tiny-skia's included)
   seeds/<target>/    committed minimized seed corpora (read-only extra input to every fuzz run)
   corpus/, artifacts/, coverage/  gitignored (corpus/ = working corpus; CI carries it over nightly)
 honggfuzz/

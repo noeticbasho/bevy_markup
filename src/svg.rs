@@ -152,6 +152,18 @@ pub const MAX_SVG_COST: u64 = 1 << 27;
 /// million path segments fits.
 pub const MAX_SVG_WORK: u64 = 1 << 23;
 
+/// The farthest any drawn path may reach from the image's origin, in the
+/// drawn image's pixels (2¹⁹). Shapes may extend past the image, as they
+/// often do (a background larger than the view, a map cropped by its
+/// `viewBox`); this bounds how far. tiny-skia 0.12's rasterizer panics, in
+/// release builds too, on paths far outside its canvas (UPSTREAM U24,
+/// U27, U28): with anti-aliasing it shifts the path's unclipped rows left
+/// by 2 in an `i32`, which wraps past 2²⁹, and it clips a cubic crossing
+/// the canvas by a search whose 0.25 px tolerance f32 can't resolve past
+/// ~2²¹. Measured on control points, with strokes padded by their width ×
+/// miter limit; the smallest extent seen to panic is ~1.8·10⁶ px.
+pub const MAX_SVG_EXTENT: f32 = 524_288.0;
+
 /// Settings for loading an `.svg` as an [`Image`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SvgLoaderSettings {
@@ -238,6 +250,17 @@ pub(crate) enum SvgError {
     TooManyReferences {
         max: usize,
     },
+    /// A path reaches farther from the image than [`MAX_SVG_EXTENT`].
+    TooFarOut {
+        extent: f32,
+        max: f32,
+    },
+    /// A value usvg would panic on (UPSTREAM U26), refused before it runs.
+    OutOfRange {
+        element: &'static str,
+        attribute: &'static str,
+        value: String,
+    },
     /// usvg or resvg panicked (caught by [`guarded`]).
     Panicked(String),
 }
@@ -276,6 +299,19 @@ impl fmt::Display for SvgError {
             Self::TooManyReferences { max } => {
                 write!(f, "more than {max} url(#…)/href references")
             }
+            Self::TooFarOut { extent, max } => write!(
+                f,
+                "draws too far outside the image (a path reaches {extent:.0} px from it at this \
+                 size, limit {max:.0}): reduce its coordinates, radii or stroke widths"
+            ),
+            Self::OutOfRange {
+                element,
+                attribute,
+                value,
+            } => write!(
+                f,
+                "<{element}> has an out-of-range {attribute} ({value:?}): its numbers must be finite"
+            ),
             Self::Panicked(message) => write!(f, "the SVG renderer panicked: {message}"),
         }
     }
@@ -519,6 +555,7 @@ fn draw_unguarded(
             max: limits.cost,
         });
     }
+    check_extent(tree, width, height)?;
     // Checked before the allocation: tiny-skia aborts the process on a
     // failed one rather than returning `None` (probe §4).
     let mut pixmap =
@@ -1302,6 +1339,132 @@ pub(crate) fn estimate_cost(tree: &usvg::Tree, width: u32, height: u32, max: u64
         let _ = walk.group(tree.root(), 0);
     }
     walk.total
+}
+
+/// Refuses a tree with a path reaching farther than [`MAX_SVG_EXTENT`]
+/// pixels from the drawn image (tiny-skia panics on such paths).
+fn check_extent(tree: &usvg::Tree, width: u32, height: u32) -> Result<(), SvgError> {
+    let size = tree.size();
+    let canvas = tiny_skia::Transform::from_scale(
+        width as f32 / size.width(),
+        height as f32 / size.height(),
+    );
+    let mut walk = ExtentWalk { extent: 0.0 };
+    match walk.group(tree.root(), canvas, 0) {
+        Ok(()) => Ok(()),
+        Err(Over) => Err(SvgError::TooFarOut {
+            extent: walk.extent,
+            max: MAX_SVG_EXTENT,
+        }),
+    }
+}
+
+/// Walks the tree as resvg draws it, composing each group's transform on
+/// the way down, and records how far each path reaches in pixels.
+struct ExtentWalk {
+    extent: f32,
+}
+
+impl ExtentWalk {
+    fn group(
+        &mut self,
+        group: &usvg::Group,
+        parent: tiny_skia::Transform,
+        depth: u32,
+    ) -> Result<(), Over> {
+        if depth > MAX_COST_DEPTH {
+            self.extent = f32::INFINITY;
+            return Err(Over);
+        }
+        let transform = parent.pre_concat(group.transform());
+        // `clip::apply`: the clip's own transform on top; nested clips get
+        // the group's.
+        let mut clip = group.clip_path();
+        while let Some(path) = clip {
+            self.group(
+                path.root(),
+                transform.pre_concat(path.transform()),
+                depth + 1,
+            )?;
+            clip = path.clip_path();
+        }
+        // `mask::apply`: drawn with the group's transform.
+        let mut mask = group.mask();
+        while let Some(layer) = mask {
+            self.group(layer.root(), transform, depth + 1)?;
+            mask = layer.mask();
+        }
+        // `feImage` content: drawn at the transform's scale in the filter
+        // region.
+        for filter in group.filters() {
+            for primitive in filter.primitives() {
+                if let usvg::filter::Kind::Image(image) = primitive.kind() {
+                    self.group(image.root(), scale_of(transform), depth + 1)?;
+                }
+            }
+        }
+        for child in group.children() {
+            match child {
+                usvg::Node::Group(child) => self.group(child, transform, depth + 1)?,
+                usvg::Node::Path(path) => self.path(path, transform, depth)?,
+                // Drawn as its flattened outlines.
+                usvg::Node::Text(text) => self.group(text.flattened(), transform, depth + 1)?,
+                // Never produced with the refusing resolver.
+                usvg::Node::Image(_) => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn path(
+        &mut self,
+        path: &usvg::Path,
+        transform: tiny_skia::Transform,
+        depth: u32,
+    ) -> Result<(), Over> {
+        let pad = path.stroke().map_or(0.0, |stroke| {
+            stroke.width().get() * 0.5 * stroke.miterlimit().get().max(std::f32::consts::SQRT_2)
+        });
+        let bounds = path.data().bounds();
+        let reach = tiny_skia::Rect::from_ltrb(
+            bounds.left() - pad,
+            bounds.top() - pad,
+            bounds.right() + pad,
+            bounds.bottom() + pad,
+        )
+        .and_then(|rect| rect.transform(transform))
+        .map_or(f32::INFINITY, |rect| {
+            rect.left()
+                .abs()
+                .max(rect.top().abs())
+                .max(rect.right().abs())
+                .max(rect.bottom().abs())
+        });
+        // `!(<=)`: NaN is too far too.
+        if !(reach <= MAX_SVG_EXTENT) {
+            self.extent = reach;
+            return Err(Over);
+        }
+        self.extent = self.extent.max(reach);
+        // `render_pattern_pixmap`: the tile is drawn at the scale of the
+        // path's transform and the pattern's.
+        let fill = path.fill().map(|fill| fill.paint());
+        let stroke = path.stroke().map(|stroke| stroke.paint());
+        for paint in fill.into_iter().chain(stroke) {
+            if let usvg::Paint::Pattern(pattern) = paint {
+                let tile = scale_of(transform.pre_concat(pattern.transform()));
+                self.group(pattern.root(), tile, depth + 1)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The scale part of a transform, as resvg takes it for tiles and filter
+/// images.
+fn scale_of(transform: tiny_skia::Transform) -> tiny_skia::Transform {
+    let (sx, sy) = transform.get_scale();
+    tiny_skia::Transform::from_scale(sx, sy)
 }
 
 /// The walk stopped: the estimate is over the limit.
@@ -2284,6 +2447,87 @@ mod tests {
             .as_bytes(),
         )
         .unwrap();
+    }
+
+    /// tiny-skia 0.12 panics, in release builds too, on paths far outside
+    /// its canvas (UPSTREAM U24, U27, U28): these all panicked before the
+    /// extent check and are refused by it now.
+    #[test]
+    fn paths_far_outside_the_image_are_refused() {
+        let far = |body: &str| {
+            matches!(
+                rasterize(svg(64, 64, body).as_bytes(), 1.0, Limits::DEFAULT),
+                Err(SvgError::TooFarOut { .. })
+            )
+        };
+        for body in [
+            // U24: the anti-aliased row range wraps past 2²⁹.
+            "<path d='M0 0 A1e9 1e9 0 1 1 1e9 0 A1e9 1e9 0 1 1 0 0'/>",
+            "<path d='M603553400 -786566100 L-232962910 303603170 L554380750 -829689350 Z'/>",
+            // U27: a cubic crossing the canvas at ~2·10⁶ px.
+            "<path d='M594013.050 381118.560 C23.441 49.273 26.433 1484859.225 1774116.403 0.411 C1298853.611 -1384415.656 16.117 54.780 -1023737.272 -1796567.757 C61.380 -457240.839 35.599 63694.954 1712724.296 3.251' shape-rendering='crispEdges' stroke='red' stroke-width='3'/>",
+            // A stroke's width counts, and so do transforms.
+            "<path d='M0 0 L64 64' stroke='red' stroke-width='2e6'/>",
+            "<g transform='scale(1e6)'><rect width='1' height='1'/></g>",
+            // Pattern tiles, clip paths and text outlines are walked too.
+            "<pattern id='p' width='8' height='8' patternUnits='userSpaceOnUse'><path d='M0 0 L1e7 1e7 L0 1e7 Z'/></pattern><rect width='64' height='64' fill='url(#p)'/>",
+            "<clipPath id='c'><path d='M0 0 L1e7 1e7 L0 1e7 Z'/></clipPath><rect width='64' height='64' clip-path='url(#c)'/>",
+        ] {
+            assert!(far(body), "{body}");
+        }
+        // The limit is in image pixels: a viewBox that scales the drawing
+        // down lets user units grow, and shapes may pass the edge.
+        draw(
+            "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 1e7 1e7'><path d='M0 0 L1e7 0 L0 1e7 Z'/></svg>",
+        )
+        .unwrap();
+        draw(&svg(
+            64,
+            64,
+            "<rect x='-100000' y='-100000' width='200000' height='200000' fill='red'/><circle cx='32' cy='32' r='5000' stroke='blue' stroke-width='40'/>",
+        ))
+        .unwrap();
+    }
+
+    /// usvg 0.49 unwraps a `PositiveF32` made from `baseFrequency` as an
+    /// `f32`: a number past `f32::MAX` is infinity and panicked, in release
+    /// too (UPSTREAM U26). The check refuses it before usvg runs.
+    #[test]
+    fn infinite_turbulence_frequencies_are_refused() {
+        for frequency in ["1e40", "0.1 1e39", "-0 1e40"] {
+            let body = format!(
+                "<filter id='f'><feTurbulence baseFrequency='{frequency}'/></filter><rect width='8' height='8' filter='url(#f)'/>"
+            );
+            assert!(
+                matches!(
+                    rasterize(svg(64, 64, &body).as_bytes(), 1.0, Limits::DEFAULT),
+                    Err(SvgError::OutOfRange { .. })
+                ),
+                "{frequency}"
+            );
+        }
+        // Finite frequencies convert and draw. A number past `f64` fails
+        // svgtypes' parse, and usvg drops the attribute.
+        let draw = |frequency: &str| {
+            let body = format!(
+                "<filter id='f'><feTurbulence baseFrequency='{frequency}'/></filter><rect width='8' height='8' filter='url(#f)'/>"
+            );
+            rasterize(svg(64, 64, &body).as_bytes(), 1.0, Limits::DEFAULT)
+        };
+        for frequency in ["0.05", "1e6", "1e400"] {
+            draw(frequency).unwrap_or_else(|err| panic!("{frequency}: {err}"));
+        }
+        // Huge finite ones overflow resvg's lattice index: a debug-build
+        // panic (UPSTREAM U20), caught by `guarded`; release wraps and masks
+        // it into range. A resvg fix turns this arm into `Ok`.
+        for frequency in ["1e20", "3e38 0.1"] {
+            match draw(frequency) {
+                Err(SvgError::Panicked(message)) if cfg!(debug_assertions) => {
+                    assert!(message.contains("with overflow"), "{message}")
+                }
+                result => assert!(result.is_ok(), "{frequency}: {:?}", result.err()),
+            }
+        }
     }
 
     /// Ordinary illustrations stay far inside the work budget: the bound

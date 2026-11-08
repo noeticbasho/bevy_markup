@@ -33,13 +33,15 @@ the issue may already be fixed or reported.
 | U17 | usvg (resvg) | Converter recursion through references and nesting is unbounded | stack overflow (abort) from a few KB of SVG on a 2 MB thread (`svg` feature) | static recursion-depth check before conversion (`svg_bounds::bounds`) | unreported; resvg #1223 (unreleased) bounds XML nesting and `<use>` only |
 | U18 | roxmltree | 0.21.1's tokenizer recursed once per nesting level | stack overflow at ~150 levels in debug on a 2 MB thread (`svg` feature) | version floor `roxmltree >= 0.21.2` | fixed upstream (0.21.2) |
 | U19 | usvg (resvg) | The default `ImageHrefResolver` reads any file path | an SVG reads any file the process can and embeds it (`svg` feature) | a resolver that resolves nothing | unreported (by design; worth a docs warning) |
-| U20 | resvg | `feTurbulence` overflows `i32` after enough octaves (#1185, open; #937 a similar multiply overflow) | panic where overflow checks are on (debug builds, fuzzing): a failed load, or a crash through a redraw task (`svg` feature) | `svg::guarded` (catch_unwind around usvg/resvg) | reported upstream (#1185), open |
+| U20 | resvg | `feTurbulence` overflows `i32` after enough octaves or on a huge `baseFrequency` (#1185, open; #937 a similar multiply overflow) | panic where overflow checks are on (debug builds, fuzzing): a failed load, or a crash through a redraw task (`svg` feature) | `svg::guarded` (catch_unwind around usvg/resvg); the `svg` fuzz target lets it unwind (`fuzz::is_known_upstream_debug_panic`) | reported upstream (#1185), open; the `baseFrequency` trigger unreported |
 | U21 | astral-tl | `/` is a name character: `<b/>` is an unclosed element named `b/` ([bug_0185](bug_0185.md)) | a `<br/>` merged the rest of the document into one block | `template::normalize_self_closing` before every `tl` parse | unreported |
 | U22 | svgtypes / kurbo | An arc splits into `(11·r)^⅙` cubics at kurbo's absolute 0.1 tolerance, and svgtypes' simplifier drains them with `Vec::remove(0)` ([bug_0190](bug_0190.md)) | one 40-byte arc converts for seconds or never finishes (`svg` feature) | counted before conversion in the work bound (`svg_bounds::bounds`, ADR 0040) | unreported |
 | U23 | usvg (resvg) | A pattern whose content inherits a paint naming itself recurses until the stack overflows ([bug_0191](bug_0191.md)) | stack overflow (abort) from 230 bytes (`svg` feature) | inherited references are edges of the cycle check (`svg_bounds::bounds`) | unreported |
-| U24 | tiny-skia | `scan::path::walk_edges` `debug_assert!(last_y >= curr_y)` fails on huge coordinates | panic where debug assertions are on (debug builds, fuzzing): a failed load (`svg` feature) | `svg::guarded` (catch_unwind) | unreported |
+| U24 | tiny-skia | Anti-aliased fills shift the path's *unclipped* rows by 2 in an `i32`, which wraps past 2²⁹ ([bug_0194](bug_0194.md)) | panic in any build on paths far off the canvas (debug: `walk_edges` assertion; release: U28) — a failed load (`svg` feature) | refused before drawing (`svg::check_extent`, `MAX_SVG_EXTENT`, `SvgError::TooFarOut`) | unreported |
 | U25 | usvg (resvg) | No bound on conversion work: `<use>` copies under the million-node limit, markers per vertex ([bug_0188](bug_0188.md), [bug_0189](bug_0189.md)) | seconds to minutes of conversion from a few KB (`svg` feature) | the work bound (`svg_bounds::bounds`, `MAX_SVG_WORK`, ADR 0040) | unreported (by design; a conversion budget option would replace the model) |
-| U26 | usvg (resvg) | `feTurbulence` with a `baseFrequency` past `f32::MAX` unwraps `PositiveF32::new(inf)` | panic in any build: a failed load (`svg` feature); a crash under libFuzzer | `svg::guarded` (catch_unwind) | unreported |
+| U26 | usvg (resvg) | `feTurbulence` with a `baseFrequency` past `f32::MAX` unwraps `PositiveF32::new(inf)` ([bug_0192](bug_0192.md)) | panic in any build: a failed load (`svg` feature) | refused before usvg runs (`svg_bounds::check_values`, `SvgError::OutOfRange`) | unreported |
+| U27 | tiny-skia | The cubic edge clipper's bisection can't reach its 0.25 px tolerance between ~2²¹ and 2²² px and unwraps `NormalizedF32Exclusive::new(1.0)` ([bug_0194](bug_0194.md)) | panic in any build: a failed load (`svg` feature) | refused before drawing (`svg::check_extent`) | unreported |
+| U28 | tiny-skia | Release builds of U24: the wrapped row range writes outside the canvas, caught by an `unwrap` in `alpha_runs.rs` or a slice in `pipeline/mod.rs` ([bug_0194](bug_0194.md)) | panic in release builds: a failed load (`svg` feature) | as U24 | unreported (report with U24) |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -455,7 +457,10 @@ CI clippy command and workspace tests pass on both.
   masked, so the noise is merely wrong).
 - **Reproduction:** draw `<filter id="f"><feTurbulence baseFrequency="0.05"
   numOctaves="100"/></filter><rect width="16" height="16"
-  filter="url(#f)"/>` in a debug build.
+  filter="url(#f)"/>` in a debug build. A huge finite frequency reaches
+  the same line in one octave: `baseFrequency='1e20'` on a 64 × 64 image
+  (found 2026-11-08; about 3e7 is enough there). Not in #1185 yet: add it
+  when reporting.
 - **Impact on bevy_markup:** Bevy turns a panicking asset loader into a
   failed load, but the `<img>` redraws run as `AsyncComputeTaskPool`
   tasks, and polling a panicked task re-raises the panic in the poller,
@@ -463,7 +468,12 @@ CI clippy command and workspace tests pass on both.
 - **Local workaround:** `svg::guarded` wraps usvg's parse and resvg's
   draw in `catch_unwind`: the panic becomes `SvgError::Panicked` (the load
   fails, or the size isn't redrawn). Keep it while resvg can panic on
-  input; it costs nothing on the normal path.
+  input; it costs nothing on the normal path. The `svg` fuzz target
+  (debug assertions on) lets this panic unwind into `guarded` instead of
+  aborting (`fuzz::is_known_upstream_debug_panic`, matched by file and
+  message in `resvg-0.49.0/src/filter/turbulence.rs`), so it no longer
+  turns the nightly red; `fuzz::svg_tests` fails once a resvg release
+  stops panicking, as a reminder to drop the excuse.
 
 ## U21 — astral-tl: `/` is a name character, so `<b/>` never closes
 
@@ -492,7 +502,11 @@ CI clippy command and workspace tests pass on both.
 - **Problem:** the tolerance is an absolute 0.1 user units, and
   `append_iter` makes `ceil(max((1.1163·r/0.1)^⅙, 4) · sweep/2π)` cubics:
   1.5·10⁵ for one arc at `r = 1e30`, ~7·10¹¹ at `r = 1e70` (past ~1e77,
-  `rx·ry` squared overflows and the count is NaN, so 0). The simplifier
+  `rx·ry` squared can overflow and the count be NaN, so 0). The sweep is
+  computed from where the previous arc's last cubic ended, a rounding
+  error off the written point, and a large radius amplifies that error:
+  `A1e92 1e9 0 1 1 0 0` after `A1e9 1e9 0 1 1 1e9 0` is ~3·10¹⁵ cubics,
+  one from the exact point (bug_0193). The simplifier
   pushes every cubic into `buffer` and returns them with
   `self.buffer.remove(0)`, which moves the rest each time: quadratic.
 - **Reproduction:** `<path d='M0 0 A1e30 1e30 0 1 1 1e30 0'/>` converts
@@ -522,20 +536,35 @@ CI clippy command and workspace tests pass on both.
   `parent_markers` does for markers) and resolve a nested reference to
   one of them as `none`.
 
-## U24 — tiny-skia: a scan-converter debug assertion fails on huge coordinates
+## U24 — tiny-skia: the anti-aliased row range wraps on paths far off the canvas
 
 - **Project:** linebender/tiny-skia 0.12.0.
-- **Problem:** `scan/path.rs` `walk_edges`
-  `debug_assert!(edges[curr_idx].last_y >= curr_y as i32)` fails for paths
-  whose coordinates are far outside the canvas (fixed-point edges
-  overflow). Release builds skip the check and draw on.
-- **Reproduction:** a 64 × 64 SVG with
-  `<path d='M0 0 A1e9 1e9 0 1 1 1e9 0 A1e9 1e9 0 1 1 0 0 …'/>` (20 such
-  pairs), drawn by the `svg` fuzz target (debug assertions on).
-- **Impact on bevy_markup:** `svg::guarded` turns the panic into
-  `SvgError::Panicked` (a failed load, or no redraw). Under libFuzzer any
-  panic is a crash, so the `svg` target can report it, as it can U20.
-- **Local workaround:** none beyond `guarded`.
+- **Problem:** `scan/path.rs` (around line 164) takes the path's integer
+  bounds before clipping them to the canvas (the code's own `TODO:
+  SkScanClipper`; Skia clips first) and, for anti-aliasing, shifts them
+  left by 2 (`start_y <<= shift_edges_up`). Past |y| ≥ 2²⁹ the `i32`
+  wraps and the edge walk starts at a garbage row. Debug builds then fail
+  `walk_edges`' `debug_assert!(edges[curr_idx].last_y >= curr_y as i32)`;
+  release builds write outside the canvas (U28). Lines alone trigger it;
+  non-anti-aliased fills don't.
+- **Reproduction:** a 64 × 64 SVG with `<path d='M603553400 -786566100
+  L-232962910 303603170 L554380750 -829689350 Z'/>`, or `<path d='M0 0
+  A1e9 1e9 0 1 1 1e9 0 A1e9 1e9 0 1 1 0 0'/>` (seed `004a6ba5…` in
+  `fuzz/seeds/svg/`). Through tiny-skia alone: fill that triangle at
+  identity with `anti_alias = true` (halving the coordinates still panics,
+  quartering them doesn't).
+- **Impact on bevy_markup:** before the workaround, a failed load
+  (`svg::guarded` catches the panic). An earlier version of this entry
+  said release builds were unaffected; a release replay showed U28
+  ([bug_0194](bug_0194.md)).
+- **Local workaround:** `svg::check_extent` refuses a drawing that reaches
+  more than `MAX_SVG_EXTENT` (2¹⁹ px) outside the image, measured on
+  control points with strokes padded, through every transform resvg
+  applies (`SvgError::TooFarOut`). Drop it, and the limit, once tiny-skia
+  clips first.
+- **PR sketch:** clip the integer bounds to the clip rect (Skia's
+  `SkScanClipper`) before the shift, or compute the shift in `i64` and
+  reject what doesn't fit.
 
 ## U25 — usvg: no bound on conversion work
 
@@ -564,11 +593,45 @@ CI clippy command and workspace tests pass on both.
   baseFrequency='1e40'/></filter><rect width='8' height='8'
   filter='url(#f)'/>`. Found by a local `svg` fuzz run on 2026-11-08
   (artifact `crash-05abaafb…`, a 557-byte filter chain).
-- **Impact on bevy_markup:** `svg::guarded` turns the panic into
-  `SvgError::Panicked`: the load fails. Under libFuzzer any panic is a
-  crash, so the `svg` target can report it.
+- **Impact on bevy_markup:** before the workaround, the load failed with
+  `SvgError::Panicked` (`guarded`), and libFuzzer counted it a crash
+  ([bug_0192](bug_0192.md)).
+- **Local workaround:** `svg_bounds::check_values` refuses an
+  `feTurbulence` whose `baseFrequency` holds a non-finite `f32` before usvg
+  runs (`SvgError::OutOfRange`). A number past `f64` fails svgtypes' parse
+  and usvg ignores the attribute, so that isn't refused. Drop the check
+  once usvg handles it.
 - **PR sketch:** treat a non-finite frequency like a negative one (keep the
   default), or use `PositiveF32::new(x).unwrap_or_default()`.
+
+## U27 — tiny-skia: the cubic clipper unwraps a `t` of 1.0
+
+- **Project:** linebender/tiny-skia 0.12.0.
+- **Problem:** `edge_clipper.rs` (around line 568) `mono_cubic_closest_t`
+  bisects for the `t` where a monotonic cubic crosses a clip edge, until
+  the point is within 0.25 px. Between ~2²¹ and 2²² px the f32 spacing is
+  0.25 px or coarser, so the search never gets within tolerance and `t`
+  walks up to exactly 1.0. `NormalizedF32Exclusive::new(1.0).unwrap()` then
+  panics, in every build. Above 2²² `too_big_for_reliable_float_math`
+  draws such a cubic as a line, so only that band is affected.
+- **Reproduction:** `svg::tests::paths_far_outside_the_image_are_refused`'s
+  cubic (three cubics around 2·10⁶ px, `crispEdges`, stroke width 3), or
+  artifact `crash-13d520f9…` (a seed in `fuzz/seeds/svg/`).
+- **Local workaround:** as U24 (`MAX_SVG_EXTENT` is below 2²¹).
+- **PR sketch:** stop the bisection after a fixed number of steps and
+  clamp `t` into the exclusive range, or use an inclusive type there.
+
+## U28 — tiny-skia: release builds write outside the canvas (U24)
+
+- **Project:** linebender/tiny-skia 0.12.0.
+- **Problem:** with U24's wrapped row range and no debug assertion, the
+  scan converter writes coverage outside the canvas. Later code catches
+  it: `alpha_runs.rs` (around line 189) unwraps a `None`, or
+  `pipeline/mod.rs` (around line 205) slices out of range.
+- **Reproduction:** U24's inputs in a release build (`cargo fuzz run -O -s
+  none … svg <seed>`); artifact `crash-c7219239…` (a seed).
+- **Local workaround:** as U24.
+- **PR sketch:** fixed by U24's fix; report together.
 
 ## Not upstream bugs (recorded so they aren't re-filed)
 

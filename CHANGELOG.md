@@ -44,6 +44,13 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
     enormous radii; the limit is `svg::MAX_SVG_WORK`), and one whose
     pattern or marker inherits a `fill`, `stroke` or `marker` naming
     itself.
+  - a filter `feTurbulence` whose `baseFrequency` is too large to
+    represent fails to load with an error naming it, instead of a
+    renderer panic.
+  - an `.svg` that draws extremely far outside its image (more than
+    524,288 px past the edge at the drawn size: huge coordinates, radii,
+    stroke widths or transforms) fails to load with an error, instead of
+    a renderer panic, which release builds hit too.
 
 ### Fixed
 - A stylesheet, `style` attribute or `var()` value with deeply nested

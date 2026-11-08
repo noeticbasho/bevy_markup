@@ -221,6 +221,9 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0189](bug_0189.md) | Markers were converted once per vertex, unbounded | `src/svg_bounds.rs` | high | fixed: counted in the work bound | code reading during bug_0188's triage |
 | [bug_0190](bug_0190.md) | A huge-radius arc split into millions of curves | `src/svg_bounds.rs`; upstream svgtypes/kurbo (U22) | high | fixed: counted in the work bound | code reading during bug_0188's triage |
 | [bug_0191](bug_0191.md) | A pattern inheriting a fill naming itself overflowed the stack | `src/svg_bounds.rs`; upstream usvg (U23) | high | fixed: refused as a cycle | probing the bug_0188 fix |
+| [bug_0192](bug_0192.md) | An `feTurbulence` `baseFrequency` past `f32::MAX` panicked usvg, in release too | `src/svg_bounds.rs`; upstream usvg (U26) | high | fixed: refused before usvg runs | local cargo-fuzz `svg` run |
+| [bug_0193](bug_0193.md) | The work bound counted one cubic for a huge-radius arc that the simplifier, starting from a rounded point, split into ~3·10¹⁵ | `src/svg_bounds.rs` (`arc_curves`) | high | fixed: large radii count a whole turn | local cargo-fuzz `svg` run (OOM) |
+| [bug_0194](bug_0194.md) | tiny-skia panicked on paths far outside the image, in release builds too | `src/svg.rs` (`check_extent`) | high | fixed: drawings reaching past `MAX_SVG_EXTENT` are refused before drawing | release replay of the U24 seed; local cargo-fuzz `svg` run |
 
 ## Discovery session metadata: bug_0001–0005
 
@@ -468,7 +471,7 @@ settle (rebuild observed) and the resulting dump to match a reference model.
 - **Machine/toolchain:** Arch Linux (kernel 7.2.11), AMD Ryzen 7 9800X3D,
   rustc 1.98.1, `nightly-2026-09-09` for cargo-fuzz 0.13.2.
 
-## Discovery session metadata: bug_0188–0191 (2026-11-08)
+## Discovery session metadata: bug_0188–0194 (2026-11-08 to 2026-11-09)
 
 - **Method:** triage of the nightly workflow's failed `svg` fuzz job (run
   42471256114): the artifact was timed stage by stage with a throwaway
@@ -480,9 +483,17 @@ settle (rebuild observed) and the resulting dump to match a reference model.
   each confirmed with a generated input: bug_0189 (markers), bug_0190
   (arcs), and, while checking inherited paint servers, bug_0191 (a
   self-inheriting pattern, an ASan stack overflow). The fix was calibrated
-  in a release build without ASan (ADR 0040 §3).
+  in a release build without ASan (ADR 0040 §3). A local fork-mode fuzz
+  run of the fix found bug_0192 (usvg's `baseFrequency` unwrap), minimized
+  by hand against `parser/filter.rs`. A later local run, after `0daf648`,
+  found bug_0193 (a 30 GB allocation in svgtypes' arc simplifier), traced
+  with `-malloc_limit_mb` and a probe of the simplifier's endpoints.
+  Replaying the U24 seed in a release build (`-O -s none`) showed tiny-skia
+  panicking there too (bug_0194); reading tiny-skia's scan converter and
+  edge clipper found the two causes (UPSTREAM U24/U28, U27), and the
+  extent limit was set by drawing 10,000 random paths per magnitude.
 - **Discovery agent:** the nightly workflow (bug_0188); Claude Code
-  session, `claude-opus-5-5` (triage, bug_0189–0191).
+  session, `claude-opus-5-5` (triage, bug_0189–0194).
 - **Commit at discovery:** `ff99cc1`.
 - **Machine/toolchain:** Arch Linux (kernel 7.2.14), AMD Ryzen 7 9800X3D,
   rustc 1.98.1, cargo-fuzz on the current nightly; CI: `nightly-2026-09-09`.

@@ -502,6 +502,28 @@ pub fn svg(source: &[u8]) -> Result<String, String> {
     ))
 }
 
+/// Whether a panic is one of the known debug-build-only panics in resvg,
+/// which the `svg` fuzz target lets unwind into `svg::guarded` instead of
+/// aborting. Release builds don't panic there, and in debug builds
+/// `guarded` already turns the panic into an error. `file` is the panic
+/// location's path; the crate directory name pins the version, so a bump
+/// makes the fuzzer report it again until rechecked.
+///
+/// - UPSTREAM U20 (resvg #1185): resvg's turbulence overflows `i32`
+///   lattice indices after many octaves or on a huge `baseFrequency`
+///   (release wraps, then masks into range).
+///
+/// tiny-skia's far-off-canvas panics (U24, U27, U28) are not excused: they
+/// panic in release builds too, and `svg::check_extent` refuses their
+/// inputs before drawing, so one reaching tiny-skia is a miss to report.
+pub fn is_known_upstream_debug_panic(file: &str, message: &str) -> bool {
+    let file = file.replace('\\', "/");
+    file.contains("/resvg-0.49.0/")
+        && file.ends_with("/src/filter/turbulence.rs")
+        && message.starts_with("attempt to ")
+        && message.ends_with(" with overflow")
+}
+
 /// The `svg` loader's size and cost estimate at its default limits, without
 /// drawing: `(width, height, estimate)`. For calibrating the estimate
 /// against resvg's real render time (probe report §7).
@@ -587,4 +609,55 @@ pub fn svg_draw(tree: &SvgTree, width: u32, height: u32) -> Result<usize, String
 /// An inline `<svg>`'s preparation (namespaces, the cascade color).
 pub fn svg_prepare_inline(raw: &str) -> Option<String> {
     crate::svg::prepare_inline(raw, Some([255, 0, 0, 255]))
+}
+
+#[cfg(test)]
+mod svg_tests {
+    /// The input behind U20 (by `baseFrequency`) still panics in debug
+    /// builds with the message `is_known_upstream_debug_panic` excuses. When
+    /// upstream fixes it, this fails: drop the excuse. U24's input is
+    /// refused before tiny-skia draws it, so its panic is never excused.
+    #[test]
+    fn known_upstream_debug_panics_still_panic_as_excused() {
+        let svg = |body: &str| {
+            format!("<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'>{body}</svg>")
+        };
+        let arcs = "A1e9 1e9 0 1 1 1e9 0 A1e9 1e9 0 1 1 0 0 ".repeat(20);
+        let u24 = svg(&format!("<path d='M0 0 {arcs}'/>"));
+        let err = super::svg(u24.as_bytes()).expect_err("U24");
+        assert!(err.contains("too far outside the image"), "U24: {err}");
+        let u20 = svg(
+            "<filter id='f'><feTurbulence baseFrequency='1e20'/></filter><rect width='64' height='64' filter='url(#f)'/>",
+        );
+        let outcome = super::svg(u20.as_bytes());
+        if cfg!(debug_assertions) {
+            let err = outcome.expect_err("U20");
+            assert!(err.contains("with overflow"), "U20: {err}");
+            let panic = err.trim_start_matches("the SVG renderer panicked: ");
+            assert!(
+                super::is_known_upstream_debug_panic(
+                    "/r/resvg-0.49.0/src/filter/turbulence.rs",
+                    panic
+                ),
+                "U20: {panic}"
+            );
+        }
+        // Anything else still aborts the fuzz target.
+        assert!(!super::is_known_upstream_debug_panic(
+            "/r/tiny-skia-0.12.0/src/scan/path.rs",
+            "index out of bounds"
+        ));
+        assert!(!super::is_known_upstream_debug_panic(
+            "/r/usvg-0.49.0/src/parser/filter.rs",
+            "called `Option::unwrap()` on a `None` value"
+        ));
+        assert!(!super::is_known_upstream_debug_panic(
+            "/r/tiny-skia-0.12.0/src/scan/path.rs",
+            "assertion failed: edges[curr_idx].last_y >= curr_y as i32"
+        ));
+        assert!(!super::is_known_upstream_debug_panic(
+            "/r/resvg-0.50.0/src/filter/turbulence.rs",
+            "attempt to add with overflow"
+        ));
+    }
 }
