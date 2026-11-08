@@ -255,6 +255,8 @@ pub mod style;
 #[cfg(feature = "svg")]
 #[cfg_attr(docsrs, doc(cfg(feature = "svg")))]
 pub mod svg;
+#[cfg(feature = "svg")]
+mod svg_bounds;
 #[cfg(feature = "svg-text")]
 mod svg_fonts;
 pub mod template;

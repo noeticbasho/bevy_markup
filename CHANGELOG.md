@@ -37,7 +37,13 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   - images are capped at 4096 px per side;
   - a file that would recurse too deeply or cost too much to draw fails
     to load with an error saying why, instead of crashing or stalling the
-    app.
+    app;
+  - so does a file that would expand too far before drawing even starts
+    (`<use>` copies of copies, a marker repeated on every vertex of long
+    paths, patterns and gradients inherited by many shapes, arcs with
+    enormous radii; the limit is `svg::MAX_SVG_WORK`), and one whose
+    pattern or marker inherits a `fill`, `stroke` or `marker` naming
+    itself.
 
 ### Fixed
 - A stylesheet, `style` attribute or `var()` value with deeply nested

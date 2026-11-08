@@ -44,7 +44,7 @@ text-input = ["bevy/bevy_ui_widgets", "bevy/keyboard"]
 # `<img src="x.svg">`, `border-image`/`background-image: url(x.svg)` and
 # 9-slice images. resvg without its default features: no text (fonts), no
 # raster decoders, no svgz. Opt-in: apps that don't use SVG pay nothing.
-svg = ["dep:resvg", "dep:roxmltree", "dep:simplecss", "dep:wgpu-types"]
+svg = ["dep:resvg", "dep:roxmltree", "dep:simplecss", "dep:svgtypes", "dep:wgpu-types"]
 # SVG `<text>` (ADR 0038 §6): resvg's text stack (fontdb, harfrust,
 # skrifa), fed the font files registered in `FontFamilies` plus Bevy's
 # default font. Its own feature: icon-only apps don't pay for it.
@@ -141,6 +141,12 @@ resvg = { version = "0.49.0", default-features = false, optional = true }
 # simplecss_and_roxmltree` fails if Cargo.lock ever holds two.
 roxmltree = { version = "0.21.2", optional = true }
 simplecss = { version = "0.2.2", optional = true }
+# usvg's path-data, length and font parsers, for the `svg` loader's
+# conversion-work bound (ADR 0040): path data is walked with the parser
+# usvg's `SimplifyingPathParser` runs on, so the arcs and segments counted
+# are the ones usvg builds. The same version usvg resolves (one copy in
+# Cargo.lock; `svg::tests::usvg_and_the_depth_check_share_…` checks it).
+svgtypes = { version = "0.16.2", optional = true }
 # Only for the `dev-tools` feature: the examples' QA tool surface — localhost
 # BRP + MCP (bevy_mcp_harness) so an agent can playtest the examples:
 # `game/screenshot` (the examples' README screenshots), `game/ui`, input

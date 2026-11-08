@@ -433,7 +433,10 @@ SVG is untrusted input, like every other loader input here. The probe
 - **Parse limits.** roxmltree rejects entity loops (depth 10, 255
   references per entity). usvg rejects trees over 1,000,000 nodes
   counted after `<use>` expansion. That stopped a 10⁷-node `<use>` bomb
-  in 0.06 s. Memory stays proportional to input size.
+  in 0.06 s. Memory stays proportional to input size. (Amended
+  2026-11-08: a fan-out *under* the limit still converts for seconds, and
+  markers and arcs aren't counted at all; ADR 0040 bounds the conversion's
+  work before usvg runs.)
 - **A static recursion-depth check before usvg converts** (revised during
   step 1, probe §6). On a 2 MB thread (Bevy's task-pool default), usvg
   0.49's converter overflows the stack at a few KB of input:

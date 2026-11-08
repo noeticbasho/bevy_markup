@@ -42,7 +42,7 @@ never reach library users. A missing feature shows up in `cargo check --lib`.
 | `ActiveLocale(Option<Handle<LocaleBundle>>)` | Resource | Fluent bundle; `None` = no localization; swap = language |
 | `FontFamilies` / `FontFaces` / `GenericFamily` | Resource + types | CSS `font-family` name → faces: font files or system families (any `FontSource`; for system families bold/italic are requested via `TextFont` weight/style), + generic keyword mapping. A CSS list resolves to every registered family in order and composes Bevy 0.20's per-glyph fallback list (ADR 0015) |
 | `HtmlTemplate`, `Stylesheet`, `NineSlice`, `LocaleBundle` | Assets | `.html`/`.htm`/`.md`/`.markdown`, `.css`, `*.slice.ron`, `*.ftl.ron` |
-| `SvgLoaderSettings { scale }` | Loader settings (`svg` feature) | `.svg` → `Image` (`svg.rs` `SvgLoader`, ADR 0038): drawn on the CPU at intrinsic size × `scale` (an `<img>` redrawn at its displayed px), ≤ `MAX_SVG_SIDE` per side; refusing `<image href>` resolver, `recursion_depth` check (≤ 256, U17), render-cost budget (`MAX_SVG_COST`); typed `Image` loads coexist with other crates' `.svg` loaders |
+| `SvgLoaderSettings { scale }` | Loader settings (`svg` feature) | `.svg` → `Image` (`svg.rs` `SvgLoader`, ADR 0038): drawn on the CPU at intrinsic size × `scale` (an `<img>` redrawn at its displayed px), ≤ `MAX_SVG_SIDE` per side; refusing `<image href>` resolver, depth and conversion-work bounds before usvg runs (`svg_bounds`: depth ≤ 256, U17; work ≤ `MAX_SVG_WORK`, ADR 0040), render-cost budget (`MAX_SVG_COST`); typed `Image` loads coexist with other crates' `.svg` loaders |
 | `NineSliceFrame(Handle<NineSlice>)` | Component | 9-slice image as a node's border-box background (non-HTML nodes; HTML uses CSS `border-image`) |
 | `HtmlCustomElementsExt::define_html_element(name, system)`, `ElementConnected { entity, root, name, dataset }` | App ext, system input | `is="<name>"` customized built-ins: the system (`In<ElementConnected>`, `data-*` attributes as `dataset`) runs on every spawn of the element, in document order, before `HtmlUiBuilt`; not on restyles |
 | `HtmlWorldAnchor { target, offset, pivot, camera }`, `HtmlWorldAnchorView { distance, on_screen }` | Component | keeps a UI root's `pivot` (fraction of its size, default bottom center) over `target`'s translation + `offset` projected through `camera` / its `UiTargetCamera` / the default UI camera (viewport-relative and `UiScale`-divided: offset viewports and scale factors read correctly); owns its `Visibility` (hidden behind the camera, off screen, or over an invisible target); despawned with `target`; `place_world_anchored`, `PostUpdate` before `UiSystems::Prepare` (last frame's transforms) |
@@ -131,12 +131,27 @@ src/
                    paths with `<text>` (`note_text`) and `set_changed`s `FontFamilies` so
                    inline text (keyed by the set's generation) is re-collected; the next run
                    sees the same signature (no loop). System families: default font
-  svg.rs           (`svg` feature, ADR 0038) `.svg` → `Image` loader: `parse` (roxmltree once, as
-                   usvg configures it → `recursion_depth`: longest path over nesting + url(#…)/href
-                   edges, `<style>` rules matched by simplecss like usvg, cycles refused, ≤ 256
-                   units ≈ 800 KB debug stack — usvg's converter overflows a 2 MB thread on a few
-                   KB of references, UPSTREAM U17 → `usvg::Tree::from_xmltree` on the same
-                   document), refusing `<image href>` resolver (usvg's default reads any file,
+  svg_bounds.rs    (`svg` feature, ADR 0040) `bounds`: one graph over the document's elements
+                   (parent → child, url(#…)/href references, `<style>` rules matched by simplecss
+                   like usvg, and — added by a topological inheritance walk — shape/text →
+                   inherited paint server or marker, so a pattern inheriting itself is a cycle,
+                   bug_0191). `depth`: longest weighted path, ≤ `MAX_DEPTH` 256 units ≈ 800 KB
+                   debug stack (usvg's converter overflows a 2 MB thread on a few KB of
+                   references, UPSTREAM U17). `work`: Σ instances × own work, instances = paths
+                   from the root with edge multiplicities (`<use>` copies 1, marker = the shape's
+                   segments + 2 — per vertex, bug_0189; paint server 0 — converted once, a
+                   shape's own work gains 2 × the server's content); own work = 16 per element,
+                   1 per stop, 4 per path segment, (arc cubics)²/64 per path arc (svgtypes'
+                   quadratic drain), 16 per text byte. Segments are counted, never generated:
+                   `path_segments` walks svgtypes' raw `PathParser` tracking the point like the
+                   simplifier, each arc's cubics by kurbo's arithmetic (bug_0190, U22); shape
+                   radii resolve like usvg's `convert_length` (`em` against the inherited
+                   font-size, `%` against the inherited viewport). One unit ≈ 60 ns of release
+                   conversion (ADR 0040 §3)
+  svg.rs           (`svg` feature, ADR 0038) `.svg` → `Image` loader: `parse`/`parse_within`
+                   (roxmltree once, as usvg configures it → `svg_bounds::bounds`: depth ≤ 256,
+                   work ≤ `MAX_SVG_WORK` 2²³ (`Limits::work`; the fuzz harness uses 1/16) →
+                   `usvg::Tree::from_xmltree` on the same document), refusing `<image href>` resolver (usvg's default reads any file,
                    U19), `raster_size` (side cap before allocating: tiny-skia aborts on a failed
                    allocation), `estimate_cost` (resvg's layer/filter/mask/clip model, early exit
                    at `MAX_SVG_COST`; calibrated in docs/agents/performance/adr-0038-probe.md §7),
@@ -311,7 +326,9 @@ examples/
                    features; with `--features svg`: SVG icons, SVG images), security
                    (nested rules, deep DOM, var()/grid/Markdown/selector/sibling/entity
                    bombs, hostile args, args-JSON injection, remote sources; with `svg`:
-                   SVG bombs, the `svg-refused` check), correctness (`TwinKind`: a fresh twin for reuse and
+                   SVG bombs — chained patterns, a `<use>` cycle, octaves, nesting, laughs,
+                   and ADR 0040's fan-out, markers, arc and self-pattern —, the `svg-refused`
+                   check), correctness (`TwinKind`: a fresh twin for reuse and
                    selectors, a forced full restyle under focus churn, a reversed-order
                    twin compared per row; plus `reuse` via `Skeleton::last_reuse`,
                    `quiet` (idle: no build/restyle/`Node` write), `linear` (N vs 4N,

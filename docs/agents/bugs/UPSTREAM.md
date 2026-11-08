@@ -30,11 +30,16 @@ the issue may already be fixed or reported.
 | U14 | lightningcss | Nested `light-dark(` and `calc(` around a `var()` parse in exponential time ([bug_0179](bug_0179.md)) | a few hundred bytes of CSS stall the load for minutes to hours | nesting pre-scan bounds `(…)` at 8 (`MAX_CSS_PAREN_NESTING`) | reported upstream by others (#1382, #1389); PR #1383 open for #1382 |
 | U15 | lightningcss | The parser recurses once per block with no bound ([bug_0092](bug_0092.md), [bug_0179](bug_0179.md)) | stack overflow (abort) from a few KB of nested blocks | nesting pre-scan bounds all blocks at 32 (`MAX_CSS_NESTING`) | reported upstream by others (#1297, #1155, #1092) |
 | U16 | tera | The compiler recurses once per operator of an expression; the 2.4.0 cap (256 operations, Keats/tera#1035) still overflows a 2 MB thread in debug builds from 136 ([bug_0182](bug_0182.md)) | stack overflow (abort) at template load in unoptimized builds | a tag over 64 operators fails the load before Tera compiles it (`tera_tag_over_limit`, `src/template.rs`) | unreported (follow-up to the closed #1035) |
-| U17 | usvg (resvg) | Converter recursion through references and nesting is unbounded | stack overflow (abort) from a few KB of SVG on a 2 MB thread (`svg` feature) | static recursion-depth check before conversion (`svg::recursion_depth`) | unreported; resvg #1223 (unreleased) bounds XML nesting and `<use>` only |
+| U17 | usvg (resvg) | Converter recursion through references and nesting is unbounded | stack overflow (abort) from a few KB of SVG on a 2 MB thread (`svg` feature) | static recursion-depth check before conversion (`svg_bounds::bounds`) | unreported; resvg #1223 (unreleased) bounds XML nesting and `<use>` only |
 | U18 | roxmltree | 0.21.1's tokenizer recursed once per nesting level | stack overflow at ~150 levels in debug on a 2 MB thread (`svg` feature) | version floor `roxmltree >= 0.21.2` | fixed upstream (0.21.2) |
 | U19 | usvg (resvg) | The default `ImageHrefResolver` reads any file path | an SVG reads any file the process can and embeds it (`svg` feature) | a resolver that resolves nothing | unreported (by design; worth a docs warning) |
 | U20 | resvg | `feTurbulence` overflows `i32` after enough octaves (#1185, open; #937 a similar multiply overflow) | panic where overflow checks are on (debug builds, fuzzing): a failed load, or a crash through a redraw task (`svg` feature) | `svg::guarded` (catch_unwind around usvg/resvg) | reported upstream (#1185), open |
 | U21 | astral-tl | `/` is a name character: `<b/>` is an unclosed element named `b/` ([bug_0185](bug_0185.md)) | a `<br/>` merged the rest of the document into one block | `template::normalize_self_closing` before every `tl` parse | unreported |
+| U22 | svgtypes / kurbo | An arc splits into `(11·r)^⅙` cubics at kurbo's absolute 0.1 tolerance, and svgtypes' simplifier drains them with `Vec::remove(0)` ([bug_0190](bug_0190.md)) | one 40-byte arc converts for seconds or never finishes (`svg` feature) | counted before conversion in the work bound (`svg_bounds::bounds`, ADR 0040) | unreported |
+| U23 | usvg (resvg) | A pattern whose content inherits a paint naming itself recurses until the stack overflows ([bug_0191](bug_0191.md)) | stack overflow (abort) from 230 bytes (`svg` feature) | inherited references are edges of the cycle check (`svg_bounds::bounds`) | unreported |
+| U24 | tiny-skia | `scan::path::walk_edges` `debug_assert!(last_y >= curr_y)` fails on huge coordinates | panic where debug assertions are on (debug builds, fuzzing): a failed load (`svg` feature) | `svg::guarded` (catch_unwind) | unreported |
+| U25 | usvg (resvg) | No bound on conversion work: `<use>` copies under the million-node limit, markers per vertex ([bug_0188](bug_0188.md), [bug_0189](bug_0189.md)) | seconds to minutes of conversion from a few KB (`svg` feature) | the work bound (`svg_bounds::bounds`, `MAX_SVG_WORK`, ADR 0040) | unreported (by design; a conversion budget option would replace the model) |
+| U26 | usvg (resvg) | `feTurbulence` with a `baseFrequency` past `f32::MAX` unwraps `PositiveF32::new(inf)` | panic in any build: a failed load (`svg` feature); a crash under libFuzzer | `svg::guarded` (catch_unwind) | unreported |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -402,7 +407,7 @@ CI clippy command and workspace tests pass on both.
   with the existing `NodesLimitReached` past `Options::max_depth` — the
   option #1223 introduced, so callers on small stacks set one number.
 - **Local workaround:** `svg::parse` parses the XML with roxmltree,
-  bounds the recursion with `svg::recursion_depth` (longest path over
+  bounds the recursion with `svg_bounds::bounds` (longest path over
   nesting and `url(#…)`/`href` edges, `<style>` rules matched with
   simplecss as usvg matches them, cycles refused) and only then calls
   `Tree::from_xmltree` on the same document. Keep it until a usvg
@@ -477,6 +482,93 @@ CI clippy command and workspace tests pass on both.
   `/>` after the name.
 - **Local workaround:** `template::normalize_self_closing` (a space
   before such a `/>`) in `HtmlDocument::parse` and `walk_translation`.
+
+## U22 — svgtypes / kurbo: arc subdivision grows with the radius, and the drain is quadratic
+
+- **Project:** RazrFalcon/svgtypes 0.16.2 (`SimplifyingPathParser`) with
+  linebender/kurbo 0.13.1 (`Arc::to_cubic_beziers`); usvg 0.49 builds
+  shapes' arcs through tiny-skia's `PathBuilder::arc_to` with the same
+  kurbo call.
+- **Problem:** the tolerance is an absolute 0.1 user units, and
+  `append_iter` makes `ceil(max((1.1163·r/0.1)^⅙, 4) · sweep/2π)` cubics:
+  1.5·10⁵ for one arc at `r = 1e30`, ~7·10¹¹ at `r = 1e70` (past ~1e77,
+  `rx·ry` squared overflows and the count is NaN, so 0). The simplifier
+  pushes every cubic into `buffer` and returns them with
+  `self.buffer.remove(0)`, which moves the rest each time: quadratic.
+- **Reproduction:** `<path d='M0 0 A1e30 1e30 0 1 1 1e30 0'/>` converts
+  for 4.3 s (ASan); `A3e38 3e38 0 1 1 3e38 0` runs past 100 s.
+- **Local workaround:** `svg_bounds::path_segments` counts each arc's
+  cubics with kurbo's arithmetic (walking svgtypes' raw `PathParser`), and
+  the work bound refuses the document before usvg runs (ADR 0040).
+- **PR sketch:** svgtypes: drain with a `VecDeque` (or an index), and cap
+  the cubics per arc (a curve is never visibly better past a few hundred).
+  kurbo/usvg: a tolerance relative to the radius, or to the output scale.
+
+## U23 — usvg: a pattern inheriting a paint naming itself recurses forever
+
+- **Project:** linebender/resvg, crate usvg. Affected: 0.49.0.
+- **Problem:** converting a pattern converts its content. A shape inside
+  that inherits `fill`/`stroke` naming the pattern from an ancestor of the
+  pattern converts the pattern again, without end: the paint cache is
+  filled only after the content converts. svgtree's recursive-pattern
+  check looks at the content's own attributes, not inherited ones.
+- **Reproduction:** `<g fill='url(#p)'><pattern id='p' width='10'
+  height='10' patternUnits='userSpaceOnUse'><rect width='5'
+  height='5'/></pattern><rect width='64' height='64'/></g>` overflows the
+  stack.
+- **Local workaround:** inherited paint servers are edges of
+  `svg_bounds::bounds`' graph, so the document is a refused cycle.
+- **PR sketch:** carry the patterns being converted in `State` (as
+  `parent_markers` does for markers) and resolve a nested reference to
+  one of them as `none`.
+
+## U24 — tiny-skia: a scan-converter debug assertion fails on huge coordinates
+
+- **Project:** linebender/tiny-skia 0.12.0.
+- **Problem:** `scan/path.rs` `walk_edges`
+  `debug_assert!(edges[curr_idx].last_y >= curr_y as i32)` fails for paths
+  whose coordinates are far outside the canvas (fixed-point edges
+  overflow). Release builds skip the check and draw on.
+- **Reproduction:** a 64 × 64 SVG with
+  `<path d='M0 0 A1e9 1e9 0 1 1 1e9 0 A1e9 1e9 0 1 1 0 0 …'/>` (20 such
+  pairs), drawn by the `svg` fuzz target (debug assertions on).
+- **Impact on bevy_markup:** `svg::guarded` turns the panic into
+  `SvgError::Panicked` (a failed load, or no redraw). Under libFuzzer any
+  panic is a crash, so the `svg` target can report it, as it can U20.
+- **Local workaround:** none beyond `guarded`.
+
+## U25 — usvg: no bound on conversion work
+
+- **Project:** linebender/resvg, crate usvg. Affected: 0.49.0.
+- **Problem:** usvg's only size limit counts its tree's nodes after `<use>`
+  copies (a million). Conversion is ~7 µs per node in release, so a fan-out
+  under the limit converts for seconds (bug_0188). Markers are converted per
+  path vertex and aren't counted at all (bug_0189). Not a defect in usvg's
+  terms: it has no notion of a budget.
+- **Local workaround:** `svg_bounds::bounds` estimates the conversion's work
+  from the XML (instances over the reference graph, inherited markers and
+  paint servers, path segments), refused over `MAX_SVG_WORK` (ADR 0040).
+- **PR sketch:** an `Options::max_work`-style budget counted by the
+  converter itself (nodes built plus segments), failing with an error past
+  it. With it, the model here could go.
+
+## U26 — usvg: an infinite `baseFrequency` panics
+
+- **Project:** linebender/resvg, crate usvg. Affected: 0.49.0.
+- **Problem:** `parser/filter.rs` `convert_turbulence` parses
+  `baseFrequency` as a number list, converts to `f32` (a value past
+  `f32::MAX` becomes `inf`), checks only `is_sign_positive()` and calls
+  `PositiveF32::new(x).unwrap()`, which is `None` for infinity. An
+  unconditional `unwrap`: release builds panic too.
+- **Reproduction:** `<filter id='f'><feTurbulence
+  baseFrequency='1e40'/></filter><rect width='8' height='8'
+  filter='url(#f)'/>`. Found by a local `svg` fuzz run on 2026-11-08
+  (artifact `crash-05abaafb…`, a 557-byte filter chain).
+- **Impact on bevy_markup:** `svg::guarded` turns the panic into
+  `SvgError::Panicked`: the load fails. Under libFuzzer any panic is a
+  crash, so the `svg` target can report it.
+- **PR sketch:** treat a non-finite frequency like a negative one (keep the
+  default), or use `PositiveF32::new(x).unwrap_or_default()`.
 
 ## Not upstream bugs (recorded so they aren't re-filed)
 

@@ -91,8 +91,19 @@
 //!   the loader estimates the cost from the parsed document; one over
 //!   [`MAX_SVG_COST`] fails to load, with an error naming the estimate.
 //!   resvg can't stop a render once it starts, so the estimate is the only
-//!   bound. Structural bombs (entity expansion, deep nesting, more than a
-//!   million nodes after `<use>` expansion) are rejected by usvg's parser.
+//!   bound.
+//! - **Conversion work.** Before the document is converted at all, the
+//!   loader bounds what conversion would build: each `<use>` copies its
+//!   target, a marker is converted once per vertex of every path carrying
+//!   it, an inherited pattern or gradient once per shape, and an elliptical
+//!   arc splits into more curves the larger its radius. A document whose
+//!   estimate exceeds [`MAX_SVG_WORK`] (a few KB can describe millions of
+//!   copies) fails to load, with an error naming the estimate.
+//! - **Structure.** Nesting deeper than usvg's converter can recurse on a
+//!   2 MB stack, and a reference cycle — including a pattern or marker that
+//!   inherits a `fill`, `stroke` or `marker-*` naming itself from an
+//!   ancestor — fail to load. Entity expansion past usvg's limits fails
+//!   in usvg's parser.
 //!
 //! # Another `.svg` loader in the app
 //!
@@ -115,6 +126,8 @@ use resvg::{tiny_skia, usvg};
 use serde::{Deserialize, Serialize};
 use usvg::roxmltree;
 
+use crate::svg_bounds;
+
 /// The largest width or height an SVG is drawn at, in px. A larger
 /// document (or a larger [`SvgLoaderSettings::scale`]) is scaled down to fit,
 /// keeping its aspect ratio. Also keeps the texture within every GPU's
@@ -128,6 +141,16 @@ pub const MAX_SVG_SIDE: u32 = 4096;
 /// Calibrated in `docs/agents/performance/adr-0038-probe.md` §7: at most
 /// ~3.8 ns of release-build drawing per unit (0.5 s at the limit).
 pub const MAX_SVG_COST: u64 = 1 << 27;
+
+/// The largest estimated work usvg's conversion of an SVG may take, before
+/// it's drawn: element instances after `<use>` copies, markers (per path
+/// vertex), patterns and gradients (per shape inheriting them), and each
+/// instance's path segments (an elliptical arc splits into more cubics the
+/// larger its radius). One element instance is 16 units, one segment 4, a
+/// unit ~60 ns of release-build conversion (ADR 0040): ~0.5 s at the limit,
+/// like [`MAX_SVG_COST`]'s drawing. A document of 50 000 elements and a
+/// million path segments fits.
+pub const MAX_SVG_WORK: u64 = 1 << 23;
 
 /// Settings for loading an `.svg` as an [`Image`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -206,6 +229,11 @@ pub(crate) enum SvgError {
         depth: u32,
         max: u32,
     },
+    /// usvg's conversion would build too much ([`MAX_SVG_WORK`]).
+    TooLarge {
+        work: u64,
+        max: u64,
+    },
     ReferenceCycle,
     TooManyReferences {
         max: usize,
@@ -232,10 +260,17 @@ impl fmt::Display for SvgError {
                 "nests too deeply (depth {depth}, limit {max}; nested elements count 1, \
                  nested <svg> 2, each followed url(#…)/href reference 6 more)"
             ),
+            Self::TooLarge { work, max } => write!(
+                f,
+                "expands too far to convert (estimated work {work}, limit {max}): \
+                 reduce its <use> copies, its markers × path vertices, the shapes \
+                 inheriting a pattern or gradient, or its arcs' radii"
+            ),
             Self::ReferenceCycle => {
                 write!(
                     f,
-                    "a url(#…)/href reference leads back to an element it came from"
+                    "a url(#…)/href reference (or an inherited fill, stroke or marker) \
+                     leads back to an element it came from"
                 )
             }
             Self::TooManyReferences { max } => {
@@ -253,12 +288,15 @@ impl std::error::Error for SvgError {}
 pub(crate) struct Limits {
     pub side: u32,
     pub cost: u64,
+    /// The conversion budget when the bytes are parsed too.
+    pub work: u64,
 }
 
 impl Limits {
     pub const DEFAULT: Limits = Limits {
         side: MAX_SVG_SIDE,
         cost: MAX_SVG_COST,
+        work: MAX_SVG_WORK,
     };
 }
 
@@ -332,19 +370,29 @@ fn options(fonts: &SvgFonts) -> usvg::Options<'static> {
 
 /// Parses an SVG the way `usvg::Tree::from_data` does, with one step in
 /// between: the XML is parsed once (roxmltree, configured as usvg's
-/// `from_str` configures it), [`recursion_depth`] bounds what usvg would
-/// recurse through, and only then does usvg convert that same document
-/// (`Tree::from_xmltree`). One parse, so the check and usvg can't disagree
-/// about the document's structure (a DTD entity expanding into markup, say).
+/// `from_str` configures it), [`svg_bounds::bounds`] bounds how deeply usvg
+/// would recurse and how much it would build, and only then does usvg
+/// convert that same document (`Tree::from_xmltree`). One parse, so the
+/// check and usvg can't disagree about the document's structure (a DTD
+/// entity expanding into markup, say).
 #[cfg(any(test, feature = "fuzzing"))]
 pub(crate) fn parse(bytes: &[u8]) -> Result<usvg::Tree, SvgError> {
     parse_with(bytes, &SvgFonts::default())
 }
 
 /// [`parse`] with the fonts `<text>` resolves against.
-#[hotpath::measure]
 pub(crate) fn parse_with(bytes: &[u8], fonts: &SvgFonts) -> Result<usvg::Tree, SvgError> {
-    guarded(|| parse_unguarded(bytes, fonts))
+    parse_within(bytes, fonts, MAX_SVG_WORK)
+}
+
+/// [`parse_with`] within a conversion budget other than [`MAX_SVG_WORK`].
+#[hotpath::measure]
+pub(crate) fn parse_within(
+    bytes: &[u8],
+    fonts: &SvgFonts,
+    max_work: u64,
+) -> Result<usvg::Tree, SvgError> {
+    guarded(|| parse_unguarded(bytes, fonts, max_work))
 }
 
 /// Runs usvg or resvg work, turning a panic into [`SvgError::Panicked`].
@@ -369,7 +417,7 @@ fn guarded<T>(work: impl FnOnce() -> Result<T, SvgError>) -> Result<T, SvgError>
     })
 }
 
-fn parse_unguarded(bytes: &[u8], fonts: &SvgFonts) -> Result<usvg::Tree, SvgError> {
+fn parse_unguarded(bytes: &[u8], fonts: &SvgFonts, max_work: u64) -> Result<usvg::Tree, SvgError> {
     if bytes.starts_with(&[0x1f, 0x8b]) {
         return Err(SvgError::Parse(usvg::Error::SvgzFeatureNotEnabled));
     }
@@ -381,232 +429,20 @@ fn parse_unguarded(bytes: &[u8], fonts: &SvgFonts) -> Result<usvg::Tree, SvgErro
     };
     let document = roxmltree::Document::parse_with_options(text, xml_options)
         .map_err(|err| SvgError::Parse(usvg::Error::ParsingFailed(err)))?;
-    let depth = recursion_depth(&document, MAX_REFERENCES)?;
-    if depth > MAX_DEPTH {
+    let bounds = svg_bounds::bounds(&document, svg_bounds::MAX_REFERENCES)?;
+    if bounds.depth > svg_bounds::MAX_DEPTH {
         return Err(SvgError::TooDeep {
-            depth,
-            max: MAX_DEPTH,
+            depth: bounds.depth,
+            max: svg_bounds::MAX_DEPTH,
+        });
+    }
+    if bounds.work > max_work {
+        return Err(SvgError::TooLarge {
+            work: bounds.work,
+            max: max_work,
         });
     }
     usvg::Tree::from_xmltree(&document, &options(fonts)).map_err(SvgError::Parse)
-}
-
-/// The deepest recursion [`recursion_depth`] lets through, in its units of
-/// roughly 3 KB of debug-build stack (about 1 KB in release): at most ~800
-/// KB, inside the 2 MB of the threads Bevy loads assets on, with room for
-/// the caller's frames. Measured per construct in the probe report §6;
-/// `accepted_depths_fit_a_two_megabyte_stack` checks it.
-const MAX_DEPTH: u32 = 256;
-/// Weight of one nested element (usvg's converter: ~3.0 KB per `<g>` level
-/// in debug).
-const DEPTH_ELEMENT: u32 = 1;
-/// Weight of one nested `<svg>` (a new viewport: ~5.7 KB in debug).
-const DEPTH_SVG: u32 = 2;
-/// Weight of following one reference into its target (paint servers,
-/// masks, clip paths, markers, filters, `<use>`, `feImage`: up to ~18.5 KB
-/// per hop in debug, counting the elements the hop passes through).
-const DEPTH_REFERENCE: u32 = 6;
-/// More reference edges than this (CSS rules × the elements they match,
-/// plus attributes) fail the load: the graph's memory stays bounded.
-const MAX_REFERENCES: usize = 1 << 20;
-
-/// An upper bound on how deeply usvg 0.49 (converting) and resvg (drawing)
-/// recurse through `document`, in units of [`DEPTH_ELEMENT`].
-///
-/// usvg's converter recurses once per nested element and once per
-/// reference it follows into a target's content; neither is bounded by
-/// anything but its 1024-level nesting check and a million nodes, and a
-/// few KB of references overflow a 2 MB stack (probe report §6, upstream
-/// UPSTREAM.md U17). This walks the graph whose edges are parent → child
-/// and element → referenced element, and returns its longest weighted
-/// path. A reference is any `url(#id)` or `#id` value in any attribute
-/// (`style` included) or in the declarations of a `<style>` rule whose
-/// selector matches the element — matched with simplecss, as usvg applies
-/// them (`svgtree/parse.rs` `resolve_css`). Over-approximating is safe (a
-/// `fill="#fff"` beside an element `id="fff"` adds an edge); missing a
-/// reference usvg follows is not.
-///
-/// A cycle is an error: usvg drops some cyclic links but expands `<use>`
-/// cycles until its depth limit, which is past the stack. Iterative
-/// throughout (Kahn's algorithm), so the check itself can't overflow.
-#[hotpath::measure]
-pub(crate) fn recursion_depth(
-    document: &roxmltree::Document,
-    max_references: usize,
-) -> Result<u32, SvgError> {
-    let elements: Vec<roxmltree::Node> = document
-        .descendants()
-        .filter(|node| node.is_element())
-        .collect();
-    let mut index = vec![
-        u32::MAX;
-        document
-            .descendants()
-            .map(|node| node.id().get_usize() + 1)
-            .max()
-            .unwrap_or(0)
-    ];
-    for (i, element) in elements.iter().enumerate() {
-        index[element.id().get_usize()] = i as u32;
-    }
-    let mut ids: std::collections::HashMap<&str, Vec<u32>> = std::collections::HashMap::new();
-    for (i, element) in elements.iter().enumerate() {
-        if let Some(id) = element.attribute("id") {
-            ids.entry(id).or_default().push(i as u32);
-        }
-    }
-    // The rules that can attach a reference, as usvg collects them.
-    let mut sheet = simplecss::StyleSheet::new();
-    for node in document
-        .descendants()
-        .filter(|node| node.has_tag_name("style"))
-    {
-        match node.attribute("type") {
-            Some("text/css") | None => {}
-            Some(_) => continue,
-        }
-        if let Some(text) = node.text() {
-            sheet.parse_more(text);
-        }
-    }
-    let rules: Vec<(&simplecss::Selector, Vec<&str>)> = sheet
-        .rules
-        .iter()
-        .filter_map(|rule| {
-            let mut targets = Vec::new();
-            for declaration in &rule.declarations {
-                reference_targets(declaration.value, &mut targets);
-            }
-            (!targets.is_empty()).then_some((&rule.selector, targets))
-        })
-        .collect();
-
-    let weight = |element: &roxmltree::Node| {
-        if element.has_tag_name("svg") {
-            DEPTH_SVG
-        } else {
-            DEPTH_ELEMENT
-        }
-    };
-    let mut edges: Vec<Vec<(u32, u32)>> = vec![Vec::new(); elements.len()];
-    let mut edge_count = 0usize;
-    let mut targets = Vec::new();
-    for (i, element) in elements.iter().enumerate() {
-        for child in element.children().filter(|child| child.is_element()) {
-            edges[i].push((index[child.id().get_usize()], weight(&child)));
-        }
-        targets.clear();
-        for attribute in element.attributes() {
-            reference_targets(attribute.value(), &mut targets);
-        }
-        for (selector, rule_targets) in &rules {
-            if selector.matches(&XmlNode(*element)) {
-                targets.extend(rule_targets.iter().copied());
-            }
-        }
-        targets.sort_unstable();
-        targets.dedup();
-        for target in &targets {
-            for &to in ids.get(target).into_iter().flatten() {
-                edges[i].push((to, DEPTH_REFERENCE + weight(&elements[to as usize])));
-            }
-        }
-        edge_count += edges[i].len();
-        if edge_count > max_references {
-            return Err(SvgError::TooManyReferences {
-                max: max_references,
-            });
-        }
-    }
-
-    // Longest path over a topological order; a node left over is on a cycle.
-    let mut incoming = vec![0u32; elements.len()];
-    for list in &edges {
-        for &(to, _) in list {
-            incoming[to as usize] += 1;
-        }
-    }
-    let mut depth: Vec<u32> = elements.iter().map(weight).collect();
-    let mut ready: Vec<u32> = (0..elements.len() as u32)
-        .filter(|&i| incoming[i as usize] == 0)
-        .collect();
-    let mut done = 0usize;
-    let mut deepest = 0;
-    while let Some(from) = ready.pop() {
-        done += 1;
-        let at = depth[from as usize];
-        deepest = deepest.max(at);
-        for &(to, step) in &edges[from as usize] {
-            let to = to as usize;
-            depth[to] = depth[to].max(at.saturating_add(step));
-            incoming[to] -= 1;
-            if incoming[to] == 0 {
-                ready.push(to as u32);
-            }
-        }
-    }
-    if done < elements.len() {
-        return Err(SvgError::ReferenceCycle);
-    }
-    Ok(deepest)
-}
-
-/// Adds the ids `value` may reference: a value that is `#id` (an `href`),
-/// and every `url(#id)` in it (quoted or not; `url(` in any case).
-fn reference_targets<'a>(value: &'a str, targets: &mut Vec<&'a str>) {
-    let id = |rest: &'a str| {
-        let end = rest
-            .find(|c: char| c == ')' || c == '"' || c == '\'' || c.is_ascii_whitespace())
-            .unwrap_or(rest.len());
-        &rest[..end]
-    };
-    if let Some(rest) = value.trim_start().strip_prefix('#') {
-        targets.push(id(rest));
-    }
-    let bytes = value.as_bytes();
-    let mut at = 0;
-    while let Some(found) = bytes[at..]
-        .windows(4)
-        .position(|window| window.eq_ignore_ascii_case(b"url("))
-    {
-        let rest = value[at + found + 4..]
-            .trim_start_matches(|c: char| c.is_ascii_whitespace() || c == '"' || c == '\'');
-        if let Some(rest) = rest.strip_prefix('#') {
-            targets.push(id(rest));
-        }
-        at += found + 4;
-    }
-}
-
-/// usvg's `simplecss::Element` for roxmltree nodes (`svgtree/parse.rs`
-/// `XmlNode`), so `<style>` selectors match exactly what usvg applies.
-struct XmlNode<'a, 'input>(roxmltree::Node<'a, 'input>);
-
-impl simplecss::Element for XmlNode<'_, '_> {
-    fn parent_element(&self) -> Option<Self> {
-        self.0.parent_element().map(XmlNode)
-    }
-
-    fn prev_sibling_element(&self) -> Option<Self> {
-        self.0.prev_sibling_element().map(XmlNode)
-    }
-
-    fn has_local_name(&self, local_name: &str) -> bool {
-        self.0.tag_name().name() == local_name
-    }
-
-    fn attribute_matches(&self, local_name: &str, operator: simplecss::AttributeOperator) -> bool {
-        self.0
-            .attribute(local_name)
-            .is_some_and(|value| operator.matches(value))
-    }
-
-    fn pseudo_class_matches(&self, class: simplecss::PseudoClass) -> bool {
-        match class {
-            simplecss::PseudoClass::FirstChild => self.prev_sibling_element().is_none(),
-            _ => false,
-        }
-    }
 }
 
 /// The pixel size to draw `tree` at: intrinsic size × `scale`, rounded up,
@@ -642,7 +478,7 @@ pub(crate) fn rasterize_with(
     limits: Limits,
     fonts: &SvgFonts,
 ) -> Result<Raster, SvgError> {
-    let tree = parse_with(bytes, fonts)?;
+    let tree = parse_within(bytes, fonts, limits.work)?;
     let (width, height, downscaled) = raster_size(&tree, scale, limits.side)?;
     let (image, cost) = draw(&tree, width, height, limits)?;
     Ok(Raster {
@@ -1804,9 +1640,11 @@ mod tests {
             );
         }
         uses += "</defs><use href='#g7'/>";
+        // 10⁷ rects: refused by the work bound before usvg's own node
+        // limit (a million) would see them.
         assert!(matches!(
             draw(&svg(100, 100, &uses)),
-            Err(SvgError::Parse(_))
+            Err(SvgError::TooLarge { .. })
         ));
 
         // Past usvg's own 1024 levels; the depth check refuses it first.
@@ -1904,7 +1742,7 @@ mod tests {
             },
         )
         .unwrap();
-        recursion_depth(&document, MAX_REFERENCES)
+        svg_bounds::bounds(&document, svg_bounds::MAX_REFERENCES).map(|bounds| bounds.depth)
     }
 
     /// The deepest stack of `pick(i)` levels the check accepts, and the
@@ -1914,7 +1752,7 @@ mod tests {
         loop {
             levels.push(pick(levels.len()));
             let source = nest(&levels);
-            if matches!(depth_of(&source), Ok(depth) if depth > MAX_DEPTH) {
+            if matches!(depth_of(&source), Ok(depth) if depth > svg_bounds::MAX_DEPTH) {
                 assert!(
                     matches!(parse(source.as_bytes()), Err(SvgError::TooDeep { .. })),
                     "{levels:?}: past the limit but not refused"
@@ -1965,7 +1803,9 @@ mod tests {
             // (which aborts the process before this line). Each case is a
             // real chain at the limit, not an empty document.
             assert!(
-                levels.len() > 1 && depth <= MAX_DEPTH && depth > MAX_DEPTH / 2,
+                levels.len() > 1
+                    && depth <= svg_bounds::MAX_DEPTH
+                    && depth > svg_bounds::MAX_DEPTH / 2,
                 "{name}: {} levels, depth {depth}: {outcome:?}",
                 levels.len()
             );
@@ -2091,8 +1931,9 @@ mod tests {
         ));
     }
 
-    /// The recursion-depth check matches `<style>` rules with simplecss
-    /// as usvg does, so both must use the same simplecss. usvg keeps it
+    /// The depth and work bounds match `<style>` rules with simplecss and
+    /// walk path data with svgtypes as usvg does, so both must use the same
+    /// copies. usvg keeps it
     /// private (no type to check at compile time, unlike roxmltree, which
     /// comes from usvg's re-export, and cssparser, ADR 0039), so the
     /// lockfile is checked instead: one simplecss, the one usvg resolves.
@@ -2100,9 +1941,9 @@ mod tests {
     /// needs usvg to move to another simplecss, which arrives with a resvg
     /// bump here, and fails this test: bump `simplecss` in `Cargo.toml`.
     #[test]
-    fn usvg_and_the_depth_check_share_one_simplecss_and_roxmltree() {
+    fn usvg_and_the_depth_check_share_one_simplecss_roxmltree_and_svgtypes() {
         let lock = include_str!("../Cargo.lock");
-        for name in ["simplecss", "roxmltree"] {
+        for name in ["simplecss", "roxmltree", "svgtypes"] {
             let versions: Vec<&str> = lock
                 .split("[[package]]")
                 .filter(|package| package.contains(&format!("\nname = \"{name}\"\n")))
@@ -2296,5 +2137,207 @@ mod tests {
         masks += "<rect width='1' height='1' mask='url(#m60)'/>";
         // Without the bound this test doesn't finish.
         assert!(draw(&svg(1, 1, &masks)).is_err(), "drew a 2^60 mask tree");
+    }
+
+    fn too_large(source: &str) -> bool {
+        matches!(parse(source.as_bytes()), Err(SvgError::TooLarge { work, max }) if work > max)
+    }
+
+    /// bug_0188: `<use>` copies multiply per level. The nightly fuzz run's
+    /// input (minimized): 10 `<use>` per level, 5 levels, 10⁵ rects from
+    /// under 1 KB — 0.7 s of release-build conversion before the render
+    /// budget could refuse it, under usvg's million-node limit.
+    #[test]
+    fn use_fan_out_is_refused_before_conversion() {
+        // `levels` levels of ten `<use>`s each. usvg copies `<use>` content
+        // wherever it is, `<defs>` included: every level counts.
+        let fan_out = |levels: usize| {
+            let mut uses = String::from("<defs><g id='g0'><rect width='1' height='1'/></g>");
+            for i in 1..=levels {
+                uses += &format!(
+                    "<g id='g{i}'>{}</g>",
+                    format!("<use href='#g{}'/>", i - 1).repeat(10)
+                );
+            }
+            svg(64, 64, &format!("{uses}</defs><use href='#g{levels}'/>"))
+        };
+        let source = fan_out(5);
+        assert!(source.len() < 2048);
+        assert!(too_large(&source));
+        // Three levels (10³ rects) convert.
+        parse(fan_out(3).as_bytes()).unwrap();
+    }
+
+    /// bug_0189: a marker is converted once per vertex of each path that
+    /// carries it, including through inheritance. 44 KB: 4·10⁶ rects (over
+    /// two minutes of conversion before the fix).
+    #[test]
+    fn markers_count_per_vertex() {
+        let marker = format!(
+            "<defs><marker id='m'>{}</marker></defs>",
+            "<rect width='1' height='1'/>".repeat(1000)
+        );
+        let vertices = " 1 1".repeat(4000);
+        let direct = svg(
+            64,
+            64,
+            &format!("{marker}<path marker-mid='url(#m)' d='M0 0{vertices}'/>"),
+        );
+        assert!(direct.len() < 50_000);
+        assert!(too_large(&direct));
+        // Inherited from a group, and through a `<style>` rule.
+        let inherited = svg(
+            64,
+            64,
+            &format!("{marker}<g marker-mid='url(#m)'><path d='M0 0{vertices}'/></g>"),
+        );
+        assert!(too_large(&inherited));
+        let styled = svg(
+            64,
+            64,
+            &format!(
+                "<style>g {{ marker-mid: url(#m) }}</style>{marker}<g><path d='M0 0{vertices}'/></g>"
+            ),
+        );
+        assert!(too_large(&styled));
+        // Through a `<use>` whose content inherits it.
+        let used = svg(
+            64,
+            64,
+            &format!(
+                "{marker}<defs><path id='p' d='M0 0{vertices}'/></defs><use href='#p' marker-mid='url(#m)'/>"
+            ),
+        );
+        assert!(too_large(&used));
+        // An arrowhead on a few hundred lines converts.
+        let arrows = svg(
+            64,
+            64,
+            &format!(
+                "<defs><marker id='a'><path d='M0 0 L10 5 L0 10 Z'/></marker></defs><g marker-end='url(#a)'>{}</g>",
+                "<line x1='0' y1='0' x2='10' y2='10'/><polyline points='0 0 5 5 10 0'/>"
+                    .repeat(300)
+            ),
+        );
+        parse(arrows.as_bytes()).unwrap();
+    }
+
+    /// bug_0190: kurbo splits an arc into more cubics the larger its
+    /// radius (`(11·r)^⅙` per turn), and svgtypes buffers them with a
+    /// quadratic drain: one 40-byte arc took 4 s, a larger one never
+    /// finished. Shapes take the same path through their radius.
+    #[test]
+    fn huge_arcs_are_refused() {
+        for body in [
+            "<path d='M0 0 A1e30 1e30 0 1 1 1e30 0'/>",
+            "<path d='M0 0 a1e30 1e30 0 1 1 1e30 0'/>",
+            "<path d='M0 0 A3e38 3e38 0 1 1 3e38 0'/>",
+            // The radius scaled up to reach the endpoint (`rx` tiny).
+            "<path d='M0 0 A1e-3 1 0 1 1 1e27 0'/>",
+            "<circle r='3e38'/>",
+            "<ellipse rx='1' ry='3e38'/>",
+            "<rect width='1e38' height='1e38' rx='1e38'/>",
+            // Lengths resolved through font sizes.
+            "<g font-size='1e20'><g font-size='1e15em'><circle r='1e3em'/></g></g>",
+            "<svg viewBox='0 0 1e38 1e38'><circle r='50%'/></svg>",
+        ] {
+            assert!(too_large(&svg(64, 64, body)), "{body}");
+        }
+        // Ordinary radii convert, `%` and `em` included.
+        for body in [
+            "<path d='M10 10 A20 20 0 1 1 30 30 a5 8 30 0 0 4 4 Z'/>",
+            "<circle r='50%'/><ellipse rx='2em' ry='3em'/><rect width='40' height='40' rx='4mm'/>",
+            "<svg viewBox='0 0 1e6 1e6'><circle r='40%'/></svg>",
+        ] {
+            parse(svg(64, 64, body).as_bytes()).unwrap();
+        }
+    }
+
+    /// bug_0191: a pattern whose content inherits a `fill` naming the
+    /// pattern itself made usvg recurse until the stack overflowed (a
+    /// process abort, not a panic). The inherited reference is an edge of
+    /// the reference graph, so it's a cycle. A marker inheriting itself is
+    /// refused the same way (usvg skips it, but the check doesn't model
+    /// that: the CSS spelling has always been refused).
+    #[test]
+    fn inherited_self_references_are_refused() {
+        for body in [
+            "<g fill='url(#p)'><pattern id='p' width='10' height='10' patternUnits='userSpaceOnUse'><rect width='5' height='5'/></pattern><rect width='64' height='64'/></g>",
+            "<g style='stroke: url(#p)'><defs><pattern id='p' width='10' height='10'><g><circle r='3'/></g></pattern></defs></g>",
+            "<g marker-mid='url(#m)'><marker id='m'><path d='M0 0 L1 1 L2 0'/></marker><path d='M0 0 L10 10 L20 0'/></g>",
+        ] {
+            assert!(
+                matches!(
+                    parse(svg(64, 64, body).as_bytes()),
+                    Err(SvgError::ReferenceCycle)
+                ),
+                "{body}"
+            );
+        }
+        // A pattern under a group filled with something else converts.
+        parse(
+            svg(
+                64,
+                64,
+                "<g fill='url(#g)'><linearGradient id='g'><stop offset='0'/></linearGradient><pattern id='p' width='10' height='10'><rect width='5' height='5'/></pattern><rect width='64' height='64' fill='url(#p)'/></g>",
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    }
+
+    /// Ordinary illustrations stay far inside the work budget: the bound
+    /// over-approximates, but not by enough to refuse real content.
+    #[test]
+    fn ordinary_documents_fit_the_work_budget() {
+        let work = |body: &str| {
+            let source = svg(512, 512, body);
+            let document = roxmltree::Document::parse(&source).unwrap();
+            svg_bounds::bounds(&document, svg_bounds::MAX_REFERENCES)
+                .unwrap()
+                .work
+        };
+        let gradient = "<linearGradient id='g'><stop offset='0' stop-color='red'/><stop offset='0.5' stop-color='gold'/><stop offset='1' stop-color='blue'/></linearGradient>";
+        let arrow =
+            "<marker id='a' markerWidth='6' markerHeight='6'><path d='M0 0 L6 3 L0 6 Z'/></marker>";
+        let icon = "<symbol id='i' viewBox='0 0 24 24'><path d='M12 2 L22 12 L12 22 L2 12 Z'/><circle cx='12' cy='12' r='4'/></symbol>";
+        let path: String = (0..200)
+            .map(|i| format!(" L{} {}", i % 37, i % 53))
+            .collect();
+        let cases = [
+            (
+                "map",
+                format!(
+                    "<defs>{gradient}</defs><g fill='url(#g)' stroke='#333'>{}</g>",
+                    format!("<path d='M0 0{path} Z'/>").repeat(200)
+                ),
+            ),
+            (
+                "diagram",
+                format!(
+                    "<defs>{arrow}</defs><g marker-end='url(#a)' stroke='black'>{}</g>",
+                    "<line x1='0' y1='0' x2='100' y2='40'/><path d='M0 0 C20 40 60 40 80 0'/>"
+                        .repeat(500)
+                ),
+            ),
+            (
+                "icons",
+                format!(
+                    "<defs>{icon}</defs>{}",
+                    "<use href='#i' width='24' height='24'/>".repeat(2000)
+                ),
+            ),
+            (
+                "rounded",
+                "<rect width='100%' height='100%' rx='2em'/><circle r='45%'/>".repeat(1000),
+            ),
+        ];
+        for (name, body) in cases {
+            let work = work(&body);
+            assert!(
+                work < MAX_SVG_WORK / 4,
+                "{name}: work {work} of {MAX_SVG_WORK}"
+            );
+        }
     }
 }

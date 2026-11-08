@@ -935,6 +935,7 @@ dependencies = [
  "serde",
  "serde_json",
  "simplecss",
+ "svgtypes",
  "tera",
  "unic-langid",
  "wgpu-types",

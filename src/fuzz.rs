@@ -467,6 +467,12 @@ mod tests {
     }
 }
 
+/// The conversion budget of the `svg` target, scaled down from
+/// [`crate::svg::MAX_SVG_WORK`] like its render cost: the target times each
+/// input, so what the budget lets through must convert in milliseconds
+/// even under ASan (a slow input means the work bound missed a cost).
+pub const SVG_FUZZ_WORK: u64 = crate::svg::MAX_SVG_WORK / 16;
+
 /// The `svg` loader's whole path on arbitrary bytes: usvg parse (with the
 /// refusing image resolver), the size cap, the render-cost estimate, and
 /// the resvg draw when the estimate allows it. Drawn within a 256 px side
@@ -479,6 +485,7 @@ pub fn svg(source: &[u8]) -> Result<String, String> {
     let limits = crate::svg::Limits {
         side,
         cost: crate::svg::MAX_SVG_COST / (full / u64::from(side).pow(2)),
+        work: SVG_FUZZ_WORK,
     };
     // The inline-`<svg>` path too (ADR 0038 §4): the same bytes as an
     // element's source text, prepared (namespaces, the cascade color).
@@ -529,8 +536,8 @@ pub fn svg_parse(source: &[u8]) -> Result<SvgTree, String> {
         .map_err(|err| err.to_string())
 }
 
-/// Only the XML parse and the recursion-depth bound (what the check adds
-/// before usvg runs).
+/// Only the XML parse and the depth and work bounds (what the check adds
+/// before usvg runs): the depth.
 pub fn svg_depth(source: &str) -> Result<u32, String> {
     let options = roxmltree::ParsingOptions {
         allow_dtd: true,
@@ -538,7 +545,30 @@ pub fn svg_depth(source: &str) -> Result<u32, String> {
     };
     let document =
         roxmltree::Document::parse_with_options(source, options).map_err(|err| err.to_string())?;
-    crate::svg::recursion_depth(&document, 1 << 20).map_err(|err| err.to_string())
+    crate::svg_bounds::bounds(&document, crate::svg_bounds::MAX_REFERENCES)
+        .map(|bounds| bounds.depth)
+        .map_err(|err| err.to_string())
+}
+
+/// The depth and work bounds of `source` (ADR 0040): `(depth, work)`.
+pub fn svg_work(source: &str) -> Result<(u32, u64), String> {
+    let options = roxmltree::ParsingOptions {
+        allow_dtd: true,
+        ..roxmltree::ParsingOptions::default()
+    };
+    let document =
+        roxmltree::Document::parse_with_options(source, options).map_err(|err| err.to_string())?;
+    crate::svg_bounds::bounds(&document, crate::svg_bounds::MAX_REFERENCES)
+        .map(|bounds| (bounds.depth, bounds.work))
+        .map_err(|err| err.to_string())
+}
+
+/// usvg's conversion with the work bound off (the depth bound stays): for
+/// calibrating the bound against real conversion time.
+pub fn svg_convert_unbounded(source: &[u8]) -> Result<SvgTree, String> {
+    crate::svg::parse_within(source, &crate::svg::SvgFonts::default(), u64::MAX)
+        .map(SvgTree)
+        .map_err(|err| err.to_string())
 }
 
 /// The render-cost estimate at `width`×`height`.

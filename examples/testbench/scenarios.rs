@@ -255,6 +255,14 @@ fn svg_bombs() -> Vec<(&'static str, String)> {
         );
     }
     patterns += "<rect width='8' height='8' fill='url(#p299)'/>";
+    let mut uses = String::from("<defs><g id='u0'><rect width='1' height='1'/></g>");
+    for i in 1..=6 {
+        uses += &format!(
+            "<g id='u{i}'>{}</g>",
+            format!("<use href='#u{}'/>", i - 1).repeat(10)
+        );
+    }
+    uses += "</defs><use href='#u6'/>";
     vec![
         // 300 chained patterns: past the recursion-depth bound (usvg alone
         // overflows a 2 MB stack at ~120).
@@ -268,6 +276,27 @@ fn svg_bombs() -> Vec<(&'static str, String)> {
         ),
         // 2 000 nested groups: past the depth bound.
         ("nest.svg", svg("<g>".repeat(2000) + &"</g>".repeat(2000))),
+        // ADR 0040, refused by the conversion-work bound before usvg runs:
+        // 10⁶ rects through ten `<use>`s per level (bug_0188),
+        ("fan-out.svg", svg(uses)),
+        // a 500-rect marker on each vertex of a 2000-vertex path
+        // (bug_0189),
+        (
+            "markers.svg",
+            svg(format!(
+                "<defs><marker id='m'>{}</marker></defs><g marker-mid='url(#m)'><path d='M0 0{}'/></g>",
+                "<rect width='1' height='1'/>".repeat(500),
+                " 1 1".repeat(2000)
+            )),
+        ),
+        // one arc split into ~10⁵ curves by its radius (bug_0190);
+        ("arc.svg", svg("<path d='M0 0 A1e30 1e30 0 1 1 1e30 0'/>".into())),
+        // and a cycle: a pattern inheriting a fill naming itself (usvg's
+        // stack overflow, bug_0191).
+        (
+            "self-pattern.svg",
+            svg("<g fill='url(#p)'><pattern id='p' width='8' height='8' patternUnits='userSpaceOnUse'><rect width='4' height='4'/></pattern><rect width='64' height='64'/></g>".into()),
+        ),
         // A billion laughs: roxmltree's entity limits.
         (
             "laughs.svg",

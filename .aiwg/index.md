@@ -21,4 +21,4 @@ Derived pages cite their sources with `@path` mentions; provenance records are i
 - [Defect register](testing/defect-register.md) — bug_0001–0181: 179 fixed, none open; 15 upstream; nightly failures and the CI scaling failure (bug_0181) fixed
 
 ## Architecture (1)
-- [Architecture](architecture/README.md) — pointer to `AGENTS.md` and ADRs 0001–0039
+- [Architecture](architecture/README.md) — pointer to `AGENTS.md` and ADRs 0001–0040

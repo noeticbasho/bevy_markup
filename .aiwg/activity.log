@@ -19,3 +19,4 @@
 ## [2026-11-07 17:18] update | ADR 0038 §7: CSS border-image/background-image SVGs drawn at the scale factor
 ## [2026-11-07 17:36] update | ADR 0038 §9: testbench SVG scenarios (svg-icons, svg-images, svg-bombs) and hotpath on SVG code; bug_0186
 ## [2026-11-07 17:51] update | ADR 0038 §10: svg example; bug_0187 found by its first run
+## [2026-11-08 11:55] update | ADR 0040: bound usvg's conversion work before it runs; bug_0188 (nightly fuzz svg) and bug_0189–0191 found in its triage

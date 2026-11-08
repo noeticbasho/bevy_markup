@@ -56,5 +56,6 @@ as `[INFERENCE]`.
 | [0037](./0037-anchored-overlays-with-bevy-popover.md) | Anchored overlays with Bevy's Popover | Rejected |
 | [0038](./0038-svg-rasterized-with-resvg.md) | SVG: rasterize on the CPU with usvg + resvg | Proposed (steps 1–3 implemented) |
 | [0039](./0039-css-pre-scan-walks-cssparser-tokens.md) | The CSS nesting pre-scan walks cssparser's tokens | Accepted |
+| [0040](./0040-svg-conversion-work-bound.md) | Bound usvg's conversion work before it runs | Accepted |
 
 Add new records to this index in the same commit that adds the file.

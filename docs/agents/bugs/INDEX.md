@@ -217,6 +217,10 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0185](bug_0185.md) | `<br/>` (any `<name/>`) nested the rest of the document inside it | `src/template.rs`, `src/build.rs`; upstream astral-tl | high | fixed: documents and translations normalized before `tl` | an ADR 0038 step-3 SVG test, narrowed with `tl` probes |
 | [bug_0186](bug_0186.md) | A refused inline `<svg>` reserved its box and an empty image | `src/svg.rs` (`InlineSvgs::image`) | low | fixed: refused at collect time | the testbench's `svg-bombs` scenario |
 | [bug_0187](bug_0187.md) | With `svg`, `BevyMarkupPlugin` replaced Bevy's `Assets<Image>` (and, with `svg-text`, `Assets<Font>`) | `src/lib.rs` | high | fixed: registered only when absent | the `svg` example's first run |
+| [bug_0188](bug_0188.md) | A `<use>` fan-out took seconds to convert before any budget applied | `src/svg_bounds.rs` | high | fixed: conversion-work bound (ADR 0040) | nightly cargo-fuzz `svg` target |
+| [bug_0189](bug_0189.md) | Markers were converted once per vertex, unbounded | `src/svg_bounds.rs` | high | fixed: counted in the work bound | code reading during bug_0188's triage |
+| [bug_0190](bug_0190.md) | A huge-radius arc split into millions of curves | `src/svg_bounds.rs`; upstream svgtypes/kurbo (U22) | high | fixed: counted in the work bound | code reading during bug_0188's triage |
+| [bug_0191](bug_0191.md) | A pattern inheriting a fill naming itself overflowed the stack | `src/svg_bounds.rs`; upstream usvg (U23) | high | fixed: refused as a cycle | probing the bug_0188 fix |
 
 ## Discovery session metadata: bug_0001–0005
 
@@ -463,6 +467,25 @@ settle (rebuild observed) and the resulting dump to match a reference model.
   `fix/later-sibling-scaling`.
 - **Machine/toolchain:** Arch Linux (kernel 7.2.11), AMD Ryzen 7 9800X3D,
   rustc 1.98.1, `nightly-2026-09-09` for cargo-fuzz 0.13.2.
+
+## Discovery session metadata: bug_0188–0191 (2026-11-08)
+
+- **Method:** triage of the nightly workflow's failed `svg` fuzz job (run
+  42471256114): the artifact was timed stage by stage with a throwaway
+  fuzz binary (depth check, usvg conversion, cost estimate), which put the
+  time in usvg's conversion (bug_0188). Reading usvg 0.49 (`use_node.rs`,
+  `marker.rs`, `paint_server.rs`, `units.rs`), svgtypes 0.16
+  (`SimplifyingPathParser`) and kurbo 0.13 (`Arc::from_svg_arc`,
+  `append_iter`) for other conversions that grow faster than the input,
+  each confirmed with a generated input: bug_0189 (markers), bug_0190
+  (arcs), and, while checking inherited paint servers, bug_0191 (a
+  self-inheriting pattern, an ASan stack overflow). The fix was calibrated
+  in a release build without ASan (ADR 0040 §3).
+- **Discovery agent:** the nightly workflow (bug_0188); Claude Code
+  session, `claude-opus-5-5` (triage, bug_0189–0191).
+- **Commit at discovery:** `ff99cc1`.
+- **Machine/toolchain:** Arch Linux (kernel 7.2.14), AMD Ryzen 7 9800X3D,
+  rustc 1.98.1, cargo-fuzz on the current nightly; CI: `nightly-2026-09-09`.
 
 ## Discovery session metadata: bug_0185 (2026-11-07)
 
