@@ -31,3 +31,4 @@
 ## [2026-11-09 14:40] update | canvas branch: the examples' --offscreen harness spawns a handle-less primary Window so Bevy's ray picking works offscreen (UPSTREAM U33); canvas hero dragged and clicked offscreen
 ## [2026-11-09 14:45] update | ADR 0041 (<canvas> shows app render targets) accepted after the prototype; canvas branch fast-forwarded into main (8f4a093, c4886b1); ADR 0028 status lists <canvas> as shipped
 ## [2026-11-09 15:10] update | Expanded tests: canvas (HTML attribute rules, Markdown, owner moves, source switches, sizing proptest), inline SVG (Markdown blocks/inline, links, translations, Tera loops, own style), SVG proptests (hostile magnitudes, convolve differential, svg_boxes round trip); fixed bug_0199-0202 (U34-U36)
+## [2026-11-09 16:08] update | Fixed bug_0199 fully: signals::pick_inline_boxes picks inline images inside links from the UI backend's text-block hits (workaround for Bevy U34)

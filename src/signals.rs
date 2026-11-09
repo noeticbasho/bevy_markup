@@ -49,6 +49,74 @@ use serde_json::Value;
 use crate::html::HtmlElement;
 use crate::template::decode_attribute;
 
+/// The picking backend for bound inline images (an `<img>` or inline
+/// `<svg>` inside a link): Bevy 0.20's UI backend resolves a text node's
+/// hit to a span by its runs only and never hit-tests
+/// `TextLayoutInfo::inline_boxes`, so a pointer over an inline image hits
+/// the text block (UPSTREAM U34, bug_0199). This runs after every
+/// backend, reads their hits, and for each one on a text node whose cursor point lies
+/// on a bound, pickable inline box, adds a hit on the box's span just in
+/// front of the text node (depth − 10⁻⁷; the UI backend steps 10⁻⁵ per
+/// node): the image wins over its own block, anything drawn in front of
+/// the block still wins over the image. The span's pointer observers then
+/// emit the link's signals as for a text span.
+pub(crate) fn pick_inline_boxes(
+    // Optional: an app without bevy_picking's plugins has no hits at all.
+    hits: Option<ResMut<Messages<bevy::picking::backend::PointerHits>>>,
+    mut cursor: Local<bevy::ecs::message::MessageCursor<bevy::picking::backend::PointerHits>>,
+    texts: Query<(&ComputedNode, &bevy::text::TextLayoutInfo)>,
+    bound: Query<Option<&Pickable>, With<ElementSignals>>,
+) {
+    use bevy::picking::backend::{HitData, PointerHits};
+    let Some(mut hits) = hits else {
+        return;
+    };
+    let mut found = Vec::new();
+    for message in cursor.read(&hits) {
+        for (entity, hit) in &message.picks {
+            let Ok((node, layout)) = texts.get(*entity) else {
+                continue;
+            };
+            if layout.inline_boxes.is_empty() {
+                continue;
+            }
+            // The UI backend's hit position is normalized to the node
+            // (center origin, corners at ±0.5); the boxes, like the runs,
+            // are in physical px relative to the content box.
+            let Some(position) = hit.position else {
+                continue;
+            };
+            let point = position.truncate() * node.size() - node.content_box().min;
+            let Some(&(image, _, _)) = layout
+                .inline_boxes
+                .iter()
+                .find(|(image, _, rect)| rect.contains(point) && bound.contains(*image))
+            else {
+                continue;
+            };
+            if bound
+                .get(image)
+                .ok()
+                .flatten()
+                .is_some_and(|pickable| !pickable.is_hoverable)
+            {
+                continue;
+            }
+            found.push(PointerHits::new(
+                message.pointer,
+                vec![(
+                    image,
+                    HitData::new(hit.camera, hit.depth - 1e-7, hit.position, hit.normal),
+                )],
+                message.order,
+            ));
+        }
+    }
+    for message in found {
+        hits.write(message);
+    }
+}
+
 /// Which interaction emits a signal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SignalTrigger {

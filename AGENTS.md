@@ -104,6 +104,10 @@ src/
   build.rs         (internal) DOM + styles → Bevy UI children; HtmlUiBuilt trigger
   rebuild.rs       (internal) pure rebuild decision: Frame (load phases + change signals) → Build/Skip/Wait
   signals.rs       `data-on-*`/`data-with` → ElementSignal messages (picking observers, hover tracking)
+                   + `pick_inline_boxes` (PreUpdate, after `PickingSystems::Backend`, before
+                   `Hover`): an inline image inside a link is picked from the UI backend's hit
+                   on its text block — Bevy never hit-tests `TextLayoutInfo::inline_boxes`,
+                   U34, bug_0199
   tooltips.rs      HtmlTooltips/HtmlTooltip: show_tooltips (Update; HoverMap → nearest `data-tooltip`
                    ancestor per hovered node → anchored tooltip HtmlUi (anchored to the nearest
                    ancestor that has a node — a link span carries no box), refreshed, despawned

@@ -11,8 +11,7 @@ An index; the bug reports are authoritative. 202 reports, bug_0001–0202 (2026-
 
 | Status | Count |
 |---|---|
-| Fixed, with regression test | 199 |
-| Partly fixed | 1 — bug_0199, an image inside a link: bindings carried, the click needs Bevy to hit inline boxes (U34) (medium) |
+| Fixed, with regression test | 200 |
 | Won't fix (known limit) | 1 — bug_0170, a one-frame row shift in the windowed build (low) |
 | Withdrawn (not a bug) | 1 — bug_0026 |
 

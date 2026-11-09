@@ -505,6 +505,16 @@ impl Plugin for BevyMarkupPlugin {
                         .after(HtmlUiSystems::Build),
                 ),
             );
+        // UPSTREAM U34: bound inline images (an icon inside a link) are
+        // picked from the backends' hits (Bevy's UI backend is the app's
+        // choice: the `bevy_ui` feature that brings it isn't the library's),
+        // after every backend reported and before hover reads them.
+        app.add_systems(
+            PreUpdate,
+            signals::pick_inline_boxes
+                .after(bevy::picking::PickingSystems::Backend)
+                .before(bevy::picking::PickingSystems::Hover),
+        );
         app.add_observer(canvas::mark_canvas);
         focus::plugin(app);
     }

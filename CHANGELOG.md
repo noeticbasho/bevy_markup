@@ -78,9 +78,9 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
     image fails with an error, instead of a renderer panic.
 
 ### Fixed
-- An image or inline `<svg>` inside a link (`<a href>`, a Markdown link)
-  now carries the link's bindings. Clicking the icon itself still doesn't
-  follow the link: Bevy's UI picking doesn't hit inline images yet.
+- Clicking an image or inline `<svg>` inside a link (`<a href>`, a
+  Markdown link) now follows the link, as clicking its text does
+  (`:hover` and the link's `data-on-*` hooks apply to the icon too).
 - `<canvas>` reads its `width`/`height` attributes by HTML's rules
   (`"256px"` is 256, `" +5"` is 5, character references decode), and a
   canvas inside text no longer shows its fallback content.

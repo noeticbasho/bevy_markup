@@ -47,7 +47,7 @@ the issue may already be fixed or reported.
 | U31 | tiny-skia-path (via usvg) | `NonZeroRect::bbox_transform` unwraps `from_xywh` of an overflowed product ([bug_0197](bug_0197.md)) | panic in any build on a filter over a box wider than ~2.8·10³⁸: a failed load (`svg` feature) | boxes measured by a first usvg pass, overflowing regions refused (ADR 0042, `svg_boxes`, `SvgError::RegionOverflow`) | unreported |
 | U32 | resvg | The box blur adds 2 to an `i32` box width that saturates at `i32::MAX` for a deviation of ~1.4·10⁹ px ([bug_0198](bug_0198.md)) | panic where overflow checks are on (debug builds, fuzzing): a failed draw; release wraps to a negative box (`svg` feature) | refused before drawing past `MAX_SVG_BLUR` (`svg::check_extent`, `SvgError::TooBlurred`) | unreported |
 | U33 | Bevy (bevy_picking 0.20) | `Location::is_in_viewport` returns false without a `PrimaryWindow`, even for an image render target: ray-based picking (mesh, sprite) hits nothing in a windowless app | any render-to-texture-only app loses mesh picking (no bevy_markup code affected); the examples' `--offscreen` mode did | the harness's `--offscreen` mode spawns a primary `Window` entity with no native window (`examples/shared/harness.rs`) | unreported |
-| U34 | Bevy (bevy_ui 0.20) | The UI picking backend hit-tests a text node's runs (`run_geometry`) but never `TextLayoutInfo::inline_boxes`: a pointer over an inline image hits its text block ([bug_0199](bug_0199.md)) | an image or SVG inside a link can't be clicked through the icon | none yet (the image span carries the link's bindings; a backend over `inline_boxes` would complete it) | unreported |
+| U34 | Bevy (bevy_ui 0.20) | The UI picking backend hit-tests a text node's runs (`run_geometry`) but never `TextLayoutInfo::inline_boxes`: a pointer over an inline image hits its text block ([bug_0199](bug_0199.md)) | an image or SVG inside a link can't be clicked through the icon | `signals::pick_inline_boxes` adds the image's hit from the UI backend's hit on its text block | unreported |
 | U35 | tiny-skia-path 0.12 (via resvg 0.49) | `NonZeroRect::to_int_rect` and `IntSize::to_int_rect(x, y)` unwrap `IntRect::from_xywh`, `None` once `x + width` passes `i32::MAX`; resvg converts filter regions, subregions and offsets with them ([bug_0201](bug_0201.md)) | panic in any build: a failed draw (`svg` feature) | regions, subregions and offsets past `MAX_SVG_FILTER_REGION` refused before drawing (`svg::check_extent`) | unreported |
 | U36 | resvg 0.49 (tiny-skia 0.12) | `render_pattern_pixmap` allocates a pattern's tile at its drawn size with no limit; `Pixmap::new` allocates with `vec![0; len]`, which aborts on failure ([bug_0200](bug_0200.md)) | process abort (`svg` feature) | the render-cost estimate charges each tile (`svg::estimate_cost`) | unreported |
 
@@ -764,10 +764,15 @@ CI clippy command and workspace tests pass on both.
   laid out in `TextLayoutInfo::inline_boxes` (entity, kind, rect) but never
   hit-tested, so the pointer over one hits the text node itself.
 - **Reproduction:** `<p><a href="next.html"><img src="frame.png"></a>
-  text</p>`, click the image: no `open` signal
-  (`signals::an_image_inside_a_link_opens_it`, `#[ignore]`d on this).
-- **Local workaround:** none yet; the image span carries the link's
-  bindings (bug_0199), ready for a backend that hit-tests `inline_boxes`.
+  text</p>`, click the image: the hit is the paragraph's
+  (`signals::an_image_inside_a_link_opens_it` passes through the
+  workaround).
+- **Local workaround:** `signals::pick_inline_boxes`, a picking system
+  after the backends: for a hit on a text node, it tests the hit's point
+  (normalized position × node size, relative to the content box) against
+  `inline_boxes` and adds a hit on a bound, pickable box's entity just in
+  front of the text node (bug_0199). Drop it once Bevy hit-tests inline
+  boxes.
 - **PR sketch:** in `pick_ui_text_section`'s caller, test
   `inline_boxes`' rects before the runs and report the box's entity.
 

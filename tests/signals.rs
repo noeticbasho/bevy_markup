@@ -982,14 +982,12 @@ fn handlers_route_by_name_and_trigger() {
 }
 
 /// An image inside a link is part of it: clicking the image (an inline
-/// `<img>` here, a 32×24 frame at the paragraph's start) should emit the
-/// link's `open` signal, as clicking an icon link does in a browser. The
-/// image span carries the link's bindings (bug_0199), but Bevy 0.20's UI
-/// picking resolves text hits by run geometry only and never hits an
-/// inline box (UPSTREAM U34): the click lands on the paragraph. Ignored
-/// until a backend hit-tests `TextLayoutInfo::inline_boxes`.
+/// `<img>` here, a 32×24 frame at the paragraph's start) emits the link's
+/// `open` signal, as clicking an icon link does in a browser. Bevy 0.20's
+/// UI picking never hits an inline box (UPSTREAM U34): bevy_markup's
+/// `pick_inline_boxes` adds the image's hit from the UI backend's hit on
+/// its text block (bug_0199).
 #[test]
-#[ignore = "UPSTREAM U34: Bevy's UI picking never hits inline boxes"]
 fn an_image_inside_a_link_opens_it() {
     let mut ui = page_ui(
         "signals-image-link",
@@ -1016,6 +1014,90 @@ fn an_image_inside_a_link_opens_it() {
     assert_eq!(clicks.len(), 1, "{clicks:?}");
     assert_eq!(clicks[0].name.as_ref(), "open");
     assert_eq!(clicks[0].payload["href"].as_str(), Some("next.html"));
+}
+
+/// What the inline-image backend must leave alone: text after the link,
+/// an image outside any link (its block's own hook gets the click), an
+/// element drawn over the image (it still wins: the UI backend reports
+/// nothing below a blocking node, so the block isn't hit and neither is
+/// its image), and a block with `pointer-events: none` (its image ignores
+/// the pointer too).
+#[test]
+fn inline_image_picking_keeps_the_rest_of_picking() {
+    // `top` reports the paragraph's rect; `x` is the image's middle (it
+    // starts the line), `after` is in the text past it.
+    let clicks_at = |name: &str, page: &str, css: &str, tag: &str, x_after: bool| {
+        let mut ui = page_ui(name, page, css, TemplateContext::new());
+        ui.settle();
+        ui.update(1);
+        let world = ui.world_mut();
+        let mut elements = world.query::<(Entity, &HtmlElement)>();
+        let block = elements
+            .iter(world)
+            .find(|(_, element)| element.tag == tag)
+            .map(|(entity, _)| entity)
+            .expect("block");
+        let rect = node_rect(world, block).expect("laid out");
+        let x = if x_after {
+            rect.max.x - 10.0
+        } else {
+            rect.min.x + 10.0
+        };
+        ui.click_at(vec2(x, rect.min.y + 10.0));
+        ui.take_signals()
+            .into_iter()
+            .filter(|signal| signal.trigger == SignalTrigger::Click)
+            .map(|signal| signal.name.to_string())
+            .collect::<Vec<_>>()
+    };
+    let link = r#"<a href="next.html"><img src="frame.png"></a>"#;
+    assert_eq!(
+        clicks_at(
+            "inline-pick-after",
+            &format!(r#"<p data-on-click="block">{link} and some text after it</p>"#),
+            "",
+            "p",
+            true,
+        ),
+        ["block"],
+        "the text after the link is the block's"
+    );
+    assert_eq!(
+        clicks_at(
+            "inline-pick-unlinked",
+            r#"<p data-on-click="block"><img src="frame.png"> text</p>"#,
+            "",
+            "p",
+            false,
+        ),
+        ["block"],
+        "an image outside a link is part of its block"
+    );
+    assert_eq!(
+        clicks_at(
+            "inline-pick-covered",
+            &format!(
+                r#"<div class="stack"><p>{link} text</p><div class="cover" data-on-click="cover"></div></div>"#
+            ),
+            ".stack { position: relative } \
+             .cover { position: absolute; top: 0; left: 0; width: 200px; height: 40px; z-index: 5 }",
+            "p",
+            false,
+        ),
+        ["cover"],
+        "an element drawn over the image wins"
+    );
+    assert!(
+        clicks_at(
+            "inline-pick-ignored",
+            &format!(r#"<p>{link} text</p>"#),
+            "p { pointer-events: none }",
+            "p",
+            false,
+        )
+        .is_empty(),
+        "pointer-events: none on the block covers its image"
+    );
 }
 
 /// `<a href>` links: the link's span becomes a picked entity whose click
