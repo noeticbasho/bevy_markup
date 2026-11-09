@@ -227,6 +227,7 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0195](bug_0195.md) | An `feConvolveMatrix` `order` whose sides multiply past `u32` panicked usvg in debug builds | `src/svg_bounds.rs` (`check_values`) | high | fixed: refused before usvg runs | local cargo-fuzz `svg` run |
 | [bug_0196](bug_0196.md) | An `feMorphology` radius that overflows `f32` panicked usvg, in release too | `src/svg_bounds.rs` (`check_values`); upstream usvg (U30) | high | fixed: refused before usvg runs | local cargo-fuzz `svg` run |
 | [bug_0197](bug_0197.md) | A filter on a shape wider than ~2.8·10³⁸ panicked tiny-skia-path during conversion | `src/svg_boxes.rs`, `src/svg.rs`; upstream tiny-skia-path (U31) | high | fixed: boxes measured by a first usvg pass (ADR 0042) | probing the bug_0196 fix |
+| [bug_0198](bug_0198.md) | A huge `feGaussianBlur` deviation overflowed resvg's box blur | `src/svg.rs` (`check_extent`, `MAX_SVG_BLUR`); upstream resvg (U32) | high | fixed: refused before drawing | nightly cargo-fuzz `svg` job |
 
 ## Discovery session metadata: bug_0001–0005
 
@@ -474,7 +475,7 @@ settle (rebuild observed) and the resulting dump to match a reference model.
 - **Machine/toolchain:** Arch Linux (kernel 7.2.11), AMD Ryzen 7 9800X3D,
   rustc 1.98.1, `nightly-2026-09-09` for cargo-fuzz 0.13.2.
 
-## Discovery session metadata: bug_0188–0197 (2026-11-08 to 2026-11-09)
+## Discovery session metadata: bug_0188–0198 (2026-11-08 to 2026-11-09)
 
 - **Method:** triage of the nightly workflow's failed `svg` fuzz job (run
   42471256114): the artifact was timed stage by stage with a throwaway
@@ -499,9 +500,11 @@ settle (rebuild observed) and the resulting dump to match a reference model.
   bug_0195 (three artifacts, one cause). A 30-minute run of that fix
   (`3211bf6`, 6.0M inputs) found bug_0196 (one artifact); probing its fix
   with huge bounding boxes found bug_0197, fixed by measuring usvg's own
-  boxes in a first conversion (ADR 0042, the user's approach).
+  boxes in a first conversion (ADR 0042, the user's approach). The nightly
+  workflow, dispatched by hand on that commit (`6a7c87d`, run
+  42621076046) to check that CI fuzzes the new code, found bug_0198.
 - **Discovery agent:** the nightly workflow (bug_0188); Claude Code
-  session, `claude-opus-5-5` (triage, bug_0189–0197).
+  session, `claude-opus-5-5` (triage, bug_0189–0198).
 - **Commit at discovery:** `ff99cc1`.
 - **Machine/toolchain:** Arch Linux (kernel 7.2.14), AMD Ryzen 7 9800X3D,
   rustc 1.98.1, cargo-fuzz on the current nightly; CI: `nightly-2026-09-09`.

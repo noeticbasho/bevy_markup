@@ -45,6 +45,7 @@ the issue may already be fixed or reported.
 | U29 | usvg (resvg) | `feConvolveMatrix` multiplies its `order` sides as `u32` unchecked ([bug_0195](bug_0195.md)) | panic where overflow checks are on (debug builds, fuzzing): a failed load; release wraps (the cost estimate then refuses the kernel) (`svg` feature) | refused before usvg runs (`svg_bounds::check_values`, `SvgError::OutOfRange`) | unreported |
 | U30 | usvg (resvg) | `feMorphology` unwraps `PositiveF32::new(radius × scale)`, `None` when the product isn't finite ([bug_0196](bug_0196.md)) | panic in any build: a failed load (`svg` feature) | non-finite radii refused before usvg runs (`svg_bounds::check_values`, `SvgError::OutOfRange`); radius × box by ADR 0042 | unreported |
 | U31 | tiny-skia-path (via usvg) | `NonZeroRect::bbox_transform` unwraps `from_xywh` of an overflowed product ([bug_0197](bug_0197.md)) | panic in any build on a filter over a box wider than ~2.8·10³⁸: a failed load (`svg` feature) | boxes measured by a first usvg pass, overflowing regions refused (ADR 0042, `svg_boxes`, `SvgError::RegionOverflow`) | unreported |
+| U32 | resvg | The box blur adds 2 to an `i32` box width that saturates at `i32::MAX` for a deviation of ~1.4·10⁹ px ([bug_0198](bug_0198.md)) | panic where overflow checks are on (debug builds, fuzzing): a failed draw; release wraps to a negative box (`svg` feature) | refused before drawing past `MAX_SVG_BLUR` (`svg::check_extent`, `SvgError::TooBlurred`) | unreported |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -704,6 +705,26 @@ CI clippy command and workspace tests pass on both.
 - **PR sketch:** return `Option<Self>` from `bbox_transform` (a breaking
   change), or a checked variant that usvg's callers use, dropping the
   element as they do for other invalid regions.
+
+## U32 — resvg: box blur width overflows `i32`
+
+- **Project:** linebender/resvg, crate resvg. Affected: 0.49.0.
+- **Problem:** `filter/box_blur.rs` `create_box_gauss` computes the ideal
+  box width `sqrt(12σ²/5) + 1` in `f32`, casts it to `i32` (saturating at
+  `i32::MAX` once σ² is infinite, from σ ≈ 1.8·10¹⁹; the cast alone reaches
+  `i32::MAX` from σ ≈ 1.4·10⁹) and adds 2 unchecked (line 48). Overflow
+  checks panic; release wraps to a negative box, which `apply` turns into a
+  huge `usize` radius [reading the code]. σ is the deviation × the
+  transform's scale (`resolve_std_dev`), so a `viewBox` can grow it.
+- **Reproduction:** `<filter id='f'><feGaussianBlur
+  stdDeviation='1.4e31'/></filter><rect width='40' height='40'
+  filter='url(#f)'/>` (seed in `fuzz/seeds/svg/`, bug_0198). Found by the
+  nightly `svg` fuzz job on 2026-11-09.
+- **Local workaround:** `svg::check_extent`'s walk refuses a deviation
+  past `MAX_SVG_BLUR` (2²⁰ px at the drawn size; `SvgError::TooBlurred`).
+- **PR sketch:** clamp σ to the image's larger side (a wider blur gives the
+  same result: the loops already stop at the image size), or compute the
+  box sizes in `i64` / with `saturating_add`.
 
 ## Not upstream bugs (recorded so they aren't re-filed)
 

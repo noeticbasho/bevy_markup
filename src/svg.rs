@@ -165,6 +165,14 @@ pub const MAX_SVG_WORK: u64 = 1 << 23;
 /// miter limit; the smallest extent seen to panic is ~1.8·10⁶ px.
 pub const MAX_SVG_EXTENT: f32 = 524_288.0;
 
+/// The largest Gaussian blur, in pixels of standard deviation at the drawn
+/// size, an `.svg` may ask for (`feGaussianBlur`, `feDropShadow`). resvg
+/// 0.49's box blur sizes its boxes as `i32`s and adds past `i32::MAX` for a
+/// σ of ~1.4·10⁹ px (UPSTREAM U32: a panic where overflow checks are on, a
+/// wrapped, negative box in release). 2²⁰ px is far below that and far
+/// beyond any layer resvg blurs (at most 5 × [`MAX_SVG_SIDE`] per side).
+pub const MAX_SVG_BLUR: f32 = 1_048_576.0;
+
 /// Settings for loading an `.svg` as an [`Image`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SvgLoaderSettings {
@@ -262,6 +270,11 @@ pub(crate) enum SvgError {
         largest: f64,
         regions: f64,
     },
+    /// A blur wider than [`MAX_SVG_BLUR`] at the drawn size (UPSTREAM U32).
+    TooBlurred {
+        sigma: f32,
+        max: f32,
+    },
     /// A value usvg would panic on (UPSTREAM U26), refused before it runs.
     OutOfRange {
         element: &'static str,
@@ -312,6 +325,11 @@ impl fmt::Display for SvgError {
                 f,
                 "draws too far outside the image (a path reaches {extent:.0} px from it at this \
                  size, limit {max:.0}): reduce its coordinates, radii or stroke widths"
+            ),
+            Self::TooBlurred { sigma, max } => write!(
+                f,
+                "blurs too much (a standard deviation of {sigma:.3e} px at this size, limit \
+                 {max:.0}): reduce its stdDeviation"
             ),
             Self::RegionOverflow { largest, regions } => write!(
                 f,
@@ -1378,19 +1396,29 @@ pub(crate) fn estimate_cost(tree: &usvg::Tree, width: u32, height: u32, max: u64
 }
 
 /// Refuses a tree with a path reaching farther than [`MAX_SVG_EXTENT`]
-/// pixels from the drawn image (tiny-skia panics on such paths).
+/// pixels from the drawn image (tiny-skia panics on such paths), or a blur
+/// wider than [`MAX_SVG_BLUR`] (resvg's box blur overflows).
 fn check_extent(tree: &usvg::Tree, width: u32, height: u32) -> Result<(), SvgError> {
     let size = tree.size();
     let canvas = tiny_skia::Transform::from_scale(
         width as f32 / size.width(),
         height as f32 / size.height(),
     );
-    let mut walk = ExtentWalk { extent: 0.0 };
+    let mut walk = ExtentWalk {
+        extent: 0.0,
+        blur: None,
+    };
     match walk.group(tree.root(), canvas, 0) {
         Ok(()) => Ok(()),
-        Err(Over) => Err(SvgError::TooFarOut {
-            extent: walk.extent,
-            max: MAX_SVG_EXTENT,
+        Err(Over) => Err(match walk.blur {
+            Some(sigma) => SvgError::TooBlurred {
+                sigma,
+                max: MAX_SVG_BLUR,
+            },
+            None => SvgError::TooFarOut {
+                extent: walk.extent,
+                max: MAX_SVG_EXTENT,
+            },
         }),
     }
 }
@@ -1399,6 +1427,8 @@ fn check_extent(tree: &usvg::Tree, width: u32, height: u32) -> Result<(), SvgErr
 /// the way down, and records how far each path reaches in pixels.
 struct ExtentWalk {
     extent: f32,
+    /// The blur that stopped the walk, past [`MAX_SVG_BLUR`].
+    blur: Option<f32>,
 }
 
 impl ExtentWalk {
@@ -1431,11 +1461,27 @@ impl ExtentWalk {
             mask = layer.mask();
         }
         // `feImage` content: drawn at the transform's scale in the filter
-        // region.
+        // region. Blurs: resvg scales the deviation by the same transform
+        // (`filter/mod.rs` `resolve_std_dev`).
         for filter in group.filters() {
             for primitive in filter.primitives() {
-                if let usvg::filter::Kind::Image(image) = primitive.kind() {
-                    self.group(image.root(), scale_of(transform), depth + 1)?;
+                let deviation = match primitive.kind() {
+                    usvg::filter::Kind::Image(image) => {
+                        self.group(image.root(), scale_of(transform), depth + 1)?;
+                        continue;
+                    }
+                    usvg::filter::Kind::GaussianBlur(blur) => (blur.std_dev_x(), blur.std_dev_y()),
+                    usvg::filter::Kind::DropShadow(shadow) => {
+                        (shadow.std_dev_x(), shadow.std_dev_y())
+                    }
+                    _ => continue,
+                };
+                let (sx, sy) = transform.get_scale();
+                let sigma = (deviation.0.get() * sx).max(deviation.1.get() * sy);
+                // `!(≤)`: a NaN product refuses too.
+                if !(sigma <= MAX_SVG_BLUR) {
+                    self.blur = Some(sigma);
+                    return Err(Over);
                 }
             }
         }
@@ -2713,6 +2759,52 @@ mod tests {
         ] {
             let result = draw(body);
             assert!(result.is_ok(), "{body}: {:?}", result.err());
+        }
+    }
+
+    /// resvg 0.49's box blur adds past `i32::MAX` for a deviation of ~1.4·10⁹
+    /// px at the drawn size (UPSTREAM U32): refused past [`MAX_SVG_BLUR`],
+    /// measured through the same transforms resvg scales it by.
+    #[test]
+    fn blurs_past_the_limit_are_refused() {
+        let draw = |root: &str, body: &str| {
+            let source = format!("<svg xmlns='http://www.w3.org/2000/svg' {root}>{body}</svg>");
+            rasterize(source.as_bytes(), 1.0, Limits::DEFAULT)
+        };
+        let size = "width='64' height='64'";
+        let blur = |deviation: &str| {
+            format!(
+                "<filter id='f'><feGaussianBlur stdDeviation='{deviation}'/></filter>\
+                 <rect width='40' height='40' filter='url(#f)'/>"
+            )
+        };
+        // The nightly's find (minimized), one side only, a drop shadow, and
+        // a deviation scaled past the limit by the viewBox (10⁴ × 6.4·10⁴).
+        for (root, body) in [
+            (size.to_string(), blur("1.4e31")),
+            (size.to_string(), blur("2 1e7")),
+            (
+                size.to_string(),
+                "<filter id='f'><feDropShadow stdDeviation='1e7'/></filter>\
+                 <rect width='40' height='40' filter='url(#f)'/>"
+                    .to_string(),
+            ),
+            (format!("{size} viewBox='0 0 0.001 0.001'"), blur("1e4")),
+        ] {
+            let result = draw(&root, &body);
+            assert!(
+                matches!(result, Err(SvgError::TooBlurred { .. })),
+                "{root} {body}: {:?}",
+                result.err()
+            );
+        }
+        // Wide but within it, and the same deviation scaled down.
+        for (root, body) in [
+            (size.to_string(), blur("1e5")),
+            (format!("{size} viewBox='0 0 1e9 1e9'"), blur("1e9")),
+        ] {
+            let result = draw(&root, &body);
+            assert!(result.is_ok(), "{root} {body}: {:?}", result.err());
         }
     }
 

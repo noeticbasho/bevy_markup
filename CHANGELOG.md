@@ -59,6 +59,9 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   - a filter, mask or pattern over a shape so large (around 10³⁸ units,
     or grown that big by transforms) that its region can't be computed
     fails to load with an error, instead of a renderer panic.
+  - a blur (`feGaussianBlur`, `feDropShadow`) with a standard deviation
+    above `MAX_SVG_BLUR` (2²⁰ px at the drawn size) fails with an error
+    naming it, instead of a renderer panic in debug builds.
 
 ### Fixed
 - A stylesheet, `style` attribute or `var()` value with deeply nested

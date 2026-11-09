@@ -175,7 +175,9 @@ src/
                    through every transform resvg applies — groups, clips, masks, `feImage`,
                    pattern tiles, text outlines — must stay within `MAX_SVG_EXTENT` 2¹⁹ px of
                    the image, else `TooFarOut`: tiny-skia panics far off the canvas in every
-                   build, U24/U27/U28, bug_0194),
+                   build, U24/U27/U28, bug_0194; the same walk scales each blur's deviation
+                   as resvg does, ≤ `MAX_SVG_BLUR` 2²⁰ px, else `TooBlurred`: resvg's box blur
+                   overflows `i32`, U32, bug_0198),
                    straight-alpha `Rgba8UnormSrgb` output; `guarded` turns a usvg/resvg panic
                    into an error (resvg #1185, U20: a panicked AsyncCompute task re-panics
                    its poller). `<img>` redraw (ADR 0038 §3): `SvgDocument` (own typed loader,

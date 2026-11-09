@@ -5,19 +5,19 @@
 | Derived from | `docs/agents/bugs/INDEX.md`, `UPSTREAM.md`, `docs/agents/reviews/`, CI history |
 | Source state | `ff99cc1` + the ADR 0040 change, 2026-11-08 |
 
-An index; the bug reports are authoritative. 197 reports, bug_0001–0197 (2026-10-04 to 2026-11-09).
+An index; the bug reports are authoritative. 198 reports, bug_0001–0198 (2026-10-04 to 2026-11-09).
 
 ## By Status and Severity
 
 | Status | Count |
 |---|---|
-| Fixed, with regression test | 195 |
+| Fixed, with regression test | 196 |
 | Won't fix (known limit) | 1 — bug_0170, a one-frame row shift in the windowed build (low) |
 | Withdrawn (not a bug) | 1 — bug_0026 |
 
 | Severity | Count |
 |---|---|
-| High (reachable from user data, panics included) | 62 |
+| High (reachable from user data, panics included) | 63 |
 | Medium | 79 (+1 low–medium) |
 | Low | 54 |
 
@@ -25,11 +25,11 @@ No open bugs.
 
 ## How They Were Found
 
-Property testing, stateful testing and fuzzing (bug_0001–0005), the Fluent and layout oracles (0006–0013), mutation-testing triage, corpus coverage replays, example smoke runs, prototype_19 integration (0021), user reports (0023, 0028–0030), and whole-crate review sessions: review_0001–0006 found most of bug_0031 onward, each finding filed when its fix landed; CI itself (bug_0181, a scaling test); nightly fuzzing and its triage (bug_0182–0184, bug_0188–0197); the ADR 0038 SVG work's tests, testbench and example (bug_0185–0187). Per-session metadata in `INDEX.md`.
+Property testing, stateful testing and fuzzing (bug_0001–0005), the Fluent and layout oracles (0006–0013), mutation-testing triage, corpus coverage replays, example smoke runs, prototype_19 integration (0021), user reports (0023, 0028–0030), and whole-crate review sessions: review_0001–0006 found most of bug_0031 onward, each finding filed when its fix landed; CI itself (bug_0181, a scaling test); nightly fuzzing and its triage (bug_0182–0184, bug_0188–0198); the ADR 0038 SVG work's tests, testbench and example (bug_0185–0187). Per-session metadata in `INDEX.md`.
 
 ## Upstream Defects (`UPSTREAM.md`)
 
-U1–U15: lightningcss exponential parsing and unbounded recursion (U14, U15; worked around by the nesting pre-scan), fluent-syntax panic and stack overflow (forked, PR pending), pulldown-cmark panic (U13, fixed by updating), honggfuzz-rs, fuzzcheck (three, vendored patches), cargo-mutants, cargo-fuzz, Bevy picking (two), lightningcss, tl (switched to `astral-tl`). U16–U31: Tera's operator recursion (U16), astral-tl's `<b/>` (U21), and the SVG stack: usvg's unbounded recursion and conversion work (U17, U25; the depth and work bounds, ADR 0040), roxmltree (U18, version floor), usvg's file-reading resolver (U19), resvg's turbulence overflow under debug assertions (U20; `svg::guarded`, excused by the `svg` fuzz target's panic hook), tiny-skia's far-off-canvas panics in every build (U24, U27, U28; refused before drawing by `MAX_SVG_EXTENT`, bug_0194), usvg's infinite-`baseFrequency` and `feMorphology` radius unwraps and `feConvolveMatrix` `order` overflow (U26, U30, U29; refused before conversion, bug_0192, bug_0196, bug_0195), tiny-skia-path's overflowed bounding-box rect (U31; boxes measured by a first usvg pass, ADR 0042, bug_0197), svgtypes/kurbo arc subdivision (U22) and usvg's self-inheriting pattern (U23).
+U1–U15: lightningcss exponential parsing and unbounded recursion (U14, U15; worked around by the nesting pre-scan), fluent-syntax panic and stack overflow (forked, PR pending), pulldown-cmark panic (U13, fixed by updating), honggfuzz-rs, fuzzcheck (three, vendored patches), cargo-mutants, cargo-fuzz, Bevy picking (two), lightningcss, tl (switched to `astral-tl`). U16–U32: Tera's operator recursion (U16), astral-tl's `<b/>` (U21), and the SVG stack: usvg's unbounded recursion and conversion work (U17, U25; the depth and work bounds, ADR 0040), roxmltree (U18, version floor), usvg's file-reading resolver (U19), resvg's turbulence overflow under debug assertions (U20; `svg::guarded`, excused by the `svg` fuzz target's panic hook) and box blur overflow (U32; refused past `MAX_SVG_BLUR`, bug_0198), tiny-skia's far-off-canvas panics in every build (U24, U27, U28; refused before drawing by `MAX_SVG_EXTENT`, bug_0194), usvg's infinite-`baseFrequency` and `feMorphology` radius unwraps and `feConvolveMatrix` `order` overflow (U26, U30, U29; refused before conversion, bug_0192, bug_0196, bug_0195), tiny-skia-path's overflowed bounding-box rect (U31; boxes measured by a first usvg pass, ADR 0042, bug_0197), svgtypes/kurbo arc subdivision (U22) and usvg's self-inheriting pattern (U23).
 
 ## Nightly Failures (2026-10-14 to 2026-10-28, fixed on `main`)
 
@@ -47,7 +47,7 @@ The timeouts had masked bug_0180 (a panic in `Compound::parse`), found by a loca
 
 | Job | Cause | Fix |
 |---|---|---|
-| Fuzz svg (5 s timing assertion) | a 1.6 KB `<use>` fan-out was refused as too expensive to draw only after usvg converted 10⁵ copies (8.8 s on the runner) | bug_0188: the conversion-work bound (ADR 0040), which also covers markers (bug_0189) and arcs (bug_0190); the triage found bug_0191 (a self-inheriting pattern aborting the process) and, fuzzing the fix, bug_0192 (usvg's `baseFrequency` unwrap) and bug_0193 (an arc the bound undercounted from a rounded start point); a release replay found bug_0194 (tiny-skia panicking far off the canvas), and fuzzing that fix found bug_0195 (usvg's convolve `order` overflow), and fuzzing that fix found bug_0196 (usvg's morphology radius unwrap) and, probing it, bug_0197 (a filter over a huge box; ADR 0042) |
+| Fuzz svg (5 s timing assertion) | a 1.6 KB `<use>` fan-out was refused as too expensive to draw only after usvg converted 10⁵ copies (8.8 s on the runner) | bug_0188: the conversion-work bound (ADR 0040), which also covers markers (bug_0189) and arcs (bug_0190); the triage found bug_0191 (a self-inheriting pattern aborting the process) and, fuzzing the fix, bug_0192 (usvg's `baseFrequency` unwrap) and bug_0193 (an arc the bound undercounted from a rounded start point); a release replay found bug_0194 (tiny-skia panicking far off the canvas), and fuzzing that fix found bug_0195 (usvg's convolve `order` overflow), and fuzzing that fix found bug_0196 (usvg's morphology radius unwrap) and, probing it, bug_0197 (a filter over a huge box; ADR 0042); the nightly on that fix found bug_0198 (resvg's box blur overflow) |
 
 ## CI Failure (`f8629c2`, 2026-10-28, fixed)
 
