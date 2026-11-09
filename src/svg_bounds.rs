@@ -124,8 +124,53 @@ fn check_values(document: &roxmltree::Document) -> Result<(), SvgError> {
         value: value.chars().take(64).collect(),
         reason,
     };
+    // `primitiveUnits` is no presentation attribute, so CSS can't set it:
+    // the XML attributes are all of it. Which filter's units apply to a
+    // primitive goes through `href` chains; any `objectBoundingBox` in the
+    // document counts for every primitive (over-refusing, never missing).
+    let bounding_box_units = document.descendants().any(|node| {
+        node.attribute("primitiveUnits")
+            .is_some_and(|units| units.contains("objectBoundingBox"))
+    });
     for element in document.descendants().filter(|node| node.is_element()) {
         match element.tag_name().name() {
+            "feMorphology" => {
+                let Some(value) = element.attribute("radius") else {
+                    continue;
+                };
+                // As usvg reads it (U30): the whole list or nothing, one
+                // number or two, scaled only when both are non-negative.
+                let Ok(radii) = svgtypes::NumberListParser::from(value)
+                    .map(|number| number.map(|number| number as f32))
+                    .collect::<Result<Vec<f32>, _>>()
+                else {
+                    continue;
+                };
+                let (rx, ry) = match radii[..] {
+                    [r] => (r, r),
+                    [rx, ry] => (rx, ry),
+                    _ => continue,
+                };
+                if !(rx.is_sign_positive() && ry.is_sign_positive()) {
+                    continue;
+                }
+                // usvg multiplies each by 1 (user space) or by the
+                // element's bounding box, which is finite: a radius ≤ 1
+                // keeps the product finite.
+                let fits = |r: f32| r.is_finite() && (!bounding_box_units || r <= 1.0);
+                if !(fits(rx) && fits(ry)) {
+                    return Err(refuse(
+                        "feMorphology",
+                        "radius",
+                        value,
+                        if bounding_box_units {
+                            "its numbers must be at most 1 in objectBoundingBox units"
+                        } else {
+                            "its numbers must be finite"
+                        },
+                    ));
+                }
+            }
             "feTurbulence" => {
                 let Some(value) = element.attribute("baseFrequency") else {
                     continue;

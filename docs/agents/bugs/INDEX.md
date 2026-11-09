@@ -225,6 +225,8 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0193](bug_0193.md) | The work bound counted one cubic for a huge-radius arc that the simplifier, starting from a rounded point, split into ~3·10¹⁵ | `src/svg_bounds.rs` (`arc_curves`) | high | fixed: large radii count a whole turn | local cargo-fuzz `svg` run (OOM) |
 | [bug_0194](bug_0194.md) | tiny-skia panicked on paths far outside the image, in release builds too | `src/svg.rs` (`check_extent`) | high | fixed: drawings reaching past `MAX_SVG_EXTENT` are refused before drawing | release replay of the U24 seed; local cargo-fuzz `svg` run |
 | [bug_0195](bug_0195.md) | An `feConvolveMatrix` `order` whose sides multiply past `u32` panicked usvg in debug builds | `src/svg_bounds.rs` (`check_values`) | high | fixed: refused before usvg runs | local cargo-fuzz `svg` run |
+| [bug_0196](bug_0196.md) | An `feMorphology` radius that overflows `f32` panicked usvg, in release too | `src/svg_bounds.rs` (`check_values`); upstream usvg (U30) | high | fixed: refused before usvg runs | local cargo-fuzz `svg` run |
+| [bug_0197](bug_0197.md) | A filter on a shape wider than ~2.8·10³⁸ panicked tiny-skia-path during conversion | `src/svg_bounds.rs` / `src/svg.rs`; upstream tiny-skia-path (U31) | high | open: caught as a failed load | probing the bug_0196 fix |
 
 ## Discovery session metadata: bug_0001–0005
 
@@ -472,7 +474,7 @@ settle (rebuild observed) and the resulting dump to match a reference model.
 - **Machine/toolchain:** Arch Linux (kernel 7.2.11), AMD Ryzen 7 9800X3D,
   rustc 1.98.1, `nightly-2026-09-09` for cargo-fuzz 0.13.2.
 
-## Discovery session metadata: bug_0188–0195 (2026-11-08 to 2026-11-09)
+## Discovery session metadata: bug_0188–0197 (2026-11-08 to 2026-11-09)
 
 - **Method:** triage of the nightly workflow's failed `svg` fuzz job (run
   42471256114): the artifact was timed stage by stage with a throwaway
@@ -494,9 +496,11 @@ settle (rebuild observed) and the resulting dump to match a reference model.
   edge clipper found the two causes (UPSTREAM U24/U28, U27), and the
   extent limit was set by drawing 10,000 random paths per magnitude. A
   30-minute fork-mode run of that fix (`3050ce8`, 7.6M inputs) found
-  bug_0195 (three artifacts, one cause).
+  bug_0195 (three artifacts, one cause). A 30-minute run of that fix
+  (`3211bf6`, 6.0M inputs) found bug_0196 (one artifact); probing its fix
+  with huge bounding boxes found bug_0197.
 - **Discovery agent:** the nightly workflow (bug_0188); Claude Code
-  session, `claude-opus-5-5` (triage, bug_0189–0195).
+  session, `claude-opus-5-5` (triage, bug_0189–0197).
 - **Commit at discovery:** `ff99cc1`.
 - **Machine/toolchain:** Arch Linux (kernel 7.2.14), AMD Ryzen 7 9800X3D,
   rustc 1.98.1, cargo-fuzz on the current nightly; CI: `nightly-2026-09-09`.

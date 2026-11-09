@@ -2572,6 +2572,52 @@ mod tests {
         }
     }
 
+    /// usvg 0.49 unwraps a `PositiveF32` of each `feMorphology` radius ×
+    /// the primitive scale, which panics in every build when it isn't
+    /// finite (UPSTREAM U30). The check refuses such radii before usvg runs.
+    #[test]
+    fn morphology_radii_that_overflow_are_refused() {
+        let draw = |units: &str, radius: &str| {
+            let body = format!(
+                "<filter id='f' {units}><feMorphology radius='{radius}'/></filter><rect width='8' height='8' filter='url(#f)'/>"
+            );
+            rasterize(svg(64, 64, &body).as_bytes(), 1.0, Limits::DEFAULT)
+        };
+        let bbox = "primitiveUnits='objectBoundingBox'";
+        // The fuzz find's radius; one infinite side; past 1 in box units.
+        for (units, radius) in [
+            ("", "1e49"),
+            ("", "2 1e39"),
+            (bbox, "2"),
+            (bbox, "0.5 1e39"),
+        ] {
+            assert!(
+                matches!(draw(units, radius), Err(SvgError::OutOfRange { .. })),
+                "{units} {radius}"
+            );
+        }
+        // Finite radii, a negative side (usvg skips the scaling), a bad or
+        // three-number list (usvg's defaults), box units up to 1.
+        for (units, radius) in [
+            ("", "3"),
+            ("", "1e30 2"),
+            ("", "-1 1e49"),
+            ("", "x 1e49"),
+            ("", "1e49 1e49 1e49"),
+            (bbox, "0.1 1"),
+        ] {
+            let result = draw(units, radius);
+            assert!(
+                !matches!(
+                    result,
+                    Err(SvgError::OutOfRange { .. } | SvgError::Panicked(_))
+                ),
+                "{units} {radius}: {:?}",
+                result.err()
+            );
+        }
+    }
+
     /// Ordinary illustrations stay far inside the work budget: the bound
     /// over-approximates, but not by enough to refuse real content.
     #[test]

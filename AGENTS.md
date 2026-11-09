@@ -138,7 +138,8 @@ src/
                    bug_0191). First `check_values` refuses values usvg would panic on
                    (`feTurbulence` `baseFrequency` not finite as `f32`, U26, bug_0192;
                    `feConvolveMatrix` `order` sides multiplying past `u32`, U29,
-                   bug_0195: `OutOfRange`). `depth`: longest weighted path, ≤ `MAX_DEPTH` 256 units ≈ 800 KB
+                   bug_0195; `feMorphology` `radius` not finite, or above 1 when any
+                   `primitiveUnits` is `objectBoundingBox`, U30, bug_0196: `OutOfRange`). `depth`: longest weighted path, ≤ `MAX_DEPTH` 256 units ≈ 800 KB
                    debug stack (usvg's converter overflows a 2 MB thread on a few KB of
                    references, UPSTREAM U17). `work`: Σ instances × own work, instances = paths
                    from the root with edge multiplicities (`<use>` copies 1, marker = the shape's
