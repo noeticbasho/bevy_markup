@@ -88,7 +88,17 @@ pub fn run(window: ExampleWindow, setup: impl FnOnce(&mut App)) {
                 .disable::<bevy::winit::WinitPlugin>()
                 .disable::<bevy::render::pipelined_rendering::PipelinedRenderingPlugin>()
                 .set(bevy::window::WindowPlugin {
-                    primary_window: None,
+                    // A primary `Window` entity with no native window behind
+                    // it (no winit: it never gets a `RawHandleWrapper`, so
+                    // the renderer never extracts it). Bevy 0.20's ray
+                    // picking needs one even for image targets
+                    // (`Location::is_in_viewport`, UPSTREAM U33): without it
+                    // mesh picking hits nothing offscreen.
+                    primary_window: Some(bevy::window::Window {
+                        title: window.title.into(),
+                        resolution: window.resolution.into(),
+                        ..default()
+                    }),
                     exit_condition: ExitCondition::DontExit,
                     ..default()
                 })

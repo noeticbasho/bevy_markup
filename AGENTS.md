@@ -240,7 +240,9 @@ examples/
                    drives frames, `game/ui` + input mocks work, screenshots
                    error) and `--offscreen` (windowed rendering minus winit
                    into the harness's offscreen texture: real screenshots
-                   without a window). Headless exists because a windowed
+                   without a window; a primary `Window` entity with no native
+                   window behind it, so Bevy's ray picking — mesh picking,
+                   the canvas example's drag — works, UPSTREAM U33). Headless exists because a windowed
                    run stops ticking when its window is unfocused
                    (`ExampleWindow::before_plugins` runs on the empty `App` — what must
                    exist before `AssetPlugin`, e.g. the testbench's asset source)
@@ -344,9 +346,9 @@ examples/
                    layer 1, drawn by the portrait camera into an image registered as the
                    `portrait` canvas (`HtmlCanvases`); a thumbnail canvas names the same camera
                    (its image, stretched); drag / click the portrait (Bevy's mesh picking
-                   through the `ViewportNode`; needs a window: under `--offscreen` Bevy's
-                   ray picking finds no primary window, UPSTREAM U33) turn the hero / change
-                   the armor, Q / E or LB / RB turn it; "Hide the portrait" → `shown` false →
+                   through the `ViewportNode`; also under `--offscreen`, whose primary
+                   window entity Bevy's ray picking needs, UPSTREAM U33) turn the hero /
+                   change the armor, Q / E or LB / RB turn it; "Hide the portrait" → `shown` false →
                    the camera's `is_active` off; Space / Y language
   svg/             ADR 0038 (`--features svg`, `svg-text` for the badge): inline `<svg>` icons
                    (toolbar buttons and a row of sizes; `currentColor` from the cascade, so

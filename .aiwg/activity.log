@@ -28,3 +28,4 @@
 ## [2026-11-09 12:04] update | Fixed bug_0197 (U31) per ADR 0042: a first usvg conversion of a rewritten copy measures object bounding boxes before filters/masks/patterns use them; replaced bug_0196's document-wide radius rule
 ## [2026-11-09 13:29] update | Fixed bug_0198 (resvg box blur i32 overflow, U32) found by the hand-dispatched nightly svg fuzz job on 6a7c87d: blurs past MAX_SVG_BLUR (2^20 px) refused before drawing
 ## [2026-11-09 14:25] create | Prototype of ADR 0041 <canvas> on branch canvas: HtmlCanvases/CanvasSource, sync_canvases (ViewportNode/ImageNode, MAX_CANVAS_SIDE gate, one viewport per camera, shown), canvas example (verified windowed by the user), tests/canvas.rs, UPSTREAM U33
+## [2026-11-09 14:40] update | canvas branch: the examples' --offscreen harness spawns a handle-less primary Window so Bevy's ray picking works offscreen (UPSTREAM U33); canvas hero dragged and clicked offscreen

@@ -191,6 +191,9 @@ example) to check the design empirically:
   arrives at the image's center and clicks the scene's entity).
   Windowed, the user confirmed it end to end: dragging the portrait turns
   the hero (mesh picking through the canvas), as do Q / E and LB / RB.
+  With a handle-less primary window in the harness's `--offscreen` mode,
+  dragging and clicking the hero work offscreen too (checked by
+  screenshots through the dev-tools harness).
 - Each test was checked by breaking its feature (no size gate, no aspect
   ratio, children walked, no camera on the viewport).
 - Still open from §1: a `<canvas>` inside a text block isn't split out; it
