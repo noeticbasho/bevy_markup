@@ -138,7 +138,7 @@ pub(crate) fn intrinsic_size(tag: &tl::HTMLTag, layout: &mut crate::cascade::Lay
         tag.attributes()
             .get(name)
             .flatten()
-            .and_then(|value| value.as_utf8_str().trim().parse::<u32>().ok())
+            .and_then(|value| dimension(&crate::template::decode_attribute(value.as_utf8_str())))
             .map_or(default, |value| value as f32)
     };
     let width = attribute("width", DEFAULT_SIZE.0);
@@ -155,6 +155,38 @@ pub(crate) fn intrinsic_size(tag: &tl::HTMLTag, layout: &mut crate::cascade::Lay
         }
         _ => {}
     }
+}
+
+/// A canvas `width`/`height` value by HTML's rules for parsing non-negative
+/// integers: leading ASCII whitespace skipped, an optional sign, then the
+/// digits up to the first non-digit (`"256px"` is 256, `"12.5"` is 12, `"-0"`
+/// is 0). The attributes reflect as `unsigned long`, limited to
+/// `0..=i32::MAX`; anything else (no digits, negative, too large) is `None`:
+/// the default size.
+pub(crate) fn dimension(value: &str) -> Option<u32> {
+    let rest = value.trim_start_matches(['\t', '\n', '\x0C', '\r', ' ']);
+    let (negative, rest) = match rest.as_bytes().first() {
+        Some(b'-') => (true, &rest[1..]),
+        Some(b'+') => (false, &rest[1..]),
+        _ => (false, rest),
+    };
+    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+    if digits == 0 {
+        return None;
+    }
+    // Leading zeros don't count toward the size; past 10 significant
+    // digits it's out of range anyway.
+    let significant = rest[..digits].trim_start_matches('0');
+    if significant.len() > 10 {
+        return None;
+    }
+    let number: u64 = significant.parse().unwrap_or(0);
+    if negative && number != 0 {
+        return None;
+    }
+    u32::try_from(number)
+        .ok()
+        .filter(|&number| number <= i32::MAX as u32)
 }
 
 /// Marks a spawned `<canvas>` element with [`HtmlCanvas`].
@@ -358,4 +390,70 @@ fn document_path(
     }
     path.reverse();
     path
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dimension;
+    use proptest::prelude::*;
+
+    /// HTML's rules for parsing non-negative integers, case by case.
+    #[test]
+    fn dimensions_parse_like_html() {
+        for (value, expected) in [
+            ("256", Some(256)),
+            ("  256", Some(256)),
+            ("\t\n\x0C\r 7", Some(7)),
+            ("256px", Some(256)),
+            ("12.9", Some(12)),
+            ("+5", Some(5)),
+            ("-0", Some(0)),
+            ("0", Some(0)),
+            ("007", Some(7)),
+            ("2147483647", Some(2_147_483_647)),
+            ("000000000000002147483647", Some(2_147_483_647)),
+            // Errors: the default size.
+            ("", None),
+            ("   ", None),
+            ("px", None),
+            ("-5", None),
+            ("+", None),
+            ("+-5", None),
+            ("2147483648", None),
+            ("99999999999999999999", None),
+            // Not ASCII whitespace (U+00A0, U+3000).
+            ("\u{a0}5", None),
+            ("\u{3000}5", None),
+        ] {
+            assert_eq!(dimension(value), expected, "{value:?}");
+        }
+    }
+
+    proptest! {
+        /// Any in-range number survives ASCII whitespace before it, a `+`,
+        /// leading zeros and any suffix that doesn't start with a digit.
+        #[test]
+        fn a_number_reads_back_whatever_surrounds_it(
+            number in 0u32..=i32::MAX as u32,
+            space in "[\t\n\x0C\r ]{0,3}",
+            plus in proptest::bool::ANY,
+            zeros in 0usize..4,
+            suffix in "([^0-9].*)?",
+        ) {
+            let value = format!(
+                "{space}{}{}{number}{suffix}",
+                if plus { "+" } else { "" },
+                "0".repeat(zeros),
+            );
+            prop_assert_eq!(dimension(&value), Some(number));
+        }
+
+        /// Never a panic, and never more than `i32::MAX`.
+        #[test]
+        fn any_text_parses_in_range_or_not_at_all(value in ".{0,24}") {
+            if let Some(number) = dimension(&value) {
+                prop_assert!(number <= i32::MAX as u32);
+            }
+        }
+    }
 }

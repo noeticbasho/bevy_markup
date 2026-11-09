@@ -173,6 +173,15 @@ pub const MAX_SVG_EXTENT: f32 = 524_288.0;
 /// beyond any layer resvg blurs (at most 5 × [`MAX_SVG_SIDE`] per side).
 pub const MAX_SVG_BLUR: f32 = 1_048_576.0;
 
+/// How far a filter region or primitive subregion may reach from the image,
+/// in pixels at the drawn size. resvg 0.49 converts both to `IntRect`s with
+/// tiny-skia-path's `NonZeroRect::to_int_rect`, which unwraps
+/// `IntRect::from_xywh` and panics in every build once `x + width` passes
+/// `i32::MAX` (UPSTREAM U35, bug_0201). 2²⁴ px leaves room for the regions of
+/// large blurred shapes (128 × [`MAX_SVG_EXTENT`]) and is far below the
+/// overflow.
+pub const MAX_SVG_FILTER_REGION: f32 = 16_777_216.0;
+
 /// Settings for loading an `.svg` as an [`Image`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SvgLoaderSettings {
@@ -259,7 +268,8 @@ pub(crate) enum SvgError {
     TooManyReferences {
         max: usize,
     },
-    /// A path reaches farther from the image than [`MAX_SVG_EXTENT`].
+    /// A path reaches farther from the image than [`MAX_SVG_EXTENT`], or a
+    /// filter region farther than [`MAX_SVG_FILTER_REGION`] (`max` says which).
     TooFarOut {
         extent: f32,
         max: f32,
@@ -323,8 +333,9 @@ impl fmt::Display for SvgError {
             }
             Self::TooFarOut { extent, max } => write!(
                 f,
-                "draws too far outside the image (a path reaches {extent:.0} px from it at this \
-                 size, limit {max:.0}): reduce its coordinates, radii or stroke widths"
+                "draws too far outside the image (a path or filter region reaches {extent:.0} px \
+                 from it at this size, limit {max:.0}): reduce its coordinates, radii, stroke \
+                 widths or filter regions"
             ),
             Self::TooBlurred { sigma, max } => write!(
                 f,
@@ -1407,6 +1418,7 @@ fn check_extent(tree: &usvg::Tree, width: u32, height: u32) -> Result<(), SvgErr
     let mut walk = ExtentWalk {
         extent: 0.0,
         blur: None,
+        region: false,
     };
     match walk.group(tree.root(), canvas, 0) {
         Ok(()) => Ok(()),
@@ -1417,7 +1429,11 @@ fn check_extent(tree: &usvg::Tree, width: u32, height: u32) -> Result<(), SvgErr
             },
             None => SvgError::TooFarOut {
                 extent: walk.extent,
-                max: MAX_SVG_EXTENT,
+                max: if walk.region {
+                    MAX_SVG_FILTER_REGION
+                } else {
+                    MAX_SVG_EXTENT
+                },
             },
         }),
     }
@@ -1429,6 +1445,9 @@ struct ExtentWalk {
     extent: f32,
     /// The blur that stopped the walk, past [`MAX_SVG_BLUR`].
     blur: Option<f32>,
+    /// A filter region stopped it (its reach is `extent`), past
+    /// [`MAX_SVG_FILTER_REGION`].
+    region: bool,
 }
 
 impl ExtentWalk {
@@ -1464,7 +1483,43 @@ impl ExtentWalk {
         // region. Blurs: resvg scales the deviation by the same transform
         // (`filter/mod.rs` `resolve_std_dev`).
         for filter in group.filters() {
+            // `filter::apply_inner`: the region and each subregion become
+            // `IntRect`s in pixels (U35).
+            let rects = std::iter::once(filter.rect())
+                .chain(filter.primitives().iter().map(|primitive| primitive.rect()));
+            for rect in rects {
+                let reach = rect.transform(transform).map_or(f32::INFINITY, |rect| {
+                    [rect.left(), rect.top(), rect.right(), rect.bottom()]
+                        .into_iter()
+                        .map(f32::abs)
+                        .fold(0.0, f32::max)
+                });
+                // `!(≤)`: NaN refuses too.
+                if !(reach <= MAX_SVG_FILTER_REGION) {
+                    self.extent = reach;
+                    self.region = true;
+                    return Err(Over);
+                }
+            }
             for primitive in filter.primitives() {
+                // `apply_offset`/`apply_drop_shadow`: the scaled offset,
+                // saturated to `i32`, positions a `draw_pixmap`, whose
+                // `IntSize::to_int_rect` unwraps an overflowing `x + width`
+                // (U35, bug_0201): bounded like the regions.
+                let offset = match primitive.kind() {
+                    usvg::filter::Kind::Offset(offset) => Some((offset.dx(), offset.dy())),
+                    usvg::filter::Kind::DropShadow(shadow) => Some((shadow.dx(), shadow.dy())),
+                    _ => None,
+                };
+                if let Some((dx, dy)) = offset {
+                    let (sx, sy) = transform.get_scale();
+                    let reach = (dx * sx).abs().max((dy * sy).abs());
+                    if !(reach <= MAX_SVG_FILTER_REGION) {
+                        self.extent = reach;
+                        self.region = true;
+                        return Err(Over);
+                    }
+                }
                 let deviation = match primitive.kind() {
                     usvg::filter::Kind::Image(image) => {
                         self.group(image.root(), scale_of(transform), depth + 1)?;
@@ -1640,8 +1695,30 @@ impl CostWalk {
         for paint in fill.into_iter().chain(stroke) {
             self.add_area(area, 1.0)?;
             if let usvg::Paint::Pattern(pattern) = paint {
-                // The tile is drawn per use, then shaded over the path.
-                self.group(pattern.root(), depth + 1)?;
+                // The tile is a pixmap of its own, per use, at its drawn
+                // size: resvg's `render_pattern_pixmap` scales the pattern
+                // rect by the path's transform with the pattern's, with no
+                // limit, and a failed allocation aborts (bug_0200). Its
+                // content draws at that scale, nested patterns included.
+                let (sx, sy) = path
+                    .abs_transform()
+                    .pre_concat(pattern.transform())
+                    .get_scale();
+                let (tile_x, tile_y) = (f64::from(sx) * self.scale_x, f64::from(sy) * self.scale_y);
+                let rect = pattern.rect();
+                let tile = (f64::from(rect.width()) * tile_x).round()
+                    * (f64::from(rect.height()) * tile_y).round();
+                if !tile.is_finite() {
+                    self.total = self.max.saturating_add(1);
+                    return Err(Over);
+                }
+                // Allocated (zeroed), drawn into, then shaded over the path.
+                self.add_area(tile, 2.0)?;
+                let outer = (self.scale_x, self.scale_y);
+                (self.scale_x, self.scale_y) = (tile_x, tile_y);
+                let drawn = self.group(pattern.root(), depth + 1);
+                (self.scale_x, self.scale_y) = outer;
+                drawn?;
             }
         }
         Ok(())
@@ -2808,6 +2885,90 @@ mod tests {
         }
     }
 
+    /// resvg 0.49 draws a pattern's tile into a pixmap of its own at the
+    /// drawn size (`render_pattern_pixmap`: the pattern rect × the scale of
+    /// the path's transform with the pattern's), with no limit; a failed
+    /// allocation aborts the process (bug_0200, found by
+    /// `properties::hostile_magnitudes_never_panic`: a 133 TB tile). The
+    /// cost estimate charges the tile, so such a document is refused before
+    /// drawing. Ordinary tiles, in either units, still draw.
+    #[test]
+    fn pattern_tiles_count_toward_the_cost() {
+        for body in [
+            // 10⁴ user units × 100 = a 10⁶ px square tile (4 TB).
+            "<pattern id='p' width='1e4' height='1e4' patternUnits='userSpaceOnUse'>\
+             <rect width='1' height='1'/></pattern>\
+             <rect width='8' height='8' fill='url(#p)' transform='scale(100)'/>",
+            // The find: box units (60 × 900 of a 500 × 80 box) scaled ×600.
+            "<pattern id='p' width='6e1' height='9e2'><rect width='1' height='1'/></pattern>\
+             <g transform='matrix(-6e2 0 0 9e-1 0 0)' fill='url(#p)'>\
+             <path d='M-5e2 -8e1 L-9e-1 0 A-5e2 0 0 0 1 -8e1 -9e-1 Z'/></g>",
+            // A nested pattern drawn at its outer tile's scale.
+            "<pattern id='inner' width='1e3' height='1e3' patternUnits='userSpaceOnUse'>\
+             <rect width='1' height='1'/></pattern>\
+             <pattern id='outer' width='8' height='8' patternUnits='userSpaceOnUse' \
+             patternTransform='scale(1000)'><rect width='8' height='8' fill='url(#inner)'/></pattern>\
+             <rect width='8' height='8' fill='url(#outer)'/>",
+        ] {
+            let result = draw(&svg(64, 64, body));
+            assert!(
+                matches!(result, Err(SvgError::TooExpensive { .. })),
+                "{body}: {:?}",
+                result.err()
+            );
+        }
+        for body in [
+            "<pattern id='p' width='8' height='8' patternUnits='userSpaceOnUse'>\
+             <rect width='4' height='4'/></pattern><rect width='64' height='64' fill='url(#p)'/>",
+            "<pattern id='p' width='0.25' height='0.25'><rect width='4' height='4'/></pattern>\
+             <rect width='64' height='64' fill='url(#p)'/>",
+        ] {
+            let result = draw(&svg(64, 64, body));
+            assert!(result.is_ok(), "{body}: {:?}", result.err());
+        }
+    }
+
+    /// resvg 0.49 turns each filter region and primitive subregion into an
+    /// `IntRect` in pixels with tiny-skia-path's `to_int_rect`, which unwraps
+    /// once `x + width` passes `i32::MAX` (UPSTREAM U35, bug_0201, found by
+    /// `properties::hostile_magnitudes_never_panic`). Refused past
+    /// [`MAX_SVG_FILTER_REGION`]; regions far past the image but under it
+    /// still draw.
+    #[test]
+    fn filter_regions_past_the_limit_are_refused() {
+        for body in [
+            // The find (minimized): a box-unit subregion 4·10⁵ × a 6000-unit box.
+            "<filter id='f' primitiveUnits='objectBoundingBox'><feFlood width='4e5'/></filter>\
+             <rect width='6000' height='10' filter='url(#f)'/>",
+            // An offset (or a drop shadow's) scaled past i32: the find,
+            // `dx='1e8'` × 200 (both panic resvg directly).
+            "<filter id='f'><feOffset dx='1e8' dy='1e8'/></filter>\
+             <g transform='scale(2e2)' filter='url(#f)'><rect width='0.1' height='0.1'/></g>",
+            "<filter id='f'><feDropShadow dx='3e9'/></filter>\
+             <rect width='8' height='8' filter='url(#f)'/>",
+            // A subregion in user space (both panic resvg directly).
+            "<filter id='f' primitiveUnits='userSpaceOnUse'><feFlood x='0' width='3e9'/>\
+             </filter><rect width='8' height='8' filter='url(#f)'/>",
+        ] {
+            let result = draw(&svg(64, 64, body));
+            assert!(
+                matches!(result, Err(SvgError::TooFarOut { max, .. }) if max == MAX_SVG_FILTER_REGION),
+                "{body}: {:?}",
+                result.err()
+            );
+        }
+        for body in [
+            "<filter id='f' filterUnits='userSpaceOnUse' x='-1e6' y='-1e6' width='2e6' \
+             height='2e6'><feGaussianBlur stdDeviation='4'/></filter>\
+             <rect width='8' height='8' filter='url(#f)'/>",
+            "<filter id='f'><feGaussianBlur stdDeviation='4'/></filter>\
+             <rect width='64' height='64' filter='url(#f)'/>",
+        ] {
+            let result = draw(&svg(64, 64, body));
+            assert!(result.is_ok(), "{body}: {:?}", result.err());
+        }
+    }
+
     /// Ordinary illustrations stay far inside the work budget: the bound
     /// over-approximates, but not by enough to refuse real content.
     #[test]
@@ -2860,6 +3021,171 @@ mod tests {
                 work < MAX_SVG_WORK / 4,
                 "{name}: work {work} of {MAX_SVG_WORK}"
             );
+        }
+    }
+
+    /// Generated hostile documents (ADR 0040/0042's guards, bug_0192–0198):
+    /// whatever the magnitudes, a document loads or is refused — never a
+    /// panic in usvg, resvg or tiny-skia. Test builds have overflow checks
+    /// on, so arithmetic overflow panics too.
+    mod properties {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// A number from 0 to past `f32::MAX`, either sign, sometimes tiny.
+        fn magnitude() -> impl Strategy<Value = String> {
+            // Mostly ordinary numbers, so documents reach resvg's drawing;
+            // a huge one in about one number of nine.
+            prop_oneof![
+                1 => Just("0".to_owned()),
+                7 => (1u32..10, -1i32..=3, any::<bool>())
+                    .prop_map(|(m, e, neg)| format!("{}{m}e{e}", if neg { "-" } else { "" })),
+                1 => (1u32..10, 4i32..=40, any::<bool>())
+                    .prop_map(|(m, e, neg)| format!("{}{m}e{e}", if neg { "-" } else { "" })),
+            ]
+        }
+
+        fn transform() -> impl Strategy<Value = String> {
+            prop_oneof![
+                2 => Just(String::new()),
+                1 => magnitude().prop_map(|m| format!(" transform='scale({m})'")),
+                1 => (magnitude(), magnitude())
+                    .prop_map(|(x, y)| format!(" transform='translate({x} {y})'")),
+                1 => (magnitude(), magnitude(), magnitude())
+                    .prop_map(|(a, d, e)| format!(" transform='matrix({a} 0 0 {d} {e} 0)'")),
+            ]
+        }
+
+        fn shape() -> impl Strategy<Value = String> {
+            prop_oneof![
+                (magnitude(), magnitude(), magnitude(), magnitude())
+                    .prop_map(|(x, y, w, h)| format!("<rect x='{x}' y='{y}' width='{w}' height='{h}'/>")),
+                (magnitude(), magnitude(), magnitude())
+                    .prop_map(|(x, y, r)| format!("<circle cx='{x}' cy='{y}' r='{r}'/>")),
+                (magnitude(), magnitude(), magnitude(), magnitude())
+                    .prop_map(|(a, b, c, d)| format!(
+                        "<path d='M{a} {b} L{c} {d} A{a} {d} 0 0 1 {b} {c} Z' stroke='red' stroke-width='{d}'/>"
+                    )),
+            ]
+        }
+
+        /// One filter primitive. Turbulence stays ordinary (`numOctaves` 1,
+        /// `baseFrequency` under 1): many octaves or a huge frequency
+        /// overflow resvg's `noise2`, a known debug-only upstream panic
+        /// (U20) that release builds wrap.
+        fn primitive() -> impl Strategy<Value = String> {
+            prop_oneof![
+                magnitude().prop_map(|m| format!("<feGaussianBlur stdDeviation='{m}'/>")),
+                magnitude().prop_map(|m| format!("<feDropShadow stdDeviation='{m}' dx='{m}'/>")),
+                magnitude().prop_map(|m| format!("<feMorphology radius='{m}'/>")),
+                magnitude().prop_map(|m| format!("<feOffset dx='{m}' dy='{m}'/>")),
+                (1u32..100).prop_map(|f| format!(
+                    "<feTurbulence baseFrequency='0.{f:02}' numOctaves='1'/>"
+                )),
+                magnitude().prop_map(|m| format!("<feConvolveMatrix order='{m}'/>")),
+                (magnitude(), magnitude())
+                    .prop_map(|(x, w)| format!("<feFlood x='{x}' width='{w}'/>")),
+            ]
+        }
+
+        fn units() -> impl Strategy<Value = &'static str> {
+            prop::sample::select(vec!["", "userSpaceOnUse", "objectBoundingBox"])
+        }
+
+        prop_compose! {
+            fn document()(
+                view_box in proptest::option::of((magnitude(), magnitude())),
+                outer in transform(),
+                inner in transform(),
+                body in shape(),
+                primitive in primitive(),
+                filter_units in units(),
+                primitive_units in units(),
+                region in proptest::option::of((magnitude(), magnitude())),
+                effect in 0u8..5,
+                tile in (magnitude(), magnitude()),
+            ) -> String {
+                let units = |name: &str, value: &str| {
+                    if value.is_empty() { String::new() } else { format!(" {name}='{value}'") }
+                };
+                let region = region
+                    .map(|(x, w)| format!(" x='{x}' width='{w}'"))
+                    .unwrap_or_default();
+                let defs = format!(
+                    "<filter id='f'{}{}{region}>{primitive}</filter>\
+                     <mask id='m'{}><rect width='1' height='1' fill='white'/></mask>\
+                     <pattern id='p' width='{}' height='{}'{}><rect width='1' height='1'/></pattern>",
+                    units("filterUnits", filter_units),
+                    units("primitiveUnits", primitive_units),
+                    units("maskUnits", filter_units),
+                    tile.0,
+                    tile.1,
+                    units("patternUnits", primitive_units),
+                );
+                let applied = match effect {
+                    0 => " filter='url(#f)'".to_owned(),
+                    1 => " mask='url(#m)'".to_owned(),
+                    2 => " fill='url(#p)'".to_owned(),
+                    3 => " style='filter: blur(3px)'".to_owned(),
+                    _ => String::new(),
+                };
+                let view_box = view_box
+                    .map(|(w, h)| format!(" viewBox='0 0 {w} {h}'"))
+                    .unwrap_or_default();
+                format!(
+                    "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'{view_box}>\
+                     <defs>{defs}</defs><g{outer}{applied}><g{inner}>{body}</g></g></svg>"
+                )
+            }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(400))]
+
+            #[test]
+            fn hostile_magnitudes_never_panic(source in document()) {
+                let result = rasterize(source.as_bytes(), 1.0, Limits::DEFAULT);
+                prop_assert!(
+                    !matches!(result, Err(SvgError::Panicked(_))),
+                    "{source}\n{:?}",
+                    result.err()
+                );
+            }
+
+            /// `check_values` refuses an `feConvolveMatrix` `order` exactly
+            /// when usvg would panic on it (UPSTREAM U29): no over- or
+            /// under-refusal, whatever the numbers.
+            #[test]
+            fn convolve_orders_are_refused_exactly_when_usvg_panics(
+                columns in prop_oneof![magnitude(), (0u32..70_000).prop_map(|n| n.to_string())],
+                rows in proptest::option::of(prop_oneof![
+                    magnitude(),
+                    (0u32..70_000).prop_map(|n| n.to_string()),
+                ]),
+            ) {
+                let order = match &rows {
+                    Some(rows) => format!("{columns} {rows}"),
+                    None => columns.clone(),
+                };
+                let source = svg(
+                    8,
+                    8,
+                    &format!(
+                        "<filter id='f'><feConvolveMatrix order='{order}'/></filter>\
+                         <rect width='8' height='8' filter='url(#f)'/>"
+                    ),
+                );
+                let document = roxmltree::Document::parse(&source).unwrap();
+                let refused = matches!(
+                    svg_bounds::bounds(&document, svg_bounds::MAX_REFERENCES),
+                    Err(SvgError::OutOfRange { .. })
+                );
+                let panics = std::panic::catch_unwind(|| {
+                    let _ = usvg::Tree::from_data(source.as_bytes(), &usvg::Options::default());
+                })
+                .is_err();
+                prop_assert_eq!(refused, panics, "order {:?}", order);
+            }
         }
     }
 }

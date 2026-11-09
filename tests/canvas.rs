@@ -395,3 +395,288 @@ fn pointer_input_reaches_the_cameras_scene() {
         "the scene entity was clicked through the canvas"
     );
 }
+
+/// The attributes parse by HTML's rules (entities decoded, digits up to
+/// the first non-digit), and a canvas in a Markdown template is the same
+/// box: raw HTML passes through.
+#[test]
+fn attributes_parse_like_html_in_html_and_markdown() {
+    let html = "<canvas id='px' width='256px' height=' +128'></canvas>\
+                <canvas id='entity' width='&#50;0' height='1&#48;'></canvas>";
+    let mut ui = page("canvas_attributes", html, "");
+    let lines: Vec<String> = ui
+        .layout_dump()
+        .lines()
+        .skip(1)
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(
+        lines,
+        ["  canvas#px 0,0 256x128", "  canvas#entity 0,128 20x10"],
+    );
+
+    // Markdown: with the opening tag alone on its line the canvas is a
+    // CommonMark HTML block, so the same box; written on one line it is
+    // inline HTML in a paragraph — text, where a canvas has no box (and
+    // shows nothing).
+    let mut ui = TestUi::with_layout(
+        "canvas_markdown",
+        &[(
+            "page.md",
+            "# Map\n\n<canvas id='map' width='64' height='32'>\n</canvas>\n\n\
+             Inline: <canvas id='inline' width='64' height='32'>fallback</canvas>\n",
+        )],
+        VIEWPORT,
+    )
+    .spawn("page.md", TemplateContext::default(), column());
+    ui.settle();
+    let dump = ui.layout_dump();
+    assert!(
+        dump.lines()
+            .any(|line| line.trim_start().starts_with("canvas#map ") && line.ends_with(" 64x32")),
+        "the block canvas is a 64×32 box:\n{dump}"
+    );
+    assert!(!dump.contains("canvas#inline"), "{dump}");
+    assert!(!ui.dump().contains("fallback"), "{}", ui.dump());
+}
+
+/// Inside text a canvas has no box (only one directly in a container is a
+/// node), and its fallback content never shows; a translation of a canvas
+/// changes nothing either: there's no content to replace.
+#[test]
+fn canvas_content_never_shows() {
+    let mut ui = TestUi::new(
+        "canvas_content",
+        &[
+            (
+                "page.html",
+                "<p>Map: <canvas data-canvas='map'>fallback</canvas> end</p>\
+                 <canvas id='own' data-l10n-id='canvas-label'>own fallback</canvas>",
+            ),
+            (
+                "locales/en-US/main.ftl.ron",
+                r#"(locale: "en-US", resources: ["ui.ftl"])"#,
+            ),
+            ("locales/en-US/ui.ftl", "canvas-label = translated fallback"),
+        ],
+    )
+    .locale("locales/en-US/main.ftl.ron")
+    .spawn("page.html", TemplateContext::default(), column());
+    ui.settle();
+    let dump = ui.dump();
+    assert!(!dump.contains("fallback"), "no fallback text:\n{dump}");
+    assert!(
+        dump.contains("\"Map: \"") || dump.contains("Map: "),
+        "{dump}"
+    );
+    assert!(
+        dump.contains("canvas#own"),
+        "the translated canvas is still a canvas:\n{dump}"
+    );
+    assert_eq!(
+        ui.world_mut()
+            .query::<&HtmlCanvas>()
+            .iter(ui.world_mut())
+            .count(),
+        1,
+        "only the canvas in a container is an element"
+    );
+}
+
+/// The viewport follows visibility: hiding the canvas that has it hands it
+/// to the next visible one (in document order), which then resizes the
+/// camera's image; showing the first again doesn't take it back (the
+/// visible owner keeps it).
+#[test]
+fn the_viewport_moves_to_a_visible_canvas() {
+    let mut ui = page_with(
+        "canvas_owner",
+        "<canvas data-canvas='map' class='{{ first }}' width='200' height='100'></canvas>\
+         <canvas data-canvas='map' width='60' height='30'></canvas>",
+        ".hidden { display: none }",
+        TemplateContext::default().with("first", "shown"),
+    );
+    let (map, image) = camera(&mut ui, 8, 8);
+    register(&mut ui, "map", CanvasSource::Camera(map));
+    ui.update(3);
+    let [first, second] = canvases(&mut ui)[..] else {
+        panic!("two canvases");
+    };
+    assert_eq!(showing(&mut ui, first), CanvasShowing::Viewport(map));
+    assert_eq!(image_size(&mut ui, &image).width, 200);
+
+    set(&mut ui, "first", "hidden");
+    ui.settle();
+    ui.update(2);
+    assert_eq!(showing(&mut ui, second), CanvasShowing::Viewport(map));
+    assert_eq!(showing(&mut ui, first), CanvasShowing::Image(image.clone()));
+    let size = image_size(&mut ui, &image);
+    assert_eq!(
+        (size.width, size.height),
+        (60, 30),
+        "resized to the new owner"
+    );
+
+    set(&mut ui, "first", "shown");
+    ui.settle();
+    ui.update(2);
+    assert_eq!(
+        showing(&mut ui, second),
+        CanvasShowing::Viewport(map),
+        "a visible owner keeps the viewport"
+    );
+    assert_eq!(showing(&mut ui, first), CanvasShowing::Image(image));
+}
+
+/// Re-registering a name switches the canvas between a camera and an
+/// image, both ways, and two names with two cameras each get a viewport.
+#[test]
+fn sources_switch_and_cameras_are_independent() {
+    let mut ui = page(
+        "canvas_switch",
+        "<canvas data-canvas='a' width='40' height='20'></canvas>\
+         <canvas data-canvas='b' width='30' height='10'></canvas>",
+        "",
+    );
+    let (camera_a, image_a) = camera(&mut ui, 8, 8);
+    let (camera_b, image_b) = camera(&mut ui, 8, 8);
+    register(&mut ui, "a", CanvasSource::Camera(camera_a));
+    register(&mut ui, "b", CanvasSource::Camera(camera_b));
+    ui.update(3);
+    let [a, b] = canvases(&mut ui)[..] else {
+        panic!("two canvases");
+    };
+    assert_eq!(showing(&mut ui, a), CanvasShowing::Viewport(camera_a));
+    assert_eq!(showing(&mut ui, b), CanvasShowing::Viewport(camera_b));
+    assert_eq!(image_size(&mut ui, &image_a).width, 40);
+    assert_eq!(image_size(&mut ui, &image_b).width, 30);
+
+    // Camera → image: the viewport loses its camera, the image shows.
+    register(&mut ui, "a", CanvasSource::Image(image_b.clone()));
+    ui.update(2);
+    assert_eq!(showing(&mut ui, a), CanvasShowing::Image(image_b.clone()));
+    assert_eq!(ui.world_mut().get::<ViewportNode>(a).unwrap().camera, None);
+    assert_eq!(ui.world_mut().get::<ImageNode>(a).unwrap().image, image_b);
+
+    // And back: the image goes, the camera returns.
+    register(&mut ui, "a", CanvasSource::Camera(camera_a));
+    ui.update(2);
+    assert_eq!(showing(&mut ui, a), CanvasShowing::Viewport(camera_a));
+    assert!(ui.world_mut().get::<ImageNode>(a).is_none());
+    assert_eq!(
+        ui.world_mut().get::<ViewportNode>(a).unwrap().camera,
+        Some(camera_a)
+    );
+}
+
+/// A canvas is an element like any container: `HtmlElements` finds it by
+/// id, its `data-on-click` makes it focusable, and its dataset carries the
+/// name.
+#[test]
+fn a_canvas_is_an_ordinary_element() {
+    let mut ui = page(
+        "canvas_element",
+        "<canvas id='map' class='framed' data-canvas='map' data-on-click='open-map'></canvas>",
+        "",
+    );
+    let canvas = canvases(&mut ui)[0];
+    let world = ui.world_mut();
+    let element = world.get::<HtmlElement>(canvas).unwrap();
+    assert_eq!(element.id.as_deref(), Some("map"));
+    assert!(element.classes.iter().any(|class| class == "framed"));
+    assert_eq!(element.data("canvas"), Some("map"));
+    assert!(
+        world.get::<Focusable>(canvas).is_some(),
+        "data-on-click makes it focusable"
+    );
+    assert!(world.get::<ElementSignals>(canvas).is_some());
+}
+
+/// A canvas attribute as generated: a number (in one of HTML's spellings)
+/// or junk that falls back to the default.
+#[derive(Clone, Debug)]
+enum Attribute {
+    Number(u32, &'static str),
+    Junk(&'static str),
+}
+
+impl Attribute {
+    fn text(&self) -> String {
+        match self {
+            Attribute::Number(number, spelling) => spelling.replace('N', &number.to_string()),
+            Attribute::Junk(junk) => junk.to_string(),
+        }
+    }
+
+    fn value(&self, default: f32) -> f32 {
+        match self {
+            Attribute::Number(number, _) => *number as f32,
+            Attribute::Junk(_) => default,
+        }
+    }
+}
+
+fn attribute() -> impl proptest::strategy::Strategy<Value = Attribute> {
+    use proptest::prelude::*;
+    prop_oneof![
+        4 => (0u32..=300, prop::sample::select(vec!["N", " N", "Npx", "+N", "N.75"]))
+            .prop_map(|(number, spelling)| Attribute::Number(number, spelling)),
+        1 => prop::sample::select(vec!["", "x", "-4", "auto"]).prop_map(Attribute::Junk),
+    ]
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(32))]
+
+    /// The canvas's laid-out box is CSS's for a replaced element with the
+    /// attributes' intrinsic size: declared sides win; one declared side
+    /// keeps the attributes' ratio along the main axis; in a column, an
+    /// undeclared width stretches to the container (`align-items:
+    /// stretch`); a zero side has no ratio, so its auto side is 0.
+    #[test]
+    fn canvas_boxes_follow_css_sizing(
+        width in attribute(),
+        height in attribute(),
+        css_width in proptest::option::of(1u32..=400),
+        css_height in proptest::option::of(1u32..=400),
+        row in proptest::bool::ANY,
+    ) {
+        static CASE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let case = CASE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut css = String::from(".row { flex-direction: row }");
+        if let Some(px) = css_width {
+            css += &format!(" canvas {{ width: {px}px }}");
+        }
+        if let Some(px) = css_height {
+            css += &format!(" canvas {{ height: {px}px }}");
+        }
+        let canvas = format!(
+            "<canvas width='{}' height='{}'></canvas>",
+            width.text(),
+            height.text()
+        );
+        let html = if row { format!("<div class='row'>{canvas}</div>") } else { canvas };
+        let mut ui = page(&format!("canvas_sizing_{case}"), &html, &css);
+
+        let (aw, ah) = (width.value(300.0), height.value(150.0));
+        let ratio = (aw > 0.0 && ah > 0.0).then_some(aw / ah);
+        let container = VIEWPORT.x as f32;
+        let expected = match (css_width, css_height) {
+            (None, None) => (aw, ah),
+            (Some(w), Some(h)) => (w as f32, h as f32),
+            (Some(w), None) => (w as f32, ratio.map_or(0.0, |r| w as f32 / r)),
+            (None, Some(h)) if row => (ratio.map_or(0.0, |r| h as f32 * r), h as f32),
+            (None, Some(h)) => (container, h as f32),
+        };
+        let entity = canvases(&mut ui)[0];
+        let rect = node_rect(ui.app_mut().world(), entity).unwrap();
+        proptest::prop_assert!(
+            (rect.width() - expected.0).abs() <= 1.0 && (rect.height() - expected.1).abs() <= 1.0,
+            "{html} with `{css}`: got {}x{}, expected {}x{}",
+            rect.width(),
+            rect.height(),
+            expected.0,
+            expected.1
+        );
+    }
+}

@@ -71,8 +71,19 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   - a blur (`feGaussianBlur`, `feDropShadow`) with a standard deviation
     above `MAX_SVG_BLUR` (2²⁰ px at the drawn size) fails with an error
     naming it, instead of a renderer panic in debug builds.
+  - a pattern whose tile would be huge at the drawn size fails as too
+    expensive to draw, instead of aborting the app on a failed allocation.
+  - a filter region, primitive subregion or `feOffset`/`feDropShadow`
+    offset reaching more than `MAX_SVG_FILTER_REGION` (2²⁴ px) from the
+    image fails with an error, instead of a renderer panic.
 
 ### Fixed
+- An image or inline `<svg>` inside a link (`<a href>`, a Markdown link)
+  now carries the link's bindings. Clicking the icon itself still doesn't
+  follow the link: Bevy's UI picking doesn't hit inline images yet.
+- `<canvas>` reads its `width`/`height` attributes by HTML's rules
+  (`"256px"` is 256, `" +5"` is 5, character references decode), and a
+  canvas inside text no longer shows its fallback content.
 - A stylesheet, `style` attribute or `var()` value with deeply nested
   functions after an unquoted URL closed by ` \)` (`url(a \)`) could stall
   its load for seconds to hours; it's now rejected at once, like other

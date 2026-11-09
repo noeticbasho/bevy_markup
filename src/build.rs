@@ -3198,7 +3198,9 @@ fn block_spec(styler: &Styler, block: &Block) -> NodeSpec {
                         decoration_color: None,
                         box_size: image.box_size(styler.images),
                         image: Some(image.clone()),
-                        link: None,
+                        // An image inside a link is part of it: its span
+                        // emits the link's signals too.
+                        link: run.extras.link.clone(),
                     },
                     None => SpanSpec {
                         text: run.text.clone(),
@@ -6986,6 +6988,16 @@ fn run_walk<'a>(
                 } else {
                     chain.clone()
                 };
+                // ADR 0041: a `<canvas>` inside text has no box here (only a
+                // canvas directly in a container is a node), and its
+                // content is fallback no browser shows: nothing at all.
+                if tag.name().as_utf8_str() == *"canvas" {
+                    debug!(
+                        "html canvas: a <canvas> inside text isn't shown; put it directly in \
+                         a container"
+                    );
+                    continue;
+                }
                 if tag.name().as_utf8_str() == *"img"
                     || (cfg!(feature = "svg") && tag.name().as_utf8_str() == *"svg")
                 {

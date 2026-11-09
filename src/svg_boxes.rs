@@ -214,3 +214,77 @@ fn escape(out: &mut String, text: &str, attribute: bool) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn parse(text: &str) -> roxmltree::Document<'_> {
+        roxmltree::Document::parse_with_options(
+            text,
+            roxmltree::ParsingOptions {
+                allow_dtd: true,
+                ..roxmltree::ParsingOptions::default()
+            },
+        )
+        .unwrap()
+    }
+
+    /// The copy renames what it must, drops `<style>` and foreign
+    /// elements, and leads every `style` with the neutralizing
+    /// declarations.
+    #[test]
+    fn the_copy_renames_drops_and_neutralizes() {
+        let source = "<svg xmlns='http://www.w3.org/2000/svg' xmlns:x='urn:x'>\
+            <style>rect { fill: red }</style><defs><mask id='m'><rect/></mask>\
+            <pattern id='p'/><clipPath id='c'/></defs><x:thing><rect/></x:thing>\
+            <rect style='opacity: 0.5'/></svg>";
+        let copy = rewrite(&parse(source));
+        let document = parse(&copy);
+        let names: Vec<&str> = document
+            .descendants()
+            .filter(|node| node.is_element())
+            .map(|node| node.tag_name().name())
+            .collect();
+        assert_eq!(names, ["svg", "g", "g", "rect", "g", "g", "rect"], "{copy}");
+        let rect = document
+            .descendants()
+            .filter(|node| node.has_tag_name("rect"))
+            .last()
+            .unwrap();
+        let style = rect.attribute("style").unwrap();
+        assert!(style.starts_with(NEUTRAL), "{style}");
+        // The `<style>` rule, inlined in usvg's order, then the element's own.
+        assert!(style.ends_with(";fill:red;opacity: 0.5"), "{style}");
+    }
+
+    proptest! {
+        /// Whatever an attribute value or text holds (quotes, `&`, `<`,
+        /// tabs and newlines that attribute normalization would turn into
+        /// spaces, CR, any Unicode), the copy reads back the same.
+        #[test]
+        fn attribute_values_and_text_survive_the_copy(
+            value in "[\\t\\n\\r\\x20-\\u{D7FF}\\u{E000}-\\u{FFFD}]{0,40}",
+            text in "[\\t\\n\\x20-\\u{D7FF}\\u{E000}-\\u{FFFD}]{0,40}",
+        ) {
+            // Independent of `escape`: every character as a reference, so
+            // the original document holds exactly `value` and `text`.
+            let escape_source =
+                |raw: &str| raw.chars().map(|c| format!("&#{};", c as u32)).collect::<String>();
+            let source = format!(
+                "<svg xmlns='http://www.w3.org/2000/svg'><text data-v=\"{}\">{}</text></svg>",
+                escape_source(&value),
+                escape_source(&text),
+            );
+            let original = parse(&source);
+            let copy = rewrite(&original);
+            let document = parse(&copy);
+            let read = |document: &roxmltree::Document| {
+                let node = document.descendants().find(|node| node.has_tag_name("text")).unwrap();
+                (node.attribute("data-v").map(str::to_owned), node.text().map(str::to_owned))
+            };
+            prop_assert_eq!(read(&document), read(&original), "{}", copy);
+        }
+    }
+}

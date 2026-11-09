@@ -10976,6 +10976,250 @@ html-ui
         let sizes: Vec<Vec2> = boxes.iter(world).map(|box_| box_.size).collect();
         assert_eq!(sizes, vec![Vec2::new(20.0, 10.0)]);
     }
+
+    fn md(name: &str, source: &str) -> TestUi {
+        let mut ui = TestUi::new(
+            name,
+            &[
+                ("page.md", source),
+                ("style.css", "html { color: #ff0000 }"),
+            ],
+        )
+        .stylesheet("style.css")
+        .spawn("page.md", TemplateContext::new(), Node::default());
+        ui.settle();
+        ui
+    }
+
+    const RED_ICON: &str =
+        r#"<svg width="6" height="3"><rect width="6" height="3" fill="currentColor"/></svg>"#;
+
+    /// A Markdown SVG block (the opening tag alone on its line) is its own
+    /// item between the paragraphs, however its children are indented —
+    /// four spaces, or blank lines inside, which CommonMark alone would
+    /// turn into code or end the block at (the dedent, ADR 0024/0025).
+    #[test]
+    fn an_svg_block_in_markdown_is_its_own_item() {
+        let rect = r#"<rect width="6" height="3" fill="currentColor"/>"#;
+        let mut ui = md(
+            "svg-md-block",
+            &format!("Before.\n\n<svg width=\"6\" height=\"3\">\n  {rect}\n</svg>\n\nAfter.\n"),
+        );
+        ui.assert_dump(
+            r#"
+html-ui
+  p.markdown
+    "Before." default 16px #ff0000
+  -
+    "" img 6x3
+  p.markdown
+    "After." default 16px #ff0000
+"#,
+        );
+        assert_eq!(images(&mut ui), vec![(UVec2::new(6, 3), [255, 0, 0, 255])]);
+        for (name, source) in [
+            (
+                "svg-md-indent4",
+                format!("<svg width=\"6\" height=\"3\">\n    {rect}\n</svg>\n"),
+            ),
+            (
+                "svg-md-blank-lines",
+                format!("<svg width=\"6\" height=\"3\">\n\n  {rect}\n\n</svg>\n"),
+            ),
+        ] {
+            let mut ui = md(name, &source);
+            assert_eq!(
+                images(&mut ui),
+                vec![(UVec2::new(6, 3), [255, 0, 0, 255])],
+                "{name}:\n{}",
+                ui.dump()
+            );
+        }
+    }
+
+    /// Inline in Markdown text — a list item, a heading, a table cell,
+    /// emphasis — an SVG is an image in that block's text; in a code span
+    /// it's literal text, as CommonMark says.
+    #[test]
+    fn inline_svgs_in_markdown_text() {
+        for (name, source, block) in [
+            (
+                "svg-md-list",
+                format!("- first {RED_ICON}\n- second\n"),
+                "li.markdown",
+            ),
+            (
+                "svg-md-heading",
+                format!("# Title {RED_ICON}\n"),
+                "h1.markdown",
+            ),
+            (
+                "svg-md-table",
+                format!("| a | b |\n|---|---|\n| {RED_ICON} | x |\n"),
+                "td.markdown",
+            ),
+            (
+                "svg-md-emphasis",
+                format!("*{RED_ICON} styled*\n"),
+                "p.markdown",
+            ),
+        ] {
+            let mut ui = md(name, &source);
+            let dump = ui.dump();
+            assert_eq!(
+                images(&mut ui),
+                vec![(UVec2::new(6, 3), [255, 0, 0, 255])],
+                "{name}:\n{dump}"
+            );
+            assert!(dump.contains(block), "{name}: inside a {block}:\n{dump}");
+        }
+        let mut ui = md("svg-md-code", &format!("`{RED_ICON}`\n"));
+        assert!(images(&mut ui).is_empty());
+        assert!(ui.dump().contains(r#""<svg width=\"6\""#), "{}", ui.dump());
+    }
+
+    /// An SVG inside a link is part of it: its image span carries the
+    /// link's `open` binding (clicking the icon follows the link), in
+    /// Markdown and in HTML.
+    #[test]
+    fn an_svg_inside_a_link_carries_the_link() {
+        let hrefs = |ui: &mut TestUi| -> Vec<Option<String>> {
+            let world = ui.world_mut();
+            let mut images = world.query::<(&InlineImage, Option<&ElementSignals>)>();
+            images
+                .iter(world)
+                .map(|(_, signals)| {
+                    signals
+                        .and_then(|signals| signals.0.iter().find(|binding| binding.name == "open"))
+                        .and_then(|binding| {
+                            binding.payload.get("href")?.as_str().map(str::to_owned)
+                        })
+                })
+                .collect()
+        };
+        let mut ui = md(
+            "svg-md-link",
+            &format!("[{RED_ICON} go](https://example.org)\n"),
+        );
+        assert_eq!(hrefs(&mut ui), vec![Some("https://example.org".to_owned())]);
+        let mut ui = page(
+            "svg-html-link",
+            &format!("<p><a href=\"next.html\">{RED_ICON}</a> and {RED_ICON}</p>"),
+            "",
+        );
+        // The linked icon carries the href, the one after the link doesn't
+        // (the query's order isn't the document's: sorted).
+        let mut found = hrefs(&mut ui);
+        found.sort();
+        assert_eq!(found, vec![None, Some("next.html".to_owned())]);
+    }
+
+    /// A translation's markup may hold an SVG: it draws in the translated
+    /// text, colored by the element's cascade.
+    #[test]
+    fn an_svg_in_a_translation() {
+        let mut ui = TestUi::new(
+            "svg-translation",
+            &[
+                ("page.html", r#"<p data-l10n-id="saved">Saved</p>"#),
+                ("style.css", "p { color: #ff0000 }"),
+                (
+                    "locales/en-US/main.ftl.ron",
+                    r#"(locale: "en-US", resources: ["ui.ftl"])"#,
+                ),
+                (
+                    "locales/en-US/ui.ftl",
+                    r#"saved = Saved <svg width="4" height="2"><rect width="4" height="2" fill="currentColor"/></svg> ok"#,
+                ),
+            ],
+        )
+        .stylesheet("style.css")
+        .locale("locales/en-US/main.ftl.ron")
+        .spawn("page.html", TemplateContext::new(), Node::default());
+        ui.settle();
+        ui.assert_dump(
+            r#"
+html-ui
+  p
+    "Saved " default 16px #ff0000
+    "" img 4x2
+    " ok" default 16px #ff0000
+"#,
+        );
+        assert_eq!(images(&mut ui), vec![(UVec2::new(4, 2), [255, 0, 0, 255])]);
+    }
+
+    /// Tera generates SVG like any markup: a loop of icons, each its own
+    /// size; identical icons share one drawing (the inline cache is keyed by
+    /// the element's text).
+    #[test]
+    fn svgs_from_a_tera_loop_and_shared_drawings() {
+        let mut ui = TestUi::new(
+            "svg-tera",
+            &[
+                (
+                    "page.html",
+                    r#"<p>{% for w in sizes %}<svg width="{{ w }}" height="2"><rect width="{{ w }}" height="2" fill="currentColor"/></svg>{% endfor %}</p>"#,
+                ),
+                ("style.css", "p { color: #ff0000 }"),
+            ],
+        )
+        .stylesheet("style.css")
+        .spawn(
+            "page.html",
+            TemplateContext::new().with("sizes", &[2, 4, 2]),
+            Node::default(),
+        );
+        ui.settle();
+        let sizes: Vec<UVec2> = images(&mut ui).into_iter().map(|(size, _)| size).collect();
+        assert_eq!(
+            sizes,
+            vec![UVec2::new(2, 2), UVec2::new(4, 2), UVec2::new(2, 2)]
+        );
+        let world = ui.world_mut();
+        let mut spans = world.query::<&InlineImage>();
+        let handles: Vec<Handle<Image>> =
+            spans.iter(world).map(|image| image.image.clone()).collect();
+        assert_eq!(handles[0], handles[2], "the two 2×2 icons share a drawing");
+        assert_ne!(handles[0], handles[1]);
+    }
+
+    /// The SVG's own markup is the SVG's: its `<style>` (CDATA included)
+    /// styles its shapes, character references in its attributes decode,
+    /// and none of it is page text or page CSS.
+    #[test]
+    fn an_svgs_own_style_and_character_references() {
+        for (name, svg, pixel) in [
+            (
+                "svg-style",
+                r#"<svg width="4" height="4"><style>rect { fill: #00ff00 }</style><rect width="4" height="4"/></svg>"#,
+                [0, 255, 0, 255],
+            ),
+            (
+                "svg-cdata",
+                r#"<svg width="4" height="4"><style><![CDATA[ rect { fill: #0000ff } ]]></style><rect width="4" height="4"/></svg>"#,
+                [0, 0, 255, 255],
+            ),
+            (
+                "svg-entities",
+                r#"<svg width="4" height="4"><rect width="&#52;" height="4" fill="&#35;00ff00"/></svg>"#,
+                [0, 255, 0, 255],
+            ),
+        ] {
+            let mut ui = page(name, &format!("<p>{svg}</p>"), "rect { fill: #ff0000 }");
+            assert_eq!(
+                images(&mut ui),
+                vec![(UVec2::new(4, 4), pixel)],
+                "{name}:\n{}",
+                ui.dump()
+            );
+            let dump = ui.dump();
+            assert!(
+                !dump.contains("rect") && !dump.contains("fill"),
+                "{name}: no SVG text:\n{dump}"
+            );
+        }
+    }
 }
 
 /// ADR 0038 §6: SVG `<text>`, drawn with the app's fonts (`svg-text`).

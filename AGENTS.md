@@ -109,7 +109,8 @@ src/
                    ancestor that has a node — a link span carries no box), refreshed, despawned
                    on leave)
   canvas.rs        (ADR 0041) `<canvas>`: `intrinsic_size` (the build gives the leaf container
-                   its `width`/`height` attributes — default 300×150 — where CSS declares
+                   its `width`/`height` attributes — HTML's integer rules, `dimension`;
+                   default 300×150 — where CSS declares
                    none; one declared side → `LayoutDecl::aspect_ratio`), `mark_canvas`
                    (observer: `HtmlCanvas` on `<canvas>` elements), `sync_canvases`
                    (`UiSystems::PostLayout`, before Bevy's
@@ -186,7 +187,11 @@ src/
                    the image, else `TooFarOut`: tiny-skia panics far off the canvas in every
                    build, U24/U27/U28, bug_0194; the same walk scales each blur's deviation
                    as resvg does, ≤ `MAX_SVG_BLUR` 2²⁰ px, else `TooBlurred`: resvg's box blur
-                   overflows `i32`, U32, bug_0198),
+                   overflows `i32`, U32, bug_0198; and maps each filter region, primitive
+                   subregion and `feOffset`/`feDropShadow` offset to pixels, ≤
+                   `MAX_SVG_FILTER_REGION` 2²⁴ px, else `TooFarOut`: tiny-skia-path's
+                   `to_int_rect` unwraps past `i32`, U35, bug_0201; the cost estimate
+                   charges each pattern tile at its drawn size, U36, bug_0200),
                    straight-alpha `Rgba8UnormSrgb` output; `guarded` turns a usvg/resvg panic
                    into an error (resvg #1185, U20: a panicked AsyncCompute task re-panics
                    its poller). `<img>` redraw (ADR 0038 §3): `SvgDocument` (own typed loader,
@@ -429,7 +434,10 @@ tests/
                    `ViewportNode`/`ImageNode` with Bevy's resize running, one viewport per
                    camera, bindings across updates, the `MAX_CANVAS_SIDE` gate, `shown`, and
                    pointer forwarding into the camera's scene (`with_pointer` + a stub
-                   picking backend)
+                   picking backend), the viewport moving with visibility, source switches,
+                   Markdown canvases (an own-line tag is a block; one in a paragraph is
+                   text and shows nothing), and `canvas_boxes_follow_css_sizing` (proptest:
+                   attribute spellings × CSS sides × row/column vs CSS's rules)
   layout_properties.rs  flexbox invariants on real headless layout (row-reverse mirror, auto margins,
                    grow shares, space-between, wrap without overlap)
   windowing_model.rs  proptest: random documents × text changes / row flips / scrolls, a windowed

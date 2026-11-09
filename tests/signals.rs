@@ -981,6 +981,43 @@ fn handlers_route_by_name_and_trigger() {
     assert_eq!(btn, btn, "target unchanged");
 }
 
+/// An image inside a link is part of it: clicking the image (an inline
+/// `<img>` here, a 32×24 frame at the paragraph's start) should emit the
+/// link's `open` signal, as clicking an icon link does in a browser. The
+/// image span carries the link's bindings (bug_0199), but Bevy 0.20's UI
+/// picking resolves text hits by run geometry only and never hits an
+/// inline box (UPSTREAM U34): the click lands on the paragraph. Ignored
+/// until a backend hit-tests `TextLayoutInfo::inline_boxes`.
+#[test]
+#[ignore = "UPSTREAM U34: Bevy's UI picking never hits inline boxes"]
+fn an_image_inside_a_link_opens_it() {
+    let mut ui = page_ui(
+        "signals-image-link",
+        r#"<p><a href="next.html"><img src="frame.png"></a> text after</p>"#,
+        "",
+        TemplateContext::new(),
+    );
+    ui.settle();
+    ui.update(1);
+    let world = ui.world_mut();
+    let mut blocks = world.query::<(Entity, &HtmlElement)>();
+    let block = blocks
+        .iter(world)
+        .find(|(_, element)| element.tag == "p")
+        .map(|(entity, _)| entity)
+        .expect("paragraph");
+    let rect = node_rect(world, block).expect("laid out");
+    ui.click_at(vec2(rect.min.x + 10.0, rect.min.y + 10.0));
+    let clicks: Vec<ElementSignal> = ui
+        .take_signals()
+        .into_iter()
+        .filter(|signal| signal.trigger == SignalTrigger::Click)
+        .collect();
+    assert_eq!(clicks.len(), 1, "{clicks:?}");
+    assert_eq!(clicks[0].name.as_ref(), "open");
+    assert_eq!(clicks[0].payload["href"].as_str(), Some("next.html"));
+}
+
 /// `<a href>` links: the link's span becomes a picked entity whose click
 /// emits the `open` signal carrying the href; the deepest-bound-element
 /// rule suppresses the parent block's own click hooks; a link without an

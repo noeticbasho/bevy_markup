@@ -228,6 +228,10 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0196](bug_0196.md) | An `feMorphology` radius that overflows `f32` panicked usvg, in release too | `src/svg_bounds.rs` (`check_values`); upstream usvg (U30) | high | fixed: refused before usvg runs | local cargo-fuzz `svg` run |
 | [bug_0197](bug_0197.md) | A filter on a shape wider than ~2.8·10³⁸ panicked tiny-skia-path during conversion | `src/svg_boxes.rs`, `src/svg.rs`; upstream tiny-skia-path (U31) | high | fixed: boxes measured by a first usvg pass (ADR 0042) | probing the bug_0196 fix |
 | [bug_0198](bug_0198.md) | A huge `feGaussianBlur` deviation overflowed resvg's box blur | `src/svg.rs` (`check_extent`, `MAX_SVG_BLUR`); upstream resvg (U32) | high | fixed: refused before drawing | nightly cargo-fuzz `svg` job |
+| [bug_0199](bug_0199.md) | An image inside a link wasn't part of the link | `src/build.rs` (`text_spec`); upstream Bevy (U34) | medium | partly fixed: bindings carried; the click needs U34 | expanding the SVG tests |
+| [bug_0200](bug_0200.md) | A huge pattern tile aborted the process | `src/svg.rs` (`estimate_cost`); upstream resvg (U36) | high | fixed: tiles charged in the cost estimate | `hostile_magnitudes_never_panic` proptest |
+| [bug_0201](bug_0201.md) | A huge filter subregion or offset panicked tiny-skia-path | `src/svg.rs` (`check_extent`); upstream tiny-skia-path (U35) | high | fixed: refused past `MAX_SVG_FILTER_REGION` | `hostile_magnitudes_never_panic` proptest |
+| [bug_0202](bug_0202.md) | `<canvas>` attributes and inline content didn't follow HTML | `src/canvas.rs`, `src/build.rs` | low | fixed | expanding the canvas tests |
 
 ## Discovery session metadata: bug_0001–0005
 
@@ -475,7 +479,7 @@ settle (rebuild observed) and the resulting dump to match a reference model.
 - **Machine/toolchain:** Arch Linux (kernel 7.2.11), AMD Ryzen 7 9800X3D,
   rustc 1.98.1, `nightly-2026-09-09` for cargo-fuzz 0.13.2.
 
-## Discovery session metadata: bug_0188–0198 (2026-11-08 to 2026-11-09)
+## Discovery session metadata: bug_0188–0202 (2026-11-08 to 2026-11-09)
 
 - **Method:** triage of the nightly workflow's failed `svg` fuzz job (run
   42471256114): the artifact was timed stage by stage with a throwaway
@@ -503,8 +507,12 @@ settle (rebuild observed) and the resulting dump to match a reference model.
   boxes in a first conversion (ADR 0042, the user's approach). The nightly
   workflow, dispatched by hand on that commit (`6a7c87d`, run
   42621076046) to check that CI fuzzes the new code, found bug_0198.
+  Expanding the tests after ADR 0041 found bug_0199 and bug_0202 (new
+  vectors and properties against HTML's rules) and bug_0200/0201 (a new
+  proptest of generated documents with hostile magnitudes,
+  `svg::tests::properties`, run 6 × 2000 cases clean after the fixes).
 - **Discovery agent:** the nightly workflow (bug_0188); Claude Code
-  session, `claude-opus-5-5` (triage, bug_0189–0198).
+  session, `claude-opus-5-5` (triage, bug_0189–0202).
 - **Commit at discovery:** `ff99cc1`.
 - **Machine/toolchain:** Arch Linux (kernel 7.2.14), AMD Ryzen 7 9800X3D,
   rustc 1.98.1, cargo-fuzz on the current nightly; CI: `nightly-2026-09-09`.
