@@ -25,3 +25,4 @@
 ## [2026-11-08 22:18] update | bug_0194: refuse SVGs drawing past MAX_SVG_EXTENT (2^19 px) before tiny-skia (U24/U27/U28, which panic in release too); svg fuzz target excuses only U20 now
 ## [2026-11-08 22:55] update | bug_0195: refuse an feConvolveMatrix order whose sides multiply past u32 before usvg (U29), found by a 30-min svg fuzz run of 3050ce8
 ## [2026-11-09 00:40] update | Fixed bug_0196 (usvg feMorphology radius unwrap, U30) found by a 30-minute svg fuzz run on 3211bf6; filed bug_0197 open (tiny-skia-path bbox_transform overflow, U31)
+## [2026-11-09 12:04] update | Fixed bug_0197 (U31) per ADR 0042: a first usvg conversion of a rewritten copy measures object bounding boxes before filters/masks/patterns use them; replaced bug_0196's document-wide radius rule

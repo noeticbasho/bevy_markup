@@ -226,7 +226,7 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0194](bug_0194.md) | tiny-skia panicked on paths far outside the image, in release builds too | `src/svg.rs` (`check_extent`) | high | fixed: drawings reaching past `MAX_SVG_EXTENT` are refused before drawing | release replay of the U24 seed; local cargo-fuzz `svg` run |
 | [bug_0195](bug_0195.md) | An `feConvolveMatrix` `order` whose sides multiply past `u32` panicked usvg in debug builds | `src/svg_bounds.rs` (`check_values`) | high | fixed: refused before usvg runs | local cargo-fuzz `svg` run |
 | [bug_0196](bug_0196.md) | An `feMorphology` radius that overflows `f32` panicked usvg, in release too | `src/svg_bounds.rs` (`check_values`); upstream usvg (U30) | high | fixed: refused before usvg runs | local cargo-fuzz `svg` run |
-| [bug_0197](bug_0197.md) | A filter on a shape wider than ~2.8·10³⁸ panicked tiny-skia-path during conversion | `src/svg_bounds.rs` / `src/svg.rs`; upstream tiny-skia-path (U31) | high | open: caught as a failed load | probing the bug_0196 fix |
+| [bug_0197](bug_0197.md) | A filter on a shape wider than ~2.8·10³⁸ panicked tiny-skia-path during conversion | `src/svg_boxes.rs`, `src/svg.rs`; upstream tiny-skia-path (U31) | high | fixed: boxes measured by a first usvg pass (ADR 0042) | probing the bug_0196 fix |
 
 ## Discovery session metadata: bug_0001–0005
 
@@ -498,7 +498,8 @@ settle (rebuild observed) and the resulting dump to match a reference model.
   30-minute fork-mode run of that fix (`3050ce8`, 7.6M inputs) found
   bug_0195 (three artifacts, one cause). A 30-minute run of that fix
   (`3211bf6`, 6.0M inputs) found bug_0196 (one artifact); probing its fix
-  with huge bounding boxes found bug_0197.
+  with huge bounding boxes found bug_0197, fixed by measuring usvg's own
+  boxes in a first conversion (ADR 0042, the user's approach).
 - **Discovery agent:** the nightly workflow (bug_0188); Claude Code
   session, `claude-opus-5-5` (triage, bug_0189–0197).
 - **Commit at discovery:** `ff99cc1`.

@@ -257,6 +257,8 @@ pub mod style;
 pub mod svg;
 #[cfg(feature = "svg")]
 mod svg_bounds;
+#[cfg(feature = "svg")]
+mod svg_boxes;
 #[cfg(feature = "svg-text")]
 mod svg_fonts;
 pub mod template;

@@ -43,8 +43,8 @@ the issue may already be fixed or reported.
 | U27 | tiny-skia | The cubic edge clipper's bisection can't reach its 0.25 px tolerance between ~2²¹ and 2²² px and unwraps `NormalizedF32Exclusive::new(1.0)` ([bug_0194](bug_0194.md)) | panic in any build: a failed load (`svg` feature) | refused before drawing (`svg::check_extent`) | unreported |
 | U28 | tiny-skia | Release builds of U24: the wrapped row range writes outside the canvas, caught by an `unwrap` in `alpha_runs.rs` or a slice in `pipeline/mod.rs` ([bug_0194](bug_0194.md)) | panic in release builds: a failed load (`svg` feature) | as U24 | unreported (report with U24) |
 | U29 | usvg (resvg) | `feConvolveMatrix` multiplies its `order` sides as `u32` unchecked ([bug_0195](bug_0195.md)) | panic where overflow checks are on (debug builds, fuzzing): a failed load; release wraps (the cost estimate then refuses the kernel) (`svg` feature) | refused before usvg runs (`svg_bounds::check_values`, `SvgError::OutOfRange`) | unreported |
-| U30 | usvg (resvg) | `feMorphology` unwraps `PositiveF32::new(radius × scale)`, `None` when the product isn't finite ([bug_0196](bug_0196.md)) | panic in any build: a failed load (`svg` feature) | refused before usvg runs (`svg_bounds::check_values`, `SvgError::OutOfRange`) | unreported |
-| U31 | tiny-skia-path (via usvg) | `NonZeroRect::bbox_transform` unwraps `from_xywh` of an overflowed product ([bug_0197](bug_0197.md)) | panic in any build on a filter over a box wider than ~2.8·10³⁸: a failed load (`svg` feature) | none yet: `svg::guarded` catches it (bug_0197 open) | unreported |
+| U30 | usvg (resvg) | `feMorphology` unwraps `PositiveF32::new(radius × scale)`, `None` when the product isn't finite ([bug_0196](bug_0196.md)) | panic in any build: a failed load (`svg` feature) | non-finite radii refused before usvg runs (`svg_bounds::check_values`, `SvgError::OutOfRange`); radius × box by ADR 0042 | unreported |
+| U31 | tiny-skia-path (via usvg) | `NonZeroRect::bbox_transform` unwraps `from_xywh` of an overflowed product ([bug_0197](bug_0197.md)) | panic in any build on a filter over a box wider than ~2.8·10³⁸: a failed load (`svg` feature) | boxes measured by a first usvg pass, overflowing regions refused (ADR 0042, `svg_boxes`, `SvgError::RegionOverflow`) | unreported |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -676,9 +676,9 @@ CI clippy command and workspace tests pass on both.
   (seed `67bfa887…` in `fuzz/seeds/svg/`). Found by a local `svg` fuzz run
   on 2026-11-09.
 - **Local workaround:** `svg_bounds::check_values` refuses a radius that
-  isn't finite as `f32`, and, when any element has `primitiveUnits`
-  containing `objectBoundingBox`, one above 1 (`SvgError::OutOfRange`).
-  Drop it once usvg checks.
+  isn't finite as `f32` (`SvgError::OutOfRange`); a finite radius counts in
+  the region factors of U31's workaround (ADR 0042). Drop both once usvg
+  checks.
 - **PR sketch:** treat a non-finite product like a negative radius (the
   primitive's default, or a transparent result as the spec says for a
   disabled effect) instead of unwrapping; `PositiveF32::new(…).unwrap_or(…)`.
@@ -695,8 +695,12 @@ CI clippy command and workspace tests pass on both.
 - **Reproduction:** `<filter id='f'><feOffset/></filter><rect width='3e38'
   height='8' filter='url(#f)'/>`. Found while probing the U30 workaround on
   2026-11-09.
-- **Local workaround:** none yet; `svg::guarded` turns the panic into
-  `SvgError::Panicked` (bug_0197, open).
+- **Local workaround:** ADR 0042: `svg_boxes::largest_box` converts a
+  copy of the document that reaches no `bbox_transform` (filters, masks,
+  clip paths off, paints plain, `defs`/`mask`/`clipPath`/`pattern` content
+  renamed to `g`) and reads usvg's boxes; `svg::check_regions` refuses
+  (`SvgError::RegionOverflow`) when the largest box × the largest region
+  factor could overflow. Drop it once tiny-skia-path or usvg checks.
 - **PR sketch:** return `Option<Self>` from `bbox_transform` (a breaking
   change), or a checked variant that usvg's callers use, dropping the
   element as they do for other invalid regions.

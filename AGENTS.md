@@ -138,8 +138,11 @@ src/
                    bug_0191). First `check_values` refuses values usvg would panic on
                    (`feTurbulence` `baseFrequency` not finite as `f32`, U26, bug_0192;
                    `feConvolveMatrix` `order` sides multiplying past `u32`, U29,
-                   bug_0195; `feMorphology` `radius` not finite, or above 1 when any
-                   `primitiveUnits` is `objectBoundingBox`, U30, bug_0196: `OutOfRange`). `depth`: longest weighted path, ≤ `MAX_DEPTH` 256 units ≈ 800 KB
+                   bug_0195; `feMorphology` `radius` not finite, U30, bug_0196:
+                   `OutOfRange`). `Bounds::boxes` (a filter/mask/pattern element or a
+                   `filter` declaration) and `Bounds::regions` (largest region/subregion
+                   `x`/`y`/`width`/`height` or morphology radius, px, ≥ 2) feed
+                   `svg_boxes`. `depth`: longest weighted path, ≤ `MAX_DEPTH` 256 units ≈ 800 KB
                    debug stack (usvg's converter overflows a 2 MB thread on a few KB of
                    references, UPSTREAM U17). `work`: Σ instances × own work, instances = paths
                    from the root with edge multiplicities (`<use>` copies 1, marker = the shape's
@@ -152,10 +155,19 @@ src/
                    radii resolve like usvg's `convert_length` (`em` against the inherited
                    font-size, `%` against the inherited viewport). One unit ≈ 60 ns of release
                    conversion (ADR 0040 §3)
+  svg_boxes.rs     (`svg` feature, ADR 0042) `largest_box`: usvg's own object bounding
+                   boxes, from a first conversion of a rewritten copy that reaches no
+                   `bbox_transform` (CSS inlined into `style` in usvg's order, each
+                   `style` led by `!important` filter/mask/clip-path none, fill black,
+                   stroke none; `defs`/`mask`/`clipPath`/`pattern` renamed to `g` so their
+                   content converts in place); run only when `Bounds::boxes`
   svg.rs           (`svg` feature, ADR 0038) `.svg` → `Image` loader: `parse`/`parse_within`
                    (roxmltree once, as usvg configures it → `svg_bounds::bounds`: depth ≤ 256,
                    work ≤ `MAX_SVG_WORK` 2²³ (`Limits::work`; the fuzz harness uses 1/16) →
-                   `usvg::Tree::from_xmltree` on the same document), refusing `<image href>` resolver (usvg's default reads any file,
+                   → if `boxes`, `check_regions` over `svg_boxes::largest_box` × `regions`:
+                   `RegionOverflow` when tiny-skia-path's `bbox_transform` could
+                   overflow, U31, bug_0197 → `usvg::Tree::from_xmltree` on the same
+                   document), refusing `<image href>` resolver (usvg's default reads any file,
                    U19), `raster_size` (side cap before allocating: tiny-skia aborts on a failed
                    allocation), `estimate_cost` (resvg's layer/filter/mask/clip model, early exit
                    at `MAX_SVG_COST`; calibrated in docs/agents/performance/adr-0038-probe.md §7),

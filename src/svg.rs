@@ -127,6 +127,7 @@ use serde::{Deserialize, Serialize};
 use usvg::roxmltree;
 
 use crate::svg_bounds;
+use crate::svg_boxes;
 
 /// The largest width or height an SVG is drawn at, in px. A larger
 /// document (or a larger [`SvgLoaderSettings::scale`]) is scaled down to fit,
@@ -255,6 +256,12 @@ pub(crate) enum SvgError {
         extent: f32,
         max: f32,
     },
+    /// An object bounding box × a region factor that could overflow `f32`
+    /// in usvg (UPSTREAM U30, U31; [`check_regions`]).
+    RegionOverflow {
+        largest: f64,
+        regions: f64,
+    },
     /// A value usvg would panic on (UPSTREAM U26), refused before it runs.
     OutOfRange {
         element: &'static str,
@@ -305,6 +312,12 @@ impl fmt::Display for SvgError {
                 f,
                 "draws too far outside the image (a path reaches {extent:.0} px from it at this \
                  size, limit {max:.0}): reduce its coordinates, radii or stroke widths"
+            ),
+            Self::RegionOverflow { largest, regions } => write!(
+                f,
+                "a filter, mask or pattern region is too large to compute (a shape's box \
+                 reaches {largest:.3e} units, a region factor is {regions:.3e}): reduce its \
+                 coordinates or transforms"
             ),
             Self::OutOfRange {
                 element,
@@ -481,7 +494,27 @@ fn parse_unguarded(bytes: &[u8], fonts: &SvgFonts, max_work: u64) -> Result<usvg
             max: max_work,
         });
     }
-    usvg::Tree::from_xmltree(&document, &options(fonts)).map_err(SvgError::Parse)
+    let options = options(fonts);
+    if bounds.boxes {
+        let largest = svg_boxes::largest_box(&document, &options)?;
+        check_regions(largest, bounds.regions)?;
+    }
+    usvg::Tree::from_xmltree(&document, &options).map_err(SvgError::Parse)
+}
+
+/// Refuses a document where usvg's `objectBoundingBox` arithmetic could
+/// overflow `f32` (UPSTREAM U30, U31; bug_0197): a region is at most
+/// `(regions + 1) × 2 × largest` after `bbox_transform` (or `regions` in
+/// user space), a primitive subregion that times `regions` again, and a
+/// morphology radius `regions × largest`. `largest` is the biggest box
+/// coordinate [`svg_boxes::largest_box`] measured.
+fn check_regions(largest: f64, regions: f64) -> Result<(), SvgError> {
+    let region = (regions + 1.0) * 2.0 * largest.max(1.0) + regions;
+    let subregion = (region + 1.0) * (regions + 1.0);
+    if subregion > f64::from(f32::MAX) / 2.0 || !subregion.is_finite() {
+        return Err(SvgError::RegionOverflow { largest, regions });
+    }
+    Ok(())
 }
 
 /// The pixel size to draw `tree` at: intrinsic size × `scale`, rounded up,
@@ -2584,13 +2617,8 @@ mod tests {
             rasterize(svg(64, 64, &body).as_bytes(), 1.0, Limits::DEFAULT)
         };
         let bbox = "primitiveUnits='objectBoundingBox'";
-        // The fuzz find's radius; one infinite side; past 1 in box units.
-        for (units, radius) in [
-            ("", "1e49"),
-            ("", "2 1e39"),
-            (bbox, "2"),
-            (bbox, "0.5 1e39"),
-        ] {
+        // The fuzz find's radius; one infinite side, in either units.
+        for (units, radius) in [("", "1e49"), ("", "2 1e39"), (bbox, "0.5 1e39")] {
             assert!(
                 matches!(draw(units, radius), Err(SvgError::OutOfRange { .. })),
                 "{units} {radius}"
@@ -2605,6 +2633,9 @@ mod tests {
             ("", "x 1e49"),
             ("", "1e49 1e49 1e49"),
             (bbox, "0.1 1"),
+            // Past 1 in box units: finite over an 8 px box
+            // (`check_regions` bounds it over a huge one).
+            (bbox, "2"),
         ] {
             let result = draw(units, radius);
             assert!(
@@ -2615,6 +2646,73 @@ mod tests {
                 "{units} {radius}: {:?}",
                 result.err()
             );
+        }
+    }
+
+    /// usvg 0.49 maps `objectBoundingBox` regions onto an element's box
+    /// with tiny-skia-path's `bbox_transform`, which unwraps an overflowed
+    /// rect (UPSTREAM U31): every route to it is refused when the box,
+    /// measured by usvg itself (`svg_boxes`), is too large for its factors.
+    #[test]
+    fn regions_over_huge_boxes_are_refused() {
+        let draw = |body: &str| rasterize(svg(64, 64, body).as_bytes(), 1.0, Limits::DEFAULT);
+        let huge = "width='3e38' height='8'";
+        for body in [
+            // The default filter region (−10%, 120%).
+            format!("<filter id='f'><feOffset/></filter><rect {huge} filter='url(#f)'/>"),
+            // A box grown by a transform below the filtered group.
+            "<filter id='f'><feOffset/></filter><g filter='url(#f)'><g transform='scale(1e20)'>\
+             <rect width='2.9e18' height='8'/></g></g>"
+                .to_string(),
+            // A CSS filter function, a mask, a pattern tile.
+            format!("<rect {huge} style='filter: blur(2px)'/>"),
+            format!(
+                "<mask id='m'><rect width='1' height='1' fill='white'/></mask><rect {huge} mask='url(#m)'/>"
+            ),
+            format!(
+                "<pattern id='p' x='-0.5' width='1.5' height='0.5'><rect width='1' height='1'/></pattern><rect {huge} fill='url(#p)'/>"
+            ),
+            // A primitive subregion times a large region, a box-unit radius.
+            "<filter id='f' primitiveUnits='objectBoundingBox'><feOffset width='1e30'/></filter>\
+             <rect width='1e10' height='8' filter='url(#f)'/>"
+                .to_string(),
+            "<filter id='f' primitiveUnits='objectBoundingBox'><feMorphology radius='2'/></filter>\
+             <rect width='2e38' height='8' filter='url(#f)'/>"
+                .to_string(),
+            // Filters inside a mask's and a pattern's content.
+            format!(
+                "<filter id='f'><feOffset/></filter><mask id='m'><rect {huge} filter='url(#f)'/></mask><rect width='8' height='8' mask='url(#m)'/>"
+            ),
+            format!(
+                "<defs><filter id='f'><feOffset/></filter><pattern id='p' width='8' height='8' patternUnits='userSpaceOnUse'><rect {huge} filter='url(#f)'/></pattern></defs><rect width='8' height='8' fill='url(#p)'/>"
+            ),
+            // A `<style>` rule's transform still applies to renamed content.
+            "<style>mask g g { transform: scale(1e20) }</style><filter id='f'><feOffset/></filter>\
+             <mask id='m'><g filter='url(#f)'><g><rect width='2.9e18' height='8'/></g></g></mask>\
+             <rect width='8' height='8' mask='url(#m)'/>"
+                .to_string(),
+        ] {
+            let result = draw(&body);
+            assert!(
+                matches!(result, Err(SvgError::RegionOverflow { .. })),
+                "{body}: {:?}",
+                result.err()
+            );
+        }
+        // Large but representable: a filtered drawing scaled down by its
+        // viewBox, and the same filters over ordinary boxes.
+        let scaled = "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64' \
+                      viewBox='0 0 1e7 1e7'><filter id='f'><feGaussianBlur stdDeviation='1e5'/>\
+                      </filter><rect width='1e7' height='1e7' filter='url(#f)'/></svg>";
+        assert!(rasterize(scaled.as_bytes(), 1.0, Limits::DEFAULT).is_ok());
+        for body in [
+            "<filter id='f'><feOffset/></filter><rect width='8' height='8' filter='url(#f)'/>",
+            "<rect width='8' height='8' style='filter: blur(2px)'/>",
+            "<pattern id='p' width='0.5' height='0.5'><rect width='1' height='1'/></pattern>\
+             <rect width='8' height='8' fill='url(#p)'/>",
+        ] {
+            let result = draw(body);
+            assert!(result.is_ok(), "{body}: {:?}", result.err());
         }
     }
 

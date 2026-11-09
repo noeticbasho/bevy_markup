@@ -55,8 +55,10 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
     fails to load with an error naming it, instead of a renderer panic
     in debug builds.
   - a filter `feMorphology` whose `radius` is too large to represent
-    (or above 1 in a document using `primitiveUnits="objectBoundingBox"`)
     fails to load with an error naming it, instead of a renderer panic.
+  - a filter, mask or pattern over a shape so large (around 10³⁸ units,
+    or grown that big by transforms) that its region can't be computed
+    fails to load with an error, instead of a renderer panic.
 
 ### Fixed
 - A stylesheet, `style` attribute or `var()` value with deeply nested

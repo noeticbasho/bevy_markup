@@ -81,6 +81,18 @@ pub(crate) struct Bounds {
     /// The conversion's work, in units of ~60 ns of release-build conversion
     /// (an element instance is [`ELEMENT_WORK`]); saturating.
     pub work: u64,
+    /// The document has something usvg maps onto an object bounding box
+    /// (a filter, mask or pattern element, or a `filter` property, whose
+    /// CSS functions always do): [`svg_boxes`](crate::svg_boxes) must
+    /// measure the boxes first.
+    pub boxes: bool,
+    /// The largest factor usvg multiplies a box by, or a region by a
+    /// primitive subregion (UPSTREAM U30, U31): each `x`, `y`, `width`,
+    /// `height` of a filter, mask, pattern or filter primitive, and each
+    /// `feMorphology` radius, as a length in px (`%` against the viewport:
+    /// in `objectBoundingBox` units it's 1/100 of the number, never more).
+    /// At least 2, a CSS filter function's region.
+    pub regions: f64,
 }
 
 /// Bounds the recursion depth and the work of usvg's conversion of
@@ -98,7 +110,10 @@ pub(crate) fn bounds(
     let mut graph = Graph::new(document, max_references)?;
     let order = graph.order().ok_or(SvgError::ReferenceCycle)?;
     graph.inherit(&order, max_references)?;
-    graph.measure()
+    let mut bounds = graph.measure()?;
+    bounds.boxes = graph.boxes;
+    bounds.regions = graph.regions;
+    Ok(bounds)
 }
 
 /// Refuses values usvg would panic on while converting. Only an element's
@@ -124,14 +139,6 @@ fn check_values(document: &roxmltree::Document) -> Result<(), SvgError> {
         value: value.chars().take(64).collect(),
         reason,
     };
-    // `primitiveUnits` is no presentation attribute, so CSS can't set it:
-    // the XML attributes are all of it. Which filter's units apply to a
-    // primitive goes through `href` chains; any `objectBoundingBox` in the
-    // document counts for every primitive (over-refusing, never missing).
-    let bounding_box_units = document.descendants().any(|node| {
-        node.attribute("primitiveUnits")
-            .is_some_and(|units| units.contains("objectBoundingBox"))
-    });
     for element in document.descendants().filter(|node| node.is_element()) {
         match element.tag_name().name() {
             "feMorphology" => {
@@ -155,19 +162,15 @@ fn check_values(document: &roxmltree::Document) -> Result<(), SvgError> {
                     continue;
                 }
                 // usvg multiplies each by 1 (user space) or by the
-                // element's bounding box, which is finite: a radius ≤ 1
-                // keeps the product finite.
-                let fits = |r: f32| r.is_finite() && (!bounding_box_units || r <= 1.0);
-                if !(fits(rx) && fits(ry)) {
+                // element's bounding box: an infinite radius always
+                // overflows; a finite one × the box is `Bounds::regions`'
+                // business (`svg_boxes`).
+                if !(rx.is_finite() && ry.is_finite()) {
                     return Err(refuse(
                         "feMorphology",
                         "radius",
                         value,
-                        if bounding_box_units {
-                            "its numbers must be at most 1 in objectBoundingBox units"
-                        } else {
-                            "its numbers must be finite"
-                        },
+                        "its numbers must be finite",
                     ));
                 }
             }
@@ -286,6 +289,10 @@ struct Graph<'a, 'input> {
     edge_count: usize,
     /// Per element, filled by [`Graph::inherit`]: the work of one instance.
     work: Vec<u64>,
+    /// [`Bounds::boxes`].
+    boxes: bool,
+    /// [`Bounds::regions`], filled by [`Graph::inherit`].
+    regions: f64,
 }
 
 impl<'a, 'input> Graph<'a, 'input> {
@@ -329,6 +336,11 @@ impl<'a, 'input> Graph<'a, 'input> {
                 sheet.parse_more(text);
             }
         }
+        let filter_rule = sheet.rules.iter().any(|rule| {
+            rule.declarations
+                .iter()
+                .any(|declaration| declaration.name == "filter")
+        });
         let rules: Vec<(&simplecss::Selector, Vec<(&str, &str)>)> = sheet
             .rules
             .iter()
@@ -351,6 +363,11 @@ impl<'a, 'input> Graph<'a, 'input> {
             own_targets: vec![Vec::new(); elements.len()],
             edges: vec![Vec::new(); elements.len()],
             work: vec![0; elements.len()],
+            boxes: filter_rule
+                || elements.iter().any(|element| {
+                    matches!(element.tag_name().name(), "filter" | "mask" | "pattern")
+                }),
+            regions: 2.0,
             edge_count: 0,
             kinds,
             elements,
@@ -415,6 +432,7 @@ impl<'a, 'input> Graph<'a, 'input> {
                     max: max_references,
                 });
             }
+            graph.boxes |= declarations.iter().any(|&(name, _)| name == "filter");
             graph.declarations[i] = declarations;
         }
         Ok(graph)
@@ -488,6 +506,8 @@ impl<'a, 'input> Graph<'a, 'input> {
                     view[i] = view[i].max(size);
                 }
             }
+
+            self.regions = self.regions.max(self.region_factor(i, font[i], view[i]));
 
             let mut context = std::mem::take(&mut inherited[i]);
             context.extend_from_slice(&self.own_targets[i]);
@@ -597,6 +617,33 @@ impl<'a, 'input> Graph<'a, 'input> {
         (segments, work)
     }
 
+    /// Element `i`'s part of [`Bounds::regions`]. Only its own attributes:
+    /// none of them is a presentation attribute.
+    fn region_factor(&self, i: usize, font: f64, view: f64) -> f64 {
+        let element = &self.elements[i];
+        let name = element.tag_name().name();
+        if !(matches!(name, "filter" | "mask" | "pattern") || name.starts_with("fe")) {
+            return 0.0;
+        }
+        let mut factor = ["x", "y", "width", "height"]
+            .iter()
+            .filter_map(|name| element.attribute(*name))
+            .map(|value| length(value, font, view))
+            .fold(0.0, f64::max);
+        if name == "feMorphology" {
+            // `check_values` refused a non-finite one.
+            for radius in element
+                .attribute("radius")
+                .into_iter()
+                .flat_map(svgtypes::NumberListParser::from)
+                .flatten()
+            {
+                factor = factor.max((radius as f32).abs().into());
+            }
+        }
+        factor
+    }
+
     fn text_work(&self, i: usize) -> u64 {
         self.elements[i]
             .children()
@@ -654,6 +701,8 @@ impl<'a, 'input> Graph<'a, 'input> {
         Ok(Bounds {
             depth: deepest,
             work,
+            boxes: false,
+            regions: 0.0,
         })
     }
 }
@@ -959,7 +1008,7 @@ pub(crate) fn reference_targets<'a>(value: &'a str, targets: &mut Vec<&'a str>) 
 
 /// usvg's `simplecss::Element` for roxmltree nodes (`svgtree/parse.rs`
 /// `XmlNode`), so `<style>` selectors match exactly what usvg applies.
-struct XmlNode<'a, 'input>(roxmltree::Node<'a, 'input>);
+pub(crate) struct XmlNode<'a, 'input>(pub roxmltree::Node<'a, 'input>);
 
 impl simplecss::Element for XmlNode<'_, '_> {
     fn parent_element(&self) -> Option<Self> {
