@@ -229,6 +229,7 @@ cargo run --example links        # <a href>: clicking and keyboard cycling, the 
 cargo run --example forms        # a signup form: Submit with the fields' values, a receipt panel
 cargo run --example live         # data rendered every frame, updated in place; inline styles, opacity
 cargo run --example world        # styled, localized nameplates over 3D units (HtmlWorldAnchor)
+cargo run --example canvas       # <canvas>: a live 3D portrait in a character sheet (HtmlCanvases)
 cargo run --example inline       # inline styling, text decoration, images, elliptical corners, position: fixed
 cargo run --example markdown     # localized Markdown documents
 cargo run --example svg --features svg-text   # inline <svg> (currentColor), <img> SVGs, SVG frames, text, a refused file

@@ -239,6 +239,7 @@ pub mod fuzz;
 
 pub mod anchor;
 mod build;
+pub mod canvas;
 #[doc(hidden)]
 pub use build::{Skeleton, WindowKey, WindowModel, WindowSpacer};
 mod cascade;
@@ -271,6 +272,9 @@ pub use {fluent, lightningcss, tera, tl};
 pub mod prelude {
     pub use crate::anchor::{
         AnchorPlacement, AnchoredSide, HtmlAnchor, HtmlWorldAnchor, HtmlWorldAnchorView,
+    };
+    pub use crate::canvas::{
+        CanvasShowing, CanvasSource, HtmlCanvas, HtmlCanvases, MAX_CANVAS_SIDE,
     };
     pub use crate::custom_elements::{ElementConnected, HtmlCustomElementsExt};
     pub use crate::focus::{
@@ -358,6 +362,7 @@ impl Plugin for BevyMarkupPlugin {
             .init_resource::<RemSize>()
             .init_resource::<fonts::FontFamilies>()
             .init_resource::<custom_elements::CustomElements>()
+            .init_resource::<canvas::HtmlCanvases>()
             // `HtmlFocus`'s navigator reads these; they are normally
             // registered by the navigation plugin in `finish` — an app
             // driving `update()` directly (headless apps, integration
@@ -488,6 +493,11 @@ impl Plugin for BevyMarkupPlugin {
                     // re-layouts the next frame, like the calc resolver's
                     // one-frame model).
                     build::promote_auto_scroll.in_set(UiSystems::PostLayout),
+                    // ADR 0041: after layout (this frame's sizes), before
+                    // Bevy resizes viewport targets to them.
+                    canvas::sync_canvases
+                        .in_set(UiSystems::PostLayout)
+                        .before(bevy::ui::widget::update_viewport_render_target_size),
                     // ADR 0031: record the materialized heights after
                     // layout (the model the windowed builds cull by).
                     build::measure_window_heights
@@ -495,6 +505,7 @@ impl Plugin for BevyMarkupPlugin {
                         .after(HtmlUiSystems::Build),
                 ),
             );
+        app.add_observer(canvas::mark_canvas);
         focus::plugin(app);
     }
 

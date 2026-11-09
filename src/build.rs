@@ -297,6 +297,9 @@ const CONTAINERS: &[&str] = &[
     "tr",
     "td",
     "th",
+    // ADR 0041: a replaced element — a leaf node (children never walked)
+    // whose source the app binds by name (`canvas.rs`).
+    "canvas",
 ];
 
 /// A spec shared into the diff: built this frame (the entity tree must be
@@ -6443,6 +6446,11 @@ fn collect_node(
                 // it is pushed first, so its children's tasks (pushed
                 // above it) pop — and append their items — before it.
                 let start = items.len();
+                let is_canvas = name == "canvas";
+                // ADR 0041: the attributes' intrinsic size, under CSS.
+                if is_canvas {
+                    crate::canvas::intrinsic_size(tag, &mut boxed.layout);
+                }
                 // ADR 0031: the children's cursor — a new frame when this
                 // container is one the vertical cursor can track (a
                 // column, unwrapped, packed from the start, no
@@ -6497,6 +6505,11 @@ fn collect_node(
                         style: style.clone(),
                         own_reactive,
                     })));
+                }
+                // ADR 0041: a canvas's content is fallback for browsers
+                // without canvas support, which never applies here.
+                if is_canvas {
+                    continue;
                 }
                 let translated = walk_translation(ctx, handle, tag, |fragment, nodes| {
                     // ADR 0028: the fragment's top-level elements' positions

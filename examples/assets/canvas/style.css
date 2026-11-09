@@ -1,0 +1,105 @@
+/* The canvas example: a character sheet over a 3D world. The portrait is
+   a <canvas>: sized by its attributes (240 × 320), framed by CSS like any
+   box, transparent where the hero isn't. */
+html {
+  color: #e6e6e6;
+  font-family: serif;
+  font-size: 20px;
+  padding: 18px 22px;
+  background-color: rgba(16, 18, 22, 0.88);
+  border-radius: 12px;
+  gap: 12px;
+}
+
+h1 {
+  color: #f0b429;
+  font-size: 32px;
+  font-weight: bold;
+}
+
+.sheet {
+  flex-direction: row;
+  gap: 20px;
+}
+
+/* As wide as the portrait (240 + its border): the caption wraps under it. */
+.portrait-column {
+  width: 246px;
+  gap: 8px;
+}
+
+/* The live portrait: a radial-ish backdrop through the transparent clear. */
+.portrait {
+  background-color: #2b3440;
+  border-style: solid;
+  border-width: 3px;
+  border-color: #f0b429;
+  border-radius: 8px;
+}
+
+.thumb-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Blocks don't shrink by default here (AGENTS.md: flex-shrink 0): let the
+   caption beside the thumbnail wrap. */
+.thumb-row p {
+  flex-shrink: 1;
+  flex-basis: 0;
+  flex-grow: 1;
+}
+
+.thumb {
+  background-color: #2b3440;
+  border-style: solid;
+  border-width: 2px;
+  border-color: #5a6270;
+}
+
+/* "Hide the portrait": both canvases go (the camera then stops). */
+.no-portrait canvas {
+  display: none;
+}
+
+.stats {
+  flex-grow: 1;
+  flex-shrink: 1;
+  gap: 10px;
+}
+
+.caption {
+  color: #9a9a9a;
+  font-size: 15px;
+  font-style: italic;
+}
+
+.status {
+  color: #7fdbff;
+  font-size: 16px;
+}
+
+.action {
+  background-color: #2a2f38;
+  border-radius: 6px;
+  padding: 6px 12px;
+}
+
+.action:hover {
+  background-color: #3a414d;
+}
+
+.action:focus-visible {
+  outline: 3px solid #7fdbff;
+}
+
+p.hint {
+  color: #9a9a9a;
+  font-size: 15px;
+  font-style: italic;
+}
+
+b {
+  color: #f0b429;
+}

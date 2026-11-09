@@ -401,6 +401,10 @@ pub(crate) struct LayoutDecl {
     pub min_height: Option<Val>,
     pub max_width: Option<Val>,
     pub max_height: Option<Val>,
+    /// Width ÷ height, kept when one size is auto. No CSS property sets it
+    /// (`aspect-ratio` isn't mapped): a `<canvas>` with one declared side
+    /// keeps its attributes' ratio (ADR 0041).
+    pub aspect_ratio: Option<f32>,
     /// `[top, right, bottom, left]`.
     pub margin: [Option<Val>; 4],
     /// `column-gap` (or `gap`'s column part) in px.
@@ -515,6 +519,9 @@ impl LayoutDecl {
         set(&mut node.min_height, &self.min_height);
         set(&mut node.max_width, &self.max_width);
         set(&mut node.max_height, &self.max_height);
+        if let Some(ratio) = self.aspect_ratio {
+            node.aspect_ratio = Some(ratio);
+        }
         set(&mut node.margin.top, &self.margin[0]);
         set(&mut node.margin.right, &self.margin[1]);
         set(&mut node.margin.bottom, &self.margin[2]);
@@ -622,6 +629,11 @@ impl LayoutDecl {
         put(&mut node.min_height, &base.min_height, &self.min_height);
         put(&mut node.max_width, &base.max_width, &self.max_width);
         put(&mut node.max_height, &base.max_height, &self.max_height);
+        put(
+            &mut node.aspect_ratio,
+            &base.aspect_ratio,
+            &self.aspect_ratio,
+        );
         put(&mut node.margin.top, &base.margin.top, &self.margin[0]);
         put(&mut node.margin.right, &base.margin.right, &self.margin[1]);
         put(

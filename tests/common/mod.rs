@@ -793,6 +793,9 @@ pub fn layout_fields(node: &Node, spawned: &Node, line: &mut String) {
             write!(line, " {name}={}", val(value)).unwrap();
         }
     }
+    if let Some(ratio) = node.aspect_ratio {
+        write!(line, " aspect={ratio}").unwrap();
+    }
     for (name, value, base) in [
         ("grow", node.flex_grow, spawned.flex_grow),
         ("shrink", node.flex_shrink, spawned.flex_shrink),
@@ -979,6 +982,21 @@ pub fn dump_entity(world: &mut World, entity: Entity, depth: usize, out: &mut St
     {
         write!(line, " pick=none").unwrap();
     }
+    // ADR 0041: what a canvas shows (its `ImageNode`, if any, isn't a
+    // background).
+    if let Some(canvas) = entity_ref.get::<HtmlCanvas>() {
+        let showing = match canvas.showing {
+            CanvasShowing::Nothing => "nothing",
+            CanvasShowing::Viewport(_) => "viewport",
+            CanvasShowing::Image(_) => "image",
+        };
+        write!(
+            line,
+            " canvas={} {showing}",
+            canvas.name.as_deref().unwrap_or("-")
+        )
+        .unwrap();
+    }
     if let Some(background) = entity_ref.get::<BackgroundColor>()
         && background.0 != Color::NONE
     {
@@ -1024,7 +1042,10 @@ pub fn dump_entity(world: &mut World, entity: Entity, depth: usize, out: &mut St
         if !matches!(image.visual_box, VisualBox::BorderBox) {
             write!(line, " visual-box={:?}", image.visual_box).unwrap();
         }
-    } else if let Some(image) = entity_ref.get::<ImageNode>() {
+    } else if let Some(image) = entity_ref
+        .get::<ImageNode>()
+        .filter(|_| !entity_ref.contains::<HtmlCanvas>())
+    {
         // ADR 0028: a background image — tiled per `background-repeat` or
         // stretched to fill (CSS's `no-repeat` can't be drawn: the
         // `ImageNode` always fills its visual box).

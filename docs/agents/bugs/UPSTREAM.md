@@ -46,6 +46,7 @@ the issue may already be fixed or reported.
 | U30 | usvg (resvg) | `feMorphology` unwraps `PositiveF32::new(radius × scale)`, `None` when the product isn't finite ([bug_0196](bug_0196.md)) | panic in any build: a failed load (`svg` feature) | non-finite radii refused before usvg runs (`svg_bounds::check_values`, `SvgError::OutOfRange`); radius × box by ADR 0042 | unreported |
 | U31 | tiny-skia-path (via usvg) | `NonZeroRect::bbox_transform` unwraps `from_xywh` of an overflowed product ([bug_0197](bug_0197.md)) | panic in any build on a filter over a box wider than ~2.8·10³⁸: a failed load (`svg` feature) | boxes measured by a first usvg pass, overflowing regions refused (ADR 0042, `svg_boxes`, `SvgError::RegionOverflow`) | unreported |
 | U32 | resvg | The box blur adds 2 to an `i32` box width that saturates at `i32::MAX` for a deviation of ~1.4·10⁹ px ([bug_0198](bug_0198.md)) | panic where overflow checks are on (debug builds, fuzzing): a failed draw; release wraps to a negative box (`svg` feature) | refused before drawing past `MAX_SVG_BLUR` (`svg::check_extent`, `SvgError::TooBlurred`) | unreported |
+| U33 | Bevy (bevy_picking 0.20) | `Location::is_in_viewport` returns false without a `PrimaryWindow`, even for an image render target: ray-based picking (mesh, sprite) hits nothing in a windowless app | the `canvas` example's portrait can't be dragged or clicked under `--offscreen`; any render-to-texture-only app loses mesh picking (no bevy_markup code affected) | none (the example works windowed; `tests/canvas.rs` tests the forwarding with a window) | unreported |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -725,6 +726,27 @@ CI clippy command and workspace tests pass on both.
 - **PR sketch:** clamp σ to the image's larger side (a wider blur gives the
   same result: the loops already stop at the image size), or compute the
   box sizes in `i64` / with `saturating_add`.
+
+## U33 — bevy_picking: ray picking needs a primary window, even for image targets
+
+- **Project:** bevyengine/bevy, crate bevy_picking. Affected: 0.20.0.
+- **Problem:** `pointer.rs` `Location::is_in_viewport` normalizes the
+  camera's `RenderTarget` against `primary_window.single()` and returns
+  `false` when there is no primary window, before comparing targets. An
+  image target needs no window to normalize, so a pointer located on an
+  image (a `ViewportNode`'s forwarded pointer, or the mouse of an app
+  rendering offscreen) never gets a ray (`RayMap::repopulate`), and mesh
+  and sprite picking hit nothing.
+- **Reproduction:** the `canvas` example under `--offscreen` (no winit, no
+  window): the forwarded pointer reaches the portrait image at the right
+  position (`viewport_picking` works), but `RayMap` stays empty for every
+  pointer. Found while playtesting ADR 0041's example on 2026-11-09.
+- **Local workaround:** none needed in the library; the example's pointer
+  interaction is only checkable windowed. `tests/canvas.rs`
+  (`pointer_input_reaches_the_cameras_scene`) checks the forwarding with
+  the harness's window and a stub backend.
+- **PR sketch:** normalize with `primary_window.single().ok()` and let
+  `RenderTarget::normalize` fail only for `WindowRef::Primary` targets.
 
 ## Not upstream bugs (recorded so they aren't re-filed)
 

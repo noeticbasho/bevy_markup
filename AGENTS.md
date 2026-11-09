@@ -45,6 +45,7 @@ never reach library users. A missing feature shows up in `cargo check --lib`.
 | `SvgLoaderSettings { scale }` | Loader settings (`svg` feature) | `.svg` → `Image` (`svg.rs` `SvgLoader`, ADR 0038): drawn on the CPU at intrinsic size × `scale` (an `<img>` redrawn at its displayed px), ≤ `MAX_SVG_SIDE` per side; refusing `<image href>` resolver, depth and conversion-work bounds before usvg runs (`svg_bounds`: depth ≤ 256, U17; work ≤ `MAX_SVG_WORK`, ADR 0040), render-cost budget (`MAX_SVG_COST`); typed `Image` loads coexist with other crates' `.svg` loaders |
 | `NineSliceFrame(Handle<NineSlice>)` | Component | 9-slice image as a node's border-box background (non-HTML nodes; HTML uses CSS `border-image`) |
 | `HtmlCustomElementsExt::define_html_element(name, system)`, `ElementConnected { entity, root, name, dataset }` | App ext, system input | `is="<name>"` customized built-ins: the system (`In<ElementConnected>`, `data-*` attributes as `dataset`) runs on every spawn of the element, in document order, before `HtmlUiBuilt`; not on restyles |
+| `HtmlCanvases` (`insert`/`remove`/`get`/`shown`), `CanvasSource::{Camera, Image}`, `HtmlCanvas { name, showing }`, `CanvasShowing`, `MAX_CANVAS_SIDE` | Resource, enums, Component, const | ADR 0041: `<canvas data-canvas="name">` shows the source registered under `name` — a camera through Bevy's `ViewportNode` (resized to the box, pointer forwarded into its scene; one canvas per camera: the current owner while visible, else the first visible in document order; the others show its image stretched) or an image (`ImageNode`, stretched, never resized); a camera canvas over `MAX_CANVAS_SIDE` (4096) physical px gets no camera (Bevy's resize is unbounded); `shown(name)` = some canvas with the name visible at a non-zero size (the app's `Camera::is_active` switch); rebinding rebuilds nothing |
 | `HtmlWorldAnchor { target, offset, pivot, camera }`, `HtmlWorldAnchorView { distance, on_screen }` | Component | keeps a UI root's `pivot` (fraction of its size, default bottom center) over `target`'s translation + `offset` projected through `camera` / its `UiTargetCamera` / the default UI camera (viewport-relative and `UiScale`-divided: offset viewports and scale factors read correctly); owns its `Visibility` (hidden behind the camera, off screen, or over an invisible target); despawned with `target`; `place_world_anchored`, `PostUpdate` before `UiSystems::Prepare` (last frame's transforms) |
 | `HtmlAnchor { element, placement, gap, flip }`, `AnchorPlacement::{Right, Left, Above, Below}`, `AnchoredSide` | Component | keeps an (absolute, root) overlay node beside `element`, placed the same frame (after `ui_layout_system`: the overlay's and its descendants' `UiGlobalTransform`s move to this frame's rect; insets written for the next layout); flips to the mirror side when it doesn't fit there but fits better on the other (`flip`, default on; `AnchoredSide` = the side used), else clamped to the viewport; `UiTargetCamera` copied, despawned with the element |
 | `HtmlSignalsExt::on_html_click(name, system)` / `on_html_signal(name, system)` | App ext | route `ElementSignal`s by name to systems taking `In<ElementSignal>` (`on_html_click`: `Click` only); run by `dispatch_signals` (exclusive, `PostUpdate` before `Render`, own message cursor); messages still sent |
@@ -107,6 +108,14 @@ src/
                    ancestor per hovered node → anchored tooltip HtmlUi (anchored to the nearest
                    ancestor that has a node — a link span carries no box), refreshed, despawned
                    on leave)
+  canvas.rs        (ADR 0041) `<canvas>`: `intrinsic_size` (the build gives the leaf container
+                   its `width`/`height` attributes — default 300×150 — where CSS declares
+                   none; one declared side → `LayoutDecl::aspect_ratio`), `mark_canvas`
+                   (observer: `HtmlCanvas` on `<canvas>` elements), `sync_canvases`
+                   (`UiSystems::PostLayout`, before Bevy's
+                   `update_viewport_render_target_size`: binds `ViewportNode`/`ImageNode`
+                   + `CanvasImage` marker, the size gate, owners, `shown`); `update_spec`
+                   never owns these, so bindings survive updates
   anchor.rs        HtmlAnchor/AnchorPlacement/AnchoredSide: place_anchored (PostUpdate, in
                    UiSystems::Layout after ui_layout_system, before clipping: this frame's
                    rects; moves the overlay subtree's UiGlobalTransforms like Bevy's Popover
@@ -331,6 +340,14 @@ examples/
                    the context and Tera `{% if submitted %}` swaps the form
                    for a receipt; "edit again" clears it; Space / Y =
                    language
+  canvas/          ADR 0041: a character sheet over a 3D world; the hero exists only on render
+                   layer 1, drawn by the portrait camera into an image registered as the
+                   `portrait` canvas (`HtmlCanvases`); a thumbnail canvas names the same camera
+                   (its image, stretched); drag / click the portrait (Bevy's mesh picking
+                   through the `ViewportNode`; needs a window: under `--offscreen` Bevy's
+                   ray picking finds no primary window, UPSTREAM U33) turn the hero / change
+                   the armor, Q / E or LB / RB turn it; "Hide the portrait" → `shown` false →
+                   the camera's `is_active` off; Space / Y language
   svg/             ADR 0038 (`--features svg`, `svg-text` for the badge): inline `<svg>` icons
                    (toolbar buttons and a row of sizes; `currentColor` from the cascade, so
                    `:hover` and the theme's context `var()`s recolor them), `star.svg` as
@@ -406,6 +423,11 @@ tests/
   stateful.rs      proptest-stateful machine: random op sequences (default theme, own HtmlStylesheet set/remove,
                    locale, context, outline toggle, FontFamilies swap, pointer moves/presses/releases) vs a
                    reference model (dump + ElementSignals)
+  canvas.rs        `<canvas>` (ADR 0041) on real headless layout: intrinsic sizes, binding to
+                   `ViewportNode`/`ImageNode` with Bevy's resize running, one viewport per
+                   camera, bindings across updates, the `MAX_CANVAS_SIDE` gate, `shown`, and
+                   pointer forwarding into the camera's scene (`with_pointer` + a stub
+                   picking backend)
   layout_properties.rs  flexbox invariants on real headless layout (row-reverse mirror, auto margins,
                    grow shares, space-between, wrap without overlap)
   windowing_model.rs  proptest: random documents × text changes / row flips / scrolls, a windowed
@@ -495,6 +517,7 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
   inputs/          profile.html, style.css (input + focus ring), locales/{en-US,de}
   links/           report.html, style.css (a:hover/:focus-visible), locales/{en-US,de}
   forms/           signup.html, style.css, locales/{en-US,de}
+  canvas/          sheet.html, style.css, locales/{en-US,de}
   svg/             page.html, style.css, icons/star.svg, frame.svg, tile.svg, badge.svg,
                    refused.svg, locales/{en-US,de}
   testbench/       shell.html, style.css, locales/{en-US,de} (`markdown: true`: shell.ftl +
@@ -718,7 +741,8 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
   `li` (bulleted), `pre` (whitespace kept, no wrap; leading newline and
   trailing whitespace dropped), loose text; containers (`CONTAINERS`: `div`,
   `section`, `article`, `header`, `footer`, `main`, `nav`, `aside`, `ul`,
-  `ol`, `blockquote`, `figure`, `form`) become column nodes holding their
+  `ol`, `blockquote`, `figure`, `form`, the table tags, and `canvas` — a
+  leaf whose content is never walked, ADR 0041) become column nodes holding their
   children, `row_gap` = the `HtmlUi` node's own unless CSS `gap`; other
   elements are inline in a block or walked through outside one (`html`,
   `body` included — the `HtmlUi` node is the root); `head`/`script`/`style`

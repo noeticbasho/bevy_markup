@@ -6,7 +6,7 @@
 | `Title` | `<canvas>` shows a render target the app registers |
 | `Date` | 2026-11-09 01:53 +0400 |
 | `Author` | Claude Opus 5.5 (Anthropic), via Claude Code |
-| `Commit` | `0daf648 Fix bugs 188-191: bound usvg's conversion work before it runs (ADR 0040)` + uncommitted: the U24/U26–U28 SVG guards (unrelated) |
+| `Commit` | `0daf648 Fix bugs 188-191: bound usvg's conversion work before it runs (ADR 0040)` + uncommitted: the U24/U26–U28 SVG guards (unrelated); revised on branch `canvas` (from `cbb1eb3`) with the prototype's findings |
 | `Status` | Proposed |
 | `Related` | ADR 0028 (authoring gaps roadmap); ADR 0038 (SVG: `<img>`-like replaced elements, `MAX_SVG_SIDE`); ADR 0031/0032 (windowed build); `anchor.rs` `HtmlWorldAnchorView` (the visibility report this copies) |
 
@@ -121,11 +121,13 @@ and the app share the name as a contract, like `data-on-*` signal names.
 
 ### 3. Bound outside the spec, by one system
 
-The source isn't part of `NodeSpec`. The build only marks the element with
-`HtmlCanvas { name, intrinsic }`. A system `sync_canvases` (`PostUpdate`,
-after `Build`, before `UiSystems::Prepare`, beside `rasterize_svg_images`)
-inserts or replaces the `ViewportNode`/`ImageNode` when an `HtmlCanvas` is
-added or changed, or `HtmlCanvases` changes. That means:
+The source isn't part of `NodeSpec`. The build gives the element its
+intrinsic size as layout (the attributes where CSS declares no size; one
+declared side sets `Node::aspect_ratio`), and an observer marks it with
+`HtmlCanvas`. A system `sync_canvases` (`UiSystems::PostLayout`, before
+Bevy's `update_viewport_render_target_size`) runs every frame over the
+canvases and inserts, retargets or removes the `ViewportNode`/`ImageNode`
+where they differ from what the registry says. That means:
 
 - registering, replacing or removing a source never re-renders or rebuilds
   the UI;
@@ -135,22 +137,28 @@ added or changed, or `HtmlCanvases` changes. That means:
 
 ### 4. The resolution is bounded: `MAX_CANVAS_SIDE`
 
-For a camera source, `sync_canvases` caps the node's `max_width`/
-`max_height` so its physical size stays at most `MAX_CANVAS_SIDE` per side
-(4096, the `MAX_SVG_SIDE` value: 64 MB at 4 bytes per pixel). Layout then
-never produces a box that would make Bevy's resize allocate more. The cap is
-in logical px (side × `ComputedNode::inverse_scale_factor`), recomputed when
-the scale factor changes, and it's taken back if the source becomes an
-image. An image source is never resized, so it needs no cap: the app chose
-its size.
+A camera canvas whose laid-out box is larger than `MAX_CANVAS_SIDE` (4096,
+the `MAX_SVG_SIDE` value: 64 MB at 4 bytes per pixel) physical px on a side
+gets a `ViewportNode` with no camera, and one `warn`. `sync_canvases` runs
+after layout and before Bevy's resize, which skips a viewport without a
+camera, so the oversized size never reaches `Image::resize`. Back under the
+limit, it binds again. An image source is never resized, so it needs no
+limit: the app chose its size.
+
+(First written as a cap on the node's `max_width`/`max_height`. That fights
+`update_spec`, which rewrites a kept element's whole `Node` on every
+restyle, and needs the scale factor before layout. The gate needs neither;
+the cost is an empty box instead of a smaller live one.)
 
 ### 5. One camera, one viewport
 
 `ViewportNode` resizes the camera's image to its own node. Two viewports on
 one camera would resize it back and forth every layout change. So per
-camera, only the first visible canvas in UI order gets the `ViewportNode`.
-Every other canvas naming that camera shows its image stretched, as an
-image source. One `warn` per name.
+camera, one canvas gets the camera: the one that has it while it stays
+visible, else the first visible one in document order (each canvas's
+index path from its UI root), else the first. Every other canvas naming
+that camera shows its image stretched, as an image source.
+`HtmlCanvas::showing` reports which (`Viewport`, `Image`, `Nothing`).
 
 ### 6. Visibility is reported, not acted on
 
@@ -161,6 +169,32 @@ Turning it off is app policy: some apps want the last frame kept. So
 visible (`InheritedVisibility`, laid out at a non-zero size) at the last
 `sync_canvases` run. The app toggles `Camera::is_active` from it, as it
 reads `HtmlWorldAnchorView::on_screen` today.
+
+## Prototype (branch `canvas`, 2026-11-09)
+
+Implemented as above (`src/canvas.rs`, `tests/canvas.rs`, the `canvas`
+example) to check the design empirically:
+
+- The `canvas` example renders a hero that exists only on render layer 1
+  into a portrait canvas over a 3D world (layer 0): the world camera never
+  shows it, the canvas's CSS background shows through the camera's
+  transparent clear, and a second canvas naming the same camera shows its
+  image. Hiding both (`display: none`) turns `shown` false; the example
+  then sets `Camera::is_active` off.
+- Pointer forwarding: under the dev-tools harness's `--offscreen` run the
+  canvas is hovered and Bevy forwards the pointer into the portrait image
+  at the right position, but no ray is cast: Bevy 0.20's
+  `Location::is_in_viewport` requires a primary window even for image
+  targets (UPSTREAM U33), so mesh picking never hits offscreen.
+  `pointer_input_reaches_the_cameras_scene` checks the forwarding with the
+  test harness's window and a stub backend (a click on the canvas's center
+  arrives at the image's center and clicks the scene's entity).
+  Windowed, the user confirmed it end to end: dragging the portrait turns
+  the hero (mesh picking through the canvas), as do Q / E and LB / RB.
+- Each test was checked by breaking its feature (no size gate, no aspect
+  ratio, children walked, no camera on the viewport).
+- Still open from §1: a `<canvas>` inside a text block isn't split out; it
+  is walked like an unknown inline tag (its fallback content shows inline).
 
 ## Alternatives considered
 

@@ -281,6 +281,23 @@ fn svg_contexts() -> Vec<Value> {
     contexts
 }
 
+/// `examples/canvas/main.rs`: every armor, the portrait shown and hidden,
+/// the camera rendering or off.
+fn canvas_contexts() -> Vec<Value> {
+    let mut contexts = Vec::new();
+    for armor in ["leather", "steel", "gold"] {
+        for portrait in [true, false] {
+            contexts.push(json!({
+                "name": "Ada",
+                "armor": armor,
+                "portrait": portrait,
+                "rendering": portrait,
+            }));
+        }
+    }
+    contexts
+}
+
 /// `examples/combinators/main.rs`: each group selected in turn.
 fn combinators_contexts() -> Vec<Value> {
     [0, 1, 2]
@@ -554,6 +571,13 @@ const PAGES: &[Page] = &[
         contexts: svg_contexts,
         stylesheets: &["svg/style.css"],
         locales: "svg/locales",
+        unlocalized: None,
+    },
+    Page {
+        template: "canvas/sheet.html",
+        contexts: canvas_contexts,
+        stylesheets: &["canvas/style.css"],
+        locales: "canvas/locales",
         unlocalized: None,
     },
     Page {

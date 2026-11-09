@@ -9,6 +9,15 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
 ## [Unreleased]
 
 ### Added
+- `<canvas data-canvas="name" width height>` shows a render target the app
+  registers by name in the new `HtmlCanvases` resource (ADR 0041): a
+  camera (`CanvasSource::Camera`, shown live through Bevy's `ViewportNode`,
+  resized to the box, with pointer input forwarded into its scene) or an
+  image (`CanvasSource::Image`, stretched). The attributes are the box's
+  size unless CSS sets one (300 × 150 by default, as in HTML). One canvas
+  per camera gets the live view, others show its image; a canvas larger
+  than `MAX_CANVAS_SIDE` (4096 px) gets no camera; `HtmlCanvases::shown`
+  tells the app whether to keep a camera running. New example: `canvas`.
 - **`svg` example** (`--features svg`, `svg-text` for its text badge):
   inline `<svg>` icons recolored by the theme and `:hover`, one SVG file
   as `<img>` at four sizes, an SVG `border-image` and tiled

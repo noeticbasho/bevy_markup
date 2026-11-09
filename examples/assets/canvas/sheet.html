@@ -1,0 +1,23 @@
+{# ADR 0041: the canvases name the source the app registers ("portrait").
+   Both name the same camera: the first visible one gets the live view,
+   the thumbnail shows its image. #}
+<h1 data-l10n-id="sheet-title">Character sheet</h1>
+<div class="sheet{% if not portrait %} no-portrait{% endif %}">
+  <div class="portrait-column">
+    <canvas class="portrait" data-canvas="portrait" width="240" height="320"></canvas>
+    <p class="caption" data-l10n-id="sheet-drag">Drag to turn the hero, click to change the armor.</p>
+  </div>
+  <div class="stats">
+    <p data-l10n-id="sheet-name" data-l10n-args='{{ {"name": name} | json }}'>Name: {{ name }}</p>
+    <p data-l10n-id="sheet-armor" data-l10n-args='{{ {"armor": armor} | json }}'>Armor: {{ armor }}</p>
+    <div class="thumb-row">
+      <canvas class="thumb" data-canvas="portrait" width="60" height="80"></canvas>
+      <p class="caption" data-l10n-id="sheet-thumb">The same camera, shown as an image.</p>
+    </div>
+    <p id="armor" class="action" autofocus data-on-click="armor" data-l10n-id="sheet-armor-button">Change armor</p>
+    <p id="toggle" class="action" data-on-click="toggle-portrait" data-l10n-id="sheet-toggle" data-l10n-args='{{ {"shown": portrait} | json }}'>Hide the portrait</p>
+    <p id="language" class="action" data-on-click="language" data-l10n-id="sheet-language">Language</p>
+    <p class="status" data-l10n-id="sheet-status" data-l10n-args='{{ {"rendering": rendering} | json }}'>The portrait camera renders.</p>
+  </div>
+</div>
+<p class="hint" data-l10n-id="sheet-hint">Drag or click the portrait. Q / E turn the hero. Space switches the language.</p>
