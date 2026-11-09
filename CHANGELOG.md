@@ -51,6 +51,9 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
     524,288 px past the edge at the drawn size: huge coordinates, radii,
     stroke widths or transforms) fails to load with an error, instead of
     a renderer panic, which release builds hit too.
+  - a filter `feConvolveMatrix` whose `order` is too large to represent
+    fails to load with an error naming it, instead of a renderer panic
+    in debug builds.
 
 ### Fixed
 - A stylesheet, `style` attribute or `var()` value with deeply nested

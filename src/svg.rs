@@ -260,6 +260,8 @@ pub(crate) enum SvgError {
         element: &'static str,
         attribute: &'static str,
         value: String,
+        /// What the value must be, as the end of a sentence.
+        reason: &'static str,
     },
     /// usvg or resvg panicked (caught by [`guarded`]).
     Panicked(String),
@@ -308,9 +310,10 @@ impl fmt::Display for SvgError {
                 element,
                 attribute,
                 value,
+                reason,
             } => write!(
                 f,
-                "<{element}> has an out-of-range {attribute} ({value:?}): its numbers must be finite"
+                "<{element}> has an out-of-range {attribute} ({value:?}): {reason}"
             ),
             Self::Panicked(message) => write!(f, "the SVG renderer panicked: {message}"),
         }
@@ -2527,6 +2530,45 @@ mod tests {
                 }
                 result => assert!(result.is_ok(), "{frequency}: {:?}", result.err()),
             }
+        }
+    }
+
+    /// usvg 0.49 multiplies `feConvolveMatrix`'s `order` sides as `u32`
+    /// unchecked: a debug-build panic, a wrapped kernel size in release
+    /// (UPSTREAM U29). The check refuses a product past `u32` before usvg
+    /// runs, reading the sides as usvg does.
+    #[test]
+    fn convolve_orders_past_u32_are_refused() {
+        let draw = |order: &str| {
+            let body = format!(
+                "<filter id='f'><feConvolveMatrix order='{order}'/></filter><rect width='8' height='8' filter='url(#f)'/>"
+            );
+            rasterize(svg(64, 64, &body).as_bytes(), 1.0, Limits::DEFAULT)
+        };
+        // The fuzz find's order saturates to `i32::MAX` on both sides.
+        for order in [
+            "65536",
+            "70000 70000",
+            "1e10 3",
+            "5555555555555555555555555555555553",
+        ] {
+            assert!(
+                matches!(draw(order), Err(SvgError::OutOfRange { .. })),
+                "{order}"
+            );
+        }
+        // A product that fits, a side usvg replaces with 3, a bad list:
+        // usvg drops the primitive (no matching kernel) or draws.
+        for order in ["3", "5 5", "65535 65537", "-1 1e10", "0", "x 70000"] {
+            let result = draw(order);
+            assert!(
+                !matches!(
+                    result,
+                    Err(SvgError::OutOfRange { .. } | SvgError::Panicked(_))
+                ),
+                "{order}: {:?}",
+                result.err()
+            );
         }
     }
 

@@ -42,6 +42,7 @@ the issue may already be fixed or reported.
 | U26 | usvg (resvg) | `feTurbulence` with a `baseFrequency` past `f32::MAX` unwraps `PositiveF32::new(inf)` ([bug_0192](bug_0192.md)) | panic in any build: a failed load (`svg` feature) | refused before usvg runs (`svg_bounds::check_values`, `SvgError::OutOfRange`) | unreported |
 | U27 | tiny-skia | The cubic edge clipper's bisection can't reach its 0.25 px tolerance between ~2²¹ and 2²² px and unwraps `NormalizedF32Exclusive::new(1.0)` ([bug_0194](bug_0194.md)) | panic in any build: a failed load (`svg` feature) | refused before drawing (`svg::check_extent`) | unreported |
 | U28 | tiny-skia | Release builds of U24: the wrapped row range writes outside the canvas, caught by an `unwrap` in `alpha_runs.rs` or a slice in `pipeline/mod.rs` ([bug_0194](bug_0194.md)) | panic in release builds: a failed load (`svg` feature) | as U24 | unreported (report with U24) |
+| U29 | usvg (resvg) | `feConvolveMatrix` multiplies its `order` sides as `u32` unchecked ([bug_0195](bug_0195.md)) | panic where overflow checks are on (debug builds, fuzzing): a failed load; release wraps (the cost estimate then refuses the kernel) (`svg` feature) | refused before usvg runs (`svg_bounds::check_values`, `SvgError::OutOfRange`) | unreported |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -632,6 +633,31 @@ CI clippy command and workspace tests pass on both.
   none … svg <seed>`); artifact `crash-c7219239…` (a seed).
 - **Local workaround:** as U24.
 - **PR sketch:** fixed by U24's fix; report together.
+
+## U29 — usvg: `feConvolveMatrix` `order` overflows `u32`
+
+- **Project:** linebender/resvg, crate usvg. Affected: 0.49.0.
+- **Problem:** `parser/filter.rs` `convert_convolve_matrix` reads `order`
+  as one or two numbers saturated to `i32`, keeps them when positive, and
+  multiplies them as `u32` unchecked: `order_x * order_y` when a
+  `kernelMatrix` is present (line 674), and `columns * rows` in
+  `tree/filter.rs` `ConvolveMatrixData::new` (line 459). Debug builds
+  panic (`attempt to multiply with overflow`). Release builds wrap. From
+  reading the code: `order='65536'` with no `kernelMatrix` wraps to 0, which
+  equals the empty matrix's length, so usvg accepts a 65536 × 65536 kernel
+  with no data. resvg would then index that empty matrix; bevy_markup's
+  cost estimate multiplies the sides in `f64` and refuses it first.
+- **Reproduction:** `<filter id='f'><feConvolveMatrix
+  order='65536'/></filter><rect width='8' height='8' filter='url(#f)'/>`
+  (seed `ddf57483…` in `fuzz/seeds/svg/`). Found by a local `svg` fuzz run
+  on 2026-11-09 (three artifacts, all filter chains whose `order` was
+  mangled into a huge number).
+- **Local workaround:** `svg_bounds::check_values` refuses an `order` whose
+  product (read as usvg reads it) doesn't fit in `u32`
+  (`SvgError::OutOfRange`). Drop it once usvg checks.
+- **PR sketch:** `checked_mul` in both places, treating an overflow like a
+  mismatched `kernelMatrix` (the primitive is dropped); or cap the order at
+  a sane size, since a large kernel is quadratic per pixel anyway.
 
 ## Not upstream bugs (recorded so they aren't re-filed)
 

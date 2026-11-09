@@ -23,3 +23,4 @@
 ## [2026-11-08 18:32] update | bug_0192: refuse a non-finite feTurbulence baseFrequency before usvg (U26); svg fuzz target excuses the debug-only upstream panics U20/U24
 ## [2026-11-08 18:49] update | bug_0193: huge-radius arcs count a whole turn (simplifier starts from a rounded point)
 ## [2026-11-08 22:18] update | bug_0194: refuse SVGs drawing past MAX_SVG_EXTENT (2^19 px) before tiny-skia (U24/U27/U28, which panic in release too); svg fuzz target excuses only U20 now
+## [2026-11-08 22:55] update | bug_0195: refuse an feConvolveMatrix order whose sides multiply past u32 before usvg (U29), found by a 30-min svg fuzz run of 3050ce8

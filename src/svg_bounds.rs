@@ -101,31 +101,66 @@ pub(crate) fn bounds(
     graph.measure()
 }
 
-/// Refuses values usvg would panic on while converting.
+/// Refuses values usvg would panic on while converting. Only an element's
+/// own attributes count: neither is a presentation attribute, so CSS can't
+/// set them.
 ///
-/// `feTurbulence`'s `baseFrequency` (UPSTREAM U26): usvg reads it as an
-/// `f32` list, where a number past `f32::MAX` becomes infinity, checks only
-/// its sign and unwraps `PositiveF32::new`, which is `None` for infinity
-/// (release builds panic too). Only the element's own attribute counts: it
-/// isn't a presentation attribute, so CSS can't set it. Any non-finite
-/// number refuses, also in a list usvg would ignore (wrong length, a bad
-/// entry): an over-refusal of documents nobody writes.
+/// - `feTurbulence`'s `baseFrequency` (UPSTREAM U26): usvg reads it as an
+///   `f32` list, where a number past `f32::MAX` becomes infinity, checks
+///   only its sign and unwraps `PositiveF32::new`, which is `None` for
+///   infinity (release builds panic too). Any non-finite number refuses,
+///   also in a list usvg would ignore (wrong length, a bad entry): an
+///   over-refusal of documents nobody writes.
+/// - `feConvolveMatrix`'s `order` (UPSTREAM U29): usvg multiplies the
+///   columns and rows as `u32` unchecked, which panics in debug builds and
+///   wraps in release (where a wrapped kernel is then refused by the cost
+///   estimate, which multiplies in `f64`). Read as usvg reads it: the
+///   first number saturated to `i32`, the second defaulting to the first;
+///   a non-positive side keeps usvg's 3 × 3.
 fn check_values(document: &roxmltree::Document) -> Result<(), SvgError> {
+    let refuse = |element, attribute, value: &str, reason| SvgError::OutOfRange {
+        element,
+        attribute,
+        value: value.chars().take(64).collect(),
+        reason,
+    };
     for element in document.descendants().filter(|node| node.is_element()) {
-        if element.tag_name().name() != "feTurbulence" {
-            continue;
-        }
-        let Some(value) = element.attribute("baseFrequency") else {
-            continue;
-        };
-        let finite = svgtypes::NumberListParser::from(value)
-            .all(|number| number.map_or(true, |number| (number as f32).is_finite()));
-        if !finite {
-            return Err(SvgError::OutOfRange {
-                element: "feTurbulence",
-                attribute: "baseFrequency",
-                value: value.chars().take(64).collect(),
-            });
+        match element.tag_name().name() {
+            "feTurbulence" => {
+                let Some(value) = element.attribute("baseFrequency") else {
+                    continue;
+                };
+                let finite = svgtypes::NumberListParser::from(value)
+                    .all(|number| number.map_or(true, |number| (number as f32).is_finite()));
+                if !finite {
+                    return Err(refuse(
+                        "feTurbulence",
+                        "baseFrequency",
+                        value,
+                        "its numbers must be finite",
+                    ));
+                }
+            }
+            "feConvolveMatrix" => {
+                let Some(value) = element.attribute("order") else {
+                    continue;
+                };
+                let mut numbers = svgtypes::NumberListParser::from(value);
+                let columns = numbers.next().and_then(Result::ok).map_or(3, |n| n as i32);
+                let rows = numbers
+                    .next()
+                    .and_then(Result::ok)
+                    .map_or(columns, |n| n as i32);
+                if columns > 0 && rows > 0 && (columns as u32).checked_mul(rows as u32).is_none() {
+                    return Err(refuse(
+                        "feConvolveMatrix",
+                        "order",
+                        value,
+                        "its columns × rows must fit in 32 bits",
+                    ));
+                }
+            }
+            _ => {}
         }
     }
     Ok(())
