@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5f2fa671334d07e3a3f69d9da9ecc8c057dd1450614e53b8f7d5f61264bc597a # shrinks to source = "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'><defs><filter id='f' filterUnits='userSpaceOnUse'><feTurbulence baseFrequency='1e8' numOctaves='1'/></filter><mask id='m' maskUnits='userSpaceOnUse'><rect width='1' height='1' fill='white'/></mask><pattern id='p' width='0' height='0'><rect width='1' height='1'/></pattern></defs><g filter='url(#f)'><g><rect x='0' y='0' width='0' height='0'/></g></g></svg>"
+cc b005140da7f0de95724f5930e2ce14be8cd3d9d93940a8bcf2b3d11bf6be439a # shrinks to source = "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'><defs><filter id='f' primitiveUnits='objectBoundingBox'><feFlood x='0' width='4e5'/></filter><mask id='m'><rect width='1' height='1' fill='white'/></mask><pattern id='p' width='0' height='0' patternUnits='objectBoundingBox'><rect width='1' height='1'/></pattern></defs><g filter='url(#f)'><g transform='matrix(1e2 0 0 1e0 0 0)'><circle cx='0' cy='0' r='3e1'/></g></g></svg>"
+cc 19daeb4712821cbbf875892e9e925ae48a6cbf4e1f8720410fc497e0ffc2b1ef # shrinks to source = "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'><defs><filter id='f' filterUnits='userSpaceOnUse'><feOffset dx='1e8' dy='1e8'/></filter><mask id='m' maskUnits='userSpaceOnUse'><rect width='1' height='1' fill='white'/></mask><pattern id='p' width='0' height='0'><rect width='1' height='1'/></pattern></defs><g transform='scale(2e2)' filter='url(#f)'><g><circle cx='0' cy='0' r='0'/></g></g></svg>"
