@@ -29,3 +29,4 @@
 ## [2026-11-09 13:29] update | Fixed bug_0198 (resvg box blur i32 overflow, U32) found by the hand-dispatched nightly svg fuzz job on 6a7c87d: blurs past MAX_SVG_BLUR (2^20 px) refused before drawing
 ## [2026-11-09 14:25] create | Prototype of ADR 0041 <canvas> on branch canvas: HtmlCanvases/CanvasSource, sync_canvases (ViewportNode/ImageNode, MAX_CANVAS_SIDE gate, one viewport per camera, shown), canvas example (verified windowed by the user), tests/canvas.rs, UPSTREAM U33
 ## [2026-11-09 14:40] update | canvas branch: the examples' --offscreen harness spawns a handle-less primary Window so Bevy's ray picking works offscreen (UPSTREAM U33); canvas hero dragged and clicked offscreen
+## [2026-11-09 14:45] update | ADR 0041 (<canvas> shows app render targets) accepted after the prototype; canvas branch fast-forwarded into main (8f4a093, c4886b1); ADR 0028 status lists <canvas> as shipped

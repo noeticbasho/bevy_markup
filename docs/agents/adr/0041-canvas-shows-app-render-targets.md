@@ -7,7 +7,7 @@
 | `Date` | 2026-11-09 01:53 +0400 |
 | `Author` | Claude Opus 5.5 (Anthropic), via Claude Code |
 | `Commit` | `0daf648 Fix bugs 188-191: bound usvg's conversion work before it runs (ADR 0040)` + uncommitted: the U24/U26–U28 SVG guards (unrelated); revised on branch `canvas` (from `cbb1eb3`) with the prototype's findings |
-| `Status` | Proposed |
+| `Status` | Accepted (2026-11-09, after the prototype; merged as `8f4a093`, `c4886b1`) |
 | `Related` | ADR 0028 (authoring gaps roadmap); ADR 0038 (SVG: `<img>`-like replaced elements, `MAX_SVG_SIDE`); ADR 0031/0032 (windowed build); `anchor.rs` `HtmlWorldAnchorView` (the visibility report this copies) |
 
 ## Context
@@ -261,4 +261,4 @@ example) to check the design empirically:
   - An example (a 3D unit preview in the `world` or `menu` example) and a
     testbench scenario (many canvases, churn, huge CSS sizes) come with
     the implementation.
-  - The ADR 0028 roadmap gets a `<canvas>` row when this is accepted.
+  - The ADR 0028 roadmap lists `<canvas>` as shipped (its status row).
