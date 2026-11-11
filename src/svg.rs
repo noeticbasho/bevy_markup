@@ -818,11 +818,22 @@ pub(crate) struct InlineSvgs {
 /// Reserves `bytes` in `used` if they fit [`MAX_SVG_RASTER_BYTES`].
 fn reserve(used: &std::sync::atomic::AtomicU64, bytes: u64) -> bool {
     use std::sync::atomic::Ordering;
-    used.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |held| {
-        held.checked_add(bytes)
+    // A compare-exchange loop: `fetch_update` is deprecated from Rust 1.99
+    // (renamed `try_update`, which 1.98 lacks), and CI builds on the
+    // latest stable with `-D warnings`.
+    let mut held = used.load(Ordering::SeqCst);
+    loop {
+        let Some(total) = held
+            .checked_add(bytes)
             .filter(|&total| total <= MAX_SVG_RASTER_BYTES)
-    })
-    .is_ok()
+        else {
+            return false;
+        };
+        match used.compare_exchange_weak(held, total, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return true,
+            Err(current) => held = current,
+        }
+    }
 }
 
 fn release(used: &std::sync::atomic::AtomicU64, bytes: u64) {
