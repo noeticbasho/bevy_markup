@@ -281,7 +281,7 @@ remain your app's choice. Optional features:
 | `text-input` | `<input type="text">` renders Bevy's editable-text widget (fields, form values) |
 | `system_fonts` | the OS's installed fonts join the font fallback chain |
 | `svg` | `.svg` files load as images (`<img src>`, `border-image`/`background-image: url()`) and inline `<svg>` draws (`currentColor` from CSS), on the CPU; untrusted files are bounded (no external resources, a size cap, a depth and render-cost limit) |
-| `svg-text` | `svg` plus SVG `<text>`, drawn with the font files registered in `FontFamilies` |
+| `svg-text` | `svg` plus SVG `<text>`, drawn with the fonts registered in `FontFamilies` (font files or system families) |
 | `dev-tools` | examples-only: the localhost agent/QA surface (BRP + MCP) |
 
 ### Bevy compatibility

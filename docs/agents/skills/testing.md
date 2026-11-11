@@ -156,10 +156,11 @@ tests needs no browser or Node.
 
 ### CSS and layout oracle (`scripts/browser_oracle.py`)
 
-The script loads each vector in headless Chromium as `* { all: unset }` +
-`BEVY_MARKUP_CSS` + the vector's `style.css` + `page.html`, and records
-`getComputedStyle` per element (and `getBoundingClientRect` for `layout_*`
-vectors) into `browser.json`.
+The script loads each vector in headless Chromium as
+`:where(:not(svg, svg *)) { all: unset }` + `BEVY_MARKUP_CSS` + the
+vector's `style.css` + `page.html` (its `*.svg`/`*.png` files beside it),
+and records `getComputedStyle` per element (and `getBoundingClientRect`
+for `layout_*` vectors, inline images included) into `browser.json`.
 
 - `BEVY_MARKUP_CSS` expresses bevy_markup's own defaults and layout model as CSS: root and
   containers are flex columns, blocks are blocks, nothing shrinks, white

@@ -213,8 +213,9 @@
 //!   `<img src="x.svg">`, `border-image`/`background-image: url(x.svg)` and
 //!   9-slice images accept SVG (the `bevy_markup::svg` module has the details
 //!   and the limits on untrusted files).
-//! - `svg-text`: `svg` plus `<text>` inside SVGs, drawn with the font files
-//!   registered in [`FontFamilies`](fonts::FontFamilies).
+//! - `svg-text`: `svg` plus `<text>` inside SVGs, drawn with the fonts
+//!   registered in [`FontFamilies`](fonts::FontFamilies) (font files and
+//!   system families alike).
 //! - `hot-reload`: Bevy's asset file watcher, for editing an asset file and
 //!   restyling without a restart (the library already reacts to asset events).
 //! - `fuzzing`: exposes `bevy_markup::fuzz` (`#[doc(hidden)]`, not covered by
@@ -413,8 +414,11 @@ impl Plugin for BevyMarkupPlugin {
                     svg::finish_inline_svgs
                         .after(HtmlUiSystems::Build)
                         .before(build::size_images),
+                    // After `apply_nine_slices`: a manifest reload writes
+                    // the 1× image back, put right the same frame.
                     svg::rasterize_svg_images
                         .after(build::size_images)
+                        .after(nine_slice::apply_nine_slices)
                         .before(UiSystems::Prepare),
                 ),
             );

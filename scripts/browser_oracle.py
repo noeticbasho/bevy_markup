@@ -4,7 +4,7 @@
 For each vector directory (default: every `tests/vectors/*/` holding
 `page.html` + `style.css`) this builds a page with
 
-    <style>* { all: unset }</style>   (no browser defaults)
+    <style>:where(:not(svg, svg *)) { all: unset }</style>   (no browser defaults)
     <style>{BEVY_MARKUP_CSS}</style>          (bevy_markup's own defaults and layout model)
     <style>{style.css}</style>
     <body>{page.html}<script>{collector}</script></body>
@@ -23,6 +23,11 @@ Fluent oracle (`scripts/fluent_oracle.sh`) and are skipped by default.
 Layout vectors must not set `font-family` and must stay printable ASCII:
 both engines then use the same font file, Bevy's embedded default font
 (located through `cargo metadata`), which covers nothing else.
+
+A vector's image files (`*.svg`, `*.png`) are served next to the page, so
+`<img src>` and `url()` load; inline `<svg>` keeps its own attributes (the
+reset skips SVG elements: Chrome maps an `<svg>`'s `width`/`height` to CSS,
+and `all: unset` would undo them).
 
 Usage:
     scripts/browser_oracle.py [--browser PATH] [VECTOR_DIR ...]
@@ -186,7 +191,7 @@ def record(browser, vector, font):
 
     document = (
         "<!doctype html><html><head><meta charset=\"utf-8\">"
-        f"<style>* {{ all: unset; }}</style><style>{BEVY_MARKUP_CSS}</style>"
+        f"<style>:where(:not(svg, svg *)) {{ all: unset; }}</style><style>{BEVY_MARKUP_CSS}</style>"
         f"<style>{css}</style></head><body>{page}"
         f"<script>{COLLECTOR}</script></body></html>"
     )
@@ -194,6 +199,8 @@ def record(browser, vector, font):
         harness = Path(tmp) / "index.html"
         harness.write_text(document, encoding="utf-8")
         shutil.copy(font, Path(tmp) / DEFAULT_FONT)
+        for image in [*vector.glob("*.svg"), *vector.glob("*.png")]:
+            shutil.copy(image, Path(tmp) / image.name)
         result = subprocess.run(
             [
                 browser,

@@ -35,7 +35,10 @@ pub struct NineSlice {
 /// Draws a [`NineSlice`] as this UI node's background, covering the whole
 /// border box so `Node::padding` insets the children, not the frame. Inserts or
 /// updates the entity's `ImageNode` once the style has loaded (keeping any
-/// existing tint).
+/// existing tint). With the `svg` feature, an `.svg` image is drawn at the
+/// node's scale factor (HiDPI, `UiScale`) with the same geometry: the
+/// insets, corner cap and tile sizes are scaled to match, so corners keep
+/// their logical size and stay sharp.
 #[derive(Component, Clone, Debug, Reflect)]
 #[reflect(Component)]
 #[require(Node)]

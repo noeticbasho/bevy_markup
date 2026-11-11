@@ -69,11 +69,13 @@
 //! resolves like the page's CSS: through the families registered in
 //! [`FontFamilies`](crate::fonts::FontFamilies) (any case), the generic
 //! keywords mapped with `set_generic`, and CSS's face fallback; a family
-//! nobody registered uses Bevy's default font. Only faces given as font
-//! files (`FontSource::Handle`) are available: a system family
-//! (`FontSource::Family`, a generic system font) falls back to the default
-//! font. A font that loads after an SVG was drawn draws it again: `.svg`
-//! files with text are reloaded, and inline `<svg>` with text is redrawn.
+//! nobody registered uses Bevy's default font. A face given as a font file
+//! (`FontSource::Handle`) is that file; one given as a family
+//! (`FontSource::Family`, `Generic`, …: system fonts) is that family's face
+//! closest to the text's weight and style in Bevy's own font collection,
+//! the face page text uses. A font that loads after an SVG was drawn draws
+//! it again: `.svg` files with text are reloaded, and inline `<svg>` with
+//! text is redrawn.
 //!
 //! # Limits
 //!
@@ -1095,8 +1097,13 @@ pub(crate) fn rasterize_svg_images(
             &ComputedNode,
             Option<&mut SvgFrame>,
             Option<&crate::build::CssRoot>,
+            Has<crate::nine_slice::NineSliceFrame>,
         ),
-        Or<(With<crate::build::CssFrame>, With<crate::build::CssRoot>)>,
+        Or<(
+            With<crate::build::CssFrame>,
+            With<crate::build::CssRoot>,
+            With<crate::nine_slice::NineSliceFrame>,
+        )>,
     >,
 ) {
     // Finished draws.
@@ -1260,13 +1267,13 @@ pub(crate) fn rasterize_svg_images(
             rasters.drawing.insert(key, task);
         }
     }
-    // CSS `border-image`/`background-image` SVGs (ADR 0038 §7): drawn at
-    // their intrinsic size × the node's scale factor (a sliced or tiled
-    // image keeps its logical geometry: the mode's insets, corner cap and
-    // tile size are scaled to match), or at the node's pixels when
-    // stretched over it.
-    for (entity, mut node_image, node, frame, root) in &mut frames {
-        if root.is_some_and(|root| !root.owns_image()) {
+    // CSS `border-image`/`background-image` SVGs (ADR 0038 §7) and
+    // `.slice.ron` frames (`NineSliceFrame`): drawn at their intrinsic size
+    // × the node's scale factor (a sliced or tiled image keeps its logical
+    // geometry: the mode's insets, corner cap and tile size are scaled to
+    // match), or at the node's pixels when stretched over it.
+    for (entity, mut node_image, node, frame, root, nine_slice) in &mut frames {
+        if root.is_some_and(|root| !root.owns_image()) && !nine_slice {
             continue;
         }
         let shown_handle = frame

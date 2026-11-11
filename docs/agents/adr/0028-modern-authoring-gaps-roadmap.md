@@ -7,7 +7,7 @@
 | Date | 2026-10-15 06:01 +0400 |
 | Author | GLM 5.3 Flash (Z.ai), via omp |
 | Commit | `e2081e8 Release 0.7.0` (uncommitted at writing) |
-| Status | Accepted (the roadmap was adopted and worked in order; status corrected 2026-10-16). Shipped: the text surface (text-transform, white-space/ellipsis), background-image (+repeat/clip; size unsupported), @font-face parse-and-skip, :nth-child/:not/:focus-within/:empty, sibling combinators, tables on the flex model, data-* attribute selectors, <canvas> showing app render targets (ADR 0041, 2026-11-09). Deferred as documented limits (capability-checked): position: sticky, <textarea> (bevy's TextInput is single-line), built-in checkbox/radio widgets. Still open (tier 4): SVG, @media, box-/text-shadow, gradients as images, @keyframes against the rebuild model |
+| Status | Accepted (the roadmap was adopted and worked in order; status corrected 2026-10-16). Shipped: the text surface (text-transform, white-space/ellipsis), background-image (+repeat/clip; size unsupported), @font-face parse-and-skip, :nth-child/:not/:focus-within/:empty, sibling combinators, tables on the flex model, data-* attribute selectors, <canvas> showing app render targets (ADR 0041, 2026-11-09), SVG — `.svg` images, inline <svg>, SVG text (ADR 0038, accepted 2026-11-11). Deferred as documented limits (capability-checked): position: sticky, <textarea> (bevy's TextInput is single-line), built-in checkbox/radio widgets. Still open (tier 4): @media, box-/text-shadow, gradients as images, @keyframes against the rebuild model |
 | Related | ADR 0011 (inline boxes), ADR 0027 (text properties, lists, overflow, entities — the wave this builds on); AGENTS.md Limits; review_0004 |
 
 ## Context

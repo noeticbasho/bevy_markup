@@ -50,6 +50,7 @@ the issue may already be fixed or reported.
 | U34 | Bevy (bevy_ui 0.20) | The UI picking backend hit-tests a text node's runs (`run_geometry`) but never `TextLayoutInfo::inline_boxes`: a pointer over an inline image hits its text block ([bug_0199](bug_0199.md)) | an image or SVG inside a link can't be clicked through the icon | `signals::pick_inline_boxes` adds the image's hit from the UI backend's hit on its text block | unreported |
 | U35 | tiny-skia-path 0.12 (via resvg 0.49) | `NonZeroRect::to_int_rect` and `IntSize::to_int_rect(x, y)` unwrap `IntRect::from_xywh`, `None` once `x + width` passes `i32::MAX`; resvg converts filter regions, subregions and offsets with them ([bug_0201](bug_0201.md)) | panic in any build: a failed draw (`svg` feature) | regions, subregions and offsets past `MAX_SVG_FILTER_REGION` refused before drawing (`svg::check_extent`) | unreported |
 | U36 | resvg 0.49 (tiny-skia 0.12) | `render_pattern_pixmap` allocates a pattern's tile at its drawn size with no limit; `Pixmap::new` allocates with `vec![0; len]`, which aborts on failure ([bug_0200](bug_0200.md)) | process abort (`svg` feature) | the render-cost estimate charges each tile (`svg::estimate_cost`) | unreported |
+| U37 | parley 0.11 (via bevy_text 0.20) | An inline box's whole height counts as ascent and the line height is the tallest item's, so a box taller than the text's ascent gets negative leading ([bug_0203](bug_0203.md)) | an `<img>`/inline `<svg>` taller than the ascent overlaps the line above; the line is short by the text's descent | none | fixed upstream (parley 0.12.0); waiting for Bevy to depend on it |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -813,6 +814,29 @@ CI clippy command and workspace tests pass on both.
   drawn size, so such a document exceeds the cost budget and is refused.
 - **PR sketch:** cap the tile at the canvas size (a larger tile shows at
   most the canvas) or use `try_reserve` and skip the paint on failure.
+
+## U37 — parley 0.11: tall inline boxes get negative leading
+
+- **Project:** linebender/parley. Affected: 0.11.1 (Bevy 0.20's bevy_text
+  depends on `^0.11`). Fixed in 0.12.0 (2026-10-09): line boxes are
+  computed CSS-style from baseline-relative extents, with
+  `vertical-align`.
+- **Problem:** `layout/line_break.rs` `finish_line` sets
+  `ascent = max(ascent, box.height)` for an in-flow inline box and takes
+  the line height from `running_line_height` (the tallest cluster or
+  box). For a box taller than the line height, `leading = line_height −
+  (ascent + descent)` is −descent: the box rises by half the descent and
+  the text's descent is missing from the line.
+- **Reproduction:** `<p>Tall <img src="frame.png" style="…"> icon</p>`
+  with `html { font-size: 20px }` and the image 20 × 40: Chromium's
+  paragraph is 45px with the image at its top; Bevy's is 40px with the
+  image at −3 (`a_tall_inline_image_grows_the_line_like_css`, ignored).
+- **Local workaround:** none (Bevy places the box from parley's metrics).
+  The `layout_svg` vector keeps its images below the font's ascent.
+- **On a Bevy bump:** if bevy_text depends on parley ≥ 0.12, run
+  `cargo test --test html_ui -- --ignored a_tall_inline_image`, un-ignore
+  it, add a tall image to `layout_svg` (and re-record it), and mark this
+  entry removed.
 
 ## Not upstream bugs (recorded so they aren't re-filed)
 

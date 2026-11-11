@@ -12,9 +12,11 @@
 //! `target/tmp/golden/` and their paths printed.
 //!
 //! Scene inputs live in `tests/golden/<scene>/`: `page.html`, `style.css`,
-//! optionally `messages.ftl` (made the active en-US bundle). Each scene gets
-//! a copy of `tests/fixtures/frame.png` beside its CSS. Text uses Bevy's
-//! embedded default font only (reproducible: no system fonts).
+//! optionally `messages.ftl` (made the active en-US bundle) and `*.svg`
+//! images. Each scene gets a copy of `tests/fixtures/frame.png` beside its
+//! CSS. Text uses Bevy's embedded default font only (reproducible: no
+//! system fonts). The `svg` scene needs the `svg` feature (the script
+//! passes it).
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -54,7 +56,7 @@ struct Scene {
     background: Color,
 }
 
-const SCENES: [Scene; 5] = [
+const SCENES: &[Scene] = &[
     Scene {
         name: "text",
         size: UVec2::new(320, 240),
@@ -79,6 +81,12 @@ const SCENES: [Scene; 5] = [
         name: "background",
         size: UVec2::new(200, 300),
         background: Color::srgb_u8(0x30, 0x30, 0x30),
+    },
+    #[cfg(feature = "svg")]
+    Scene {
+        name: "svg",
+        size: UVec2::new(260, 200),
+        background: Color::srgb_u8(0x1c, 0x24, 0x30),
     },
 ];
 
@@ -106,7 +114,7 @@ fn golden_scenes() {
     );
 
     let mut tracked: Vec<UntypedHandle> = Vec::new();
-    for scene in &SCENES {
+    for scene in SCENES {
         tracked.extend(spawn_scene(&mut app, &root, scene));
     }
     settle(&mut app, &tracked);
@@ -193,6 +201,12 @@ fn spawn_scene(app: &mut App, root: &Path, scene: &Scene) -> Vec<UntypedHandle> 
             std::fs::copy(source.join(file), dir.join(file)).unwrap();
         }
     }
+    for entry in std::fs::read_dir(&source).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|ext| ext == "svg") {
+            std::fs::copy(&path, dir.join(path.file_name().unwrap())).unwrap();
+        }
+    }
 
     let world = app.world_mut();
     let server = world.resource::<AssetServer>().clone();
@@ -250,14 +264,29 @@ struct SceneTarget(&'static str, Handle<Image>);
 
 /// Updates until every tracked asset is loaded, every scene was built, no
 /// render pipeline is still compiling (they compile asynchronously; an
-/// unfinished one silently skips its draws, e.g. all 9-slice frames), and
-/// all of that held for a few frames.
+/// unfinished one silently skips its draws, e.g. all 9-slice frames), every
+/// inline image shows a raster of its box's size and no image changed (SVG
+/// redraws run on tasks after layout, ADR 0038 §3), and all of that held
+/// for a few frames.
 fn settle(app: &mut App, tracked: &[UntypedHandle]) {
     let deadline = Instant::now() + std::time::Duration::from_secs(120);
     let mut stable = 0;
     let mut last_builds = 0;
+    let mut image_events = app
+        .world()
+        .resource::<Messages<AssetEvent<Image>>>()
+        .get_cursor();
     while Instant::now() < deadline {
         app.update();
+        let images_changed = image_events
+            .read(app.world().resource::<Messages<AssetEvent<Image>>>())
+            .any(|event| {
+                matches!(
+                    event,
+                    AssetEvent::Modified { .. } | AssetEvent::Added { .. }
+                )
+            });
+        let rasters_sized = inline_rasters_sized(app.world_mut());
         let server = app.world().resource::<AssetServer>();
         for handle in tracked {
             if let Some(LoadState::Failed(error)) = server.get_load_state(handle.id()) {
@@ -275,7 +304,13 @@ fn settle(app: &mut App, tracked: &[UntypedHandle]) {
             .waiting_pipelines()
             .next()
             .is_some();
-        if loaded && !compiling && builds >= SCENES.len() && builds == last_builds {
+        if loaded
+            && !compiling
+            && !images_changed
+            && rasters_sized
+            && builds >= SCENES.len()
+            && builds == last_builds
+        {
             stable += 1;
             if stable >= 10 {
                 return;
@@ -287,6 +322,26 @@ fn settle(app: &mut App, tracked: &[UntypedHandle]) {
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
     panic!("golden: scenes never settled (assets loading, pipelines compiling or no build)");
+}
+
+/// Whether every inline image (`<img>`, inline `<svg>`) shows a raster of
+/// its laid-out box's size: an SVG is redrawn at the size it's shown at
+/// (scale factor 1 here), a raster image (`frame.png`) keeps its own size
+/// and is skipped.
+fn inline_rasters_sized(world: &mut World) -> bool {
+    let mut boxes = world.query::<(&bevy::text::InlineBox, &bevy::ui::widget::InlineImage)>();
+    let images = world.resource::<Assets<Image>>();
+    boxes.iter(world).all(|(inline_box, image)| {
+        let path = image.image.path().map(|path| path.to_string());
+        let is_png = path.is_some_and(|path| path.ends_with(".png"));
+        is_png
+            || images.get(&image.image).is_some_and(|raster| {
+                (raster.size().as_vec2() - inline_box.size)
+                    .abs()
+                    .max_element()
+                    <= 1.0
+            })
+    })
 }
 
 /// Screenshots every scene's target and updates until all arrive.

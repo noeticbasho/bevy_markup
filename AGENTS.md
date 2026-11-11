@@ -137,14 +137,19 @@ src/
                    a submit button's activation submits its form)
   nine_slice.rs    NineSlice asset + loader, NineSliceFrame
   svg_fonts.rs     (`svg-text`, ADR 0038 §6) `SvgFontSet`: fontdb loaded with the
-                   `FontSource::Handle` faces of `FontFamilies` + Bevy's default font; a usvg
+                   faces of `FontFamilies` + Bevy's default font — `FontSource::Handle`
+                   faces from the `Font` asset, family sources (system fonts) from
+                   Bevy's `FontCx` collection (`system_face`: the family's face closest
+                   to the requested style, then weight; fontique's types used through
+                   inference, no fontique dependency); a usvg
                    `FontResolver` maps `font-family` like the page CSS (names any case,
                    `set_generic`, `FontFaces::face` fallback, unknown → default font);
                    `sync_svg_fonts` (PostUpdate, before Render) rebuilds it when the
-                   signature (families × face handles × loaded) changes, then reloads `.svg`
+                   signature (families × faces: handle + loaded, or collection data id +
+                   index) changes, then reloads `.svg`
                    paths with `<text>` (`note_text`) and `set_changed`s `FontFamilies` so
                    inline text (keyed by the set's generation) is re-collected; the next run
-                   sees the same signature (no loop). System families: default font
+                   sees the same signature (no loop)
   svg_bounds.rs    (`svg` feature, ADR 0040) `bounds`: one graph over the document's elements
                    (parent → child, url(#…)/href references, `<style>` rules matched by simplecss
                    like usvg, and — added by a topological inheritance walk — shape/text →
@@ -457,7 +462,8 @@ tests/
   vectors/<name>/  file-based vectors: page.html, style.css, browser.json (CSS oracle output);
                    Fluent vectors add messages.ftl + fluent.html (Fluent oracle output);
                    layout_* vectors also get rects in browser.json (layout oracle)
-  golden/<scene>/  page.html, style.css, [messages.ftl], expected.png (text, frame, l10n)
+  golden/<scene>/  page.html, style.css, [messages.ftl], [*.svg], expected.png (text, frame, l10n,
+                   radius, background, svg)
   fixtures/        frame.png (32×24)
 .github/workflows/
   ci.yml           per push to main / PR: -D warnings check/build/doc, cargo test, fuzzing-feature
@@ -1182,7 +1188,8 @@ harnesses below) are filed in `docs/agents/bugs/` — see **Bug reports**.
   32×24 fixture, background, container gap). Regenerate after changing a
   vector's inputs: `scripts/browser_oracle.py [tests/vectors/<name>]`, then
   review the `browser.json` diff (one record per line) and commit it. The page
-  is `* { all: unset }` + `BEVY_MARKUP_CSS` (bevy_markup's defaults and layout model as CSS:
+  is `:where(:not(svg, svg *)) { all: unset }` (inline `<svg>` keeps its
+  attributes, which Chrome maps to CSS) + `BEVY_MARKUP_CSS` (bevy_markup's defaults and layout model as CSS:
   flex-column root and containers, block blocks, Bevy's default font at line
   height 1.2, white text, `li` indent and bullet, `pre` 8px padding — keep in
   sync with `build.rs`) + `style.css` + `page.html`, so vectors must be plain
@@ -1200,7 +1207,9 @@ harnesses below) are filed in `docs/agents/bugs/` — see **Bug reports**.
   Gotchas). Text uses Bevy's embedded default font (FiraMono, 0.6em advance,
   printable ASCII only); no fake families. `layout_column_stacking` pins
   `layout_blocks` with hand-derived rects; the **layout oracle**
-  (`layout_oracle`) compares every root/block/container border box of each
+  (`layout_oracle`) compares every root/block/container border box — and
+  every inline image's (`<img>`, inline `<svg>`: the text blocks'
+  `TextLayoutInfo::inline_boxes`, in document order) — of each
   `tests/vectors/layout_*/` with Chromium's `getBoundingClientRect` (recorded
   in `browser.json` by `scripts/browser_oracle.py`: 640px viewport — headless
   Chromium widens narrower windows — and the same FiraMono file, found via
@@ -1209,8 +1218,14 @@ harnesses below) are filed in `docs/agents/bugs/` — see **Bug reports**.
   1.2 line height is whole (Bevy ceils text nodes, see Gotchas). Vectors:
   `layout_blocks` (padding, borders, gap, wrapping, `pre`), `layout_mixed`
   (mixed inline content in a container, mixed font sizes on one line,
-  `border-image` wrapper block, root border, nested containers). Both agree
-  with Chromium to the pixel.
+  `border-image` wrapper block, root border, nested containers),
+  `layout_svg` (ADR 0038: `<img>` SVGs by `width`/`height`, by a CSS side
+  and a `viewBox` ratio, inline `<svg>` by its attributes and by CSS; the
+  vector's `*.svg` files are served beside the page and loaded by the
+  harness; vectors holding `*.svg` files run only with `--features svg`).
+  They agree with Chromium to the pixel. Inline images taller than the
+  font's ascent don't: parley 0.11's line metrics (bug_0203, UPSTREAM
+  U37), so `layout_svg` keeps its images shorter.
 - **Unit tests** (`cargo test --lib`; `--features fuzzing` adds `src/fuzz.rs`):
   besides the cascade tests, `template.rs` (entity decoding: five escapes,
   one level only, others untouched; Tera-autoescape round trip proptest),
@@ -1279,7 +1294,12 @@ harnesses below) are filed in `docs/agents/bugs/` — see **Bug reports**.
   so plain `cargo test` never needs a GPU): scenes in `tests/golden/<scene>/`
   (`text`: sizes, colors, wrapping, inline runs, background, `pre`; `frame`:
   root/container/block `border-image` stretch/round/% slices; `l10n`: Fluent
-  markup, plurals, fallback) are rendered by full Bevy without a window
+  markup, plurals, fallback; `radius`; `background`; `svg` — `--features
+  svg`, which the script passes: an `<img>` SVG at 1× and redrawn at 64 px
+  (gradient, stroke), inline `<svg>` recolored through `currentColor`, an
+  SVG 9-slice frame and a tiled SVG background; settling also waits until
+  every inline image shows a raster of its box's size and no image changed)
+  are rendered by full Bevy without a window
   (DefaultPlugins minus winit/audio/gilrs/pipelined rendering) into a
   `RenderTarget::Image`, captured with `Screenshot::image` and compared with
   `expected.png`. Committed inputs only (default font, `frame.png`). The
@@ -1616,7 +1636,7 @@ known gaps:
     (`tests/layout_properties.proptest-regressions`,
     `proptest-regressions/*.txt`) are already covered: proptest replays them
     first on every run.
-- [x] **7. Golden images, sparingly** (fixes the rest of weakness 3 and part of weakness 4: real font rasterization, wrapping and 9-slice drawing; CJK fallback is still untested, since only committed fonts are used). `tests/golden.rs` + `scripts/golden.sh` on Mesa lavapipe; three scenes (`text`, `frame`, `l10n`); see Testing. Brittle across drivers and font versions: a smoke check, not a spec.
+- [x] **7. Golden images, sparingly** (fixes the rest of weakness 3 and part of weakness 4: real font rasterization, wrapping and 9-slice drawing; CJK fallback is still untested, since only committed fonts are used). `tests/golden.rs` + `scripts/golden.sh` on Mesa lavapipe; six scenes (`text`, `frame`, `l10n`, `radius`, `background`, `svg`); see Testing. Brittle across drivers and font versions: a smoke check, not a spec.
   - [ ] A CJK/fallback scene would need a committed CJK font (or `system_fonts`, which isn't reproducible).
 
 ## Decision records
@@ -1933,9 +1953,12 @@ Next steps (roughly in order of value):
   around then, suspect the image first (`golden-diffs` artifact, apt
   errors); re-record the references with the `Update golden references
   (lavapipe)` job; pinning `runs-on: ubuntu-24.04` is the quick fallback.
-  The nightly golden job has been failing since 2026-10-06 on the stale
-  references (recorded 2026-10-04 locally, before the renderer moved) —
-  re-record with the dispatch job once it lands.
+  The nightly golden job failed from 2026-10-06 to 2026-10-09 on stale
+  references (recorded 2026-10-04 locally, before the renderer moved);
+  the update job landed 2026-10-08 (`85fc611`), the references were
+  re-recorded 2026-10-10 (`590c2f5`), and it has passed every night
+  since (checked 2026-11-11: the runner's lavapipe and a local Arch
+  lavapipe, Mesa 26.2.6, render the scenes identically).
   First CI runs (2026-10-04): CI and nightly golden, browser oracle and
   fuzz-driver builds green; the cargo-fuzz jobs needed
   `fuzz-libfuzzer.sh` to pass `--target` (the prebuilt cargo-fuzz defaults

@@ -40,6 +40,48 @@ pub(crate) fn deep() -> String {
     format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">{body}</svg>"#)
 }
 
+/// A 1920×1080 full-window background (ADR 0038's "full-window SVG
+/// background at 4K": its 2× draw is 3840×2160): a gradient sky, a radial
+/// sun, three layered ridges and six translucent clouds (an offscreen layer
+/// each).
+pub(crate) fn background() -> String {
+    let mut body = String::from(
+        r##"<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1b2a4a"/><stop offset="1" stop-color="#f0a060"/></linearGradient><radialGradient id="sun"><stop offset="0" stop-color="#fff4c0"/><stop offset="1" stop-color="#ffb040" stop-opacity="0"/></radialGradient></defs><rect width="1920" height="1080" fill="url(#sky)"/><circle cx="1400" cy="640" r="260" fill="url(#sun)"/>"##,
+    );
+    for (i, color) in ["#40304a", "#2c2438", "#1a1624"].iter().enumerate() {
+        let base = 700 + i * 120;
+        body += &format!(
+            r##"<path d="M0 {base} Q240 {} 480 {base} T960 {base} T1440 {base} T1920 {base} V1080 H0 Z" fill="{color}"/>"##,
+            base - 160
+        );
+    }
+    for i in 0..6 {
+        let (x, y) = (150 + i * 300, 160 + (i % 3) * 70);
+        body += &format!(
+            r##"<g opacity="0.6"><ellipse cx="{x}" cy="{y}" rx="140" ry="40" fill="#fff"/><ellipse cx="{}" cy="{}" rx="90" ry="34" fill="#fff"/></g>"##,
+            x + 60,
+            y - 20
+        );
+    }
+    format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080">{body}</svg>"#)
+}
+
+/// A 1024×1024 icon sheet (ADR 0038's "large icon sheet"): 32 × 32 cells
+/// of 32 px, each a translated copy of the star path with its own fill and
+/// a stroke.
+pub(crate) fn sheet() -> String {
+    let mut body = String::new();
+    for i in 0..1024 {
+        let (x, y) = ((i % 32) * 32 + 4, (i / 32) * 32 + 4);
+        body += &format!(
+            r##"<path transform="translate({x} {y})" d="M12 2l3 7h7l-5.5 4.5 2 7.5-6.5-4.5-6.5 4.5 2-7.5L2 9h7z" fill="rgb({}, {}, 120)" stroke="#000" stroke-width="1"/>"##,
+            i % 256,
+            (i * 7) % 256
+        );
+    }
+    format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024">{body}</svg>"#)
+}
+
 /// The stage benchmarks' documents.
 pub(crate) fn documents() -> Vec<(&'static str, String)> {
     vec![
@@ -47,6 +89,8 @@ pub(crate) fn documents() -> Vec<(&'static str, String)> {
         ("illustration", illustration()),
         ("shadowed", SHADOWED.to_owned()),
         ("deep", deep()),
+        ("background", background()),
+        ("sheet", sheet()),
     ]
 }
 

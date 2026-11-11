@@ -54,7 +54,7 @@ as `[INFERENCE]`.
 | [0035](./0035-replace-tl-with-html5ever.md) | Replace tl with html5ever | Rejected |
 | [0036](./0036-decode-character-references-with-htmlize.md) | Decode character references with htmlize | Accepted |
 | [0037](./0037-anchored-overlays-with-bevy-popover.md) | Anchored overlays with Bevy's Popover | Rejected |
-| [0038](./0038-svg-rasterized-with-resvg.md) | SVG: rasterize on the CPU with usvg + resvg | Proposed (steps 1–3 implemented) |
+| [0038](./0038-svg-rasterized-with-resvg.md) | SVG: rasterize on the CPU with usvg + resvg | Accepted |
 | [0039](./0039-css-pre-scan-walks-cssparser-tokens.md) | The CSS nesting pre-scan walks cssparser's tokens | Accepted |
 | [0040](./0040-svg-conversion-work-bound.md) | Bound usvg's conversion work before it runs | Accepted |
 | [0041](./0041-canvas-shows-app-render-targets.md) | `<canvas>` shows a render target the app registers | Accepted |

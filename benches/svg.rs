@@ -2,7 +2,8 @@
 //!
 //! - **Stages**, per document (`benches/shared/svg.rs`: an icon, a 40-group
 //!   illustration, a drop-shadowed panel, a pattern chain near the
-//!   recursion-depth limit):
+//!   recursion-depth limit, a 1920×1080 background — its 2× draw is 4K —
+//!   and a 1024-icon sheet):
 //!   - `depth`: the XML parse and the recursion-depth bound alone, the
 //!     cost the check adds before usvg;
 //!   - `parse`: the loader's whole parse (XML, depth bound, usvg);

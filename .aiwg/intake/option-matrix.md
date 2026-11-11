@@ -27,7 +27,7 @@
 - Application input bindings stay in apps; the library offers `HtmlFocus` (directional and Tab) instead (ADR 0008).
 - `tl`'s tag soup kept over html5ever: a spec parser costs 6–9× on the per-change parse, 10–20 % of a changing frame (ADR 0035).
 - Overlays stay separate roots placed by the crate, not Bevy `Popover` children: a child node collapses a text block's layout (ADR 0037).
-- SVG (proposed): rasterized on the CPU by usvg + resvg into plain `Image`s behind an opt-in `svg` feature, not drawn by a GPU vector renderer (bevy_vello): no renderer dependency, headless-testable, every backend (ADR 0038).
+- SVG: rasterized on the CPU by usvg + resvg into plain `Image`s behind an opt-in `svg` feature, not drawn by a GPU vector renderer (bevy_vello): no renderer dependency, headless-testable, every backend (ADR 0038).
 
 ## Sources
 

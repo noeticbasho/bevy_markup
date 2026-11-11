@@ -18,7 +18,14 @@ fn main() {
     divan::main();
 }
 
-const DOCUMENTS: [&str; 4] = ["icon", "illustration", "shadowed", "deep"];
+const DOCUMENTS: [&str; 6] = [
+    "icon",
+    "illustration",
+    "shadowed",
+    "deep",
+    "background",
+    "sheet",
+];
 
 fn document(name: &str) -> String {
     documents()

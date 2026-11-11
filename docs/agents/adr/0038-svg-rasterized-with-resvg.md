@@ -7,7 +7,7 @@
 | `Date` | 2026-11-07 17:19 +0400 |
 | `Author` | Claude Opus 5.5 (Anthropic), via Claude Code; direction chosen by Nikita Chashchinskii |
 | `Commit` | `5bae780 Fix the Mutants workflow: cap test memory and use 8 shards` + uncommitted (this ADR, revised after the probe); revised again at `d1eae43` + uncommitted step 1 (the recursion-depth check, §5) |
-| `Status` | Proposed (steps 1–3 implemented: `.svg` images, `<img>` redrawn at its displayed size, inline `<svg>`) |
+| `Status` | Accepted 2026-11-11 (all of §1–§10 implemented and verified: `.svg` images, `<img>` redrawn at its displayed size, inline `<svg>`, safety limits, `svg-text`, CSS images at the scale factor, benchmarks, testbench scenarios, the `svg` example) |
 | `Related` | ADR 0028 (roadmap item 12: "decide the shape first"), 0002 (library shape, minimal Bevy features), 0036 (in-domain crates replacing maintained code); review_0003 G19 (no remote loads); [probe report](../performance/adr-0038-probe.md) (the evidence for §2, §3 and §5) |
 
 ## Context
@@ -233,163 +233,6 @@ Tests (`html_ui` `inline_svg`, `svg::tests`):
 Falsified: without the cascade color, three tests fail; with the
 children walked, six; without the collect-time intrinsic size, one.
 
-### 7. CSS-loaded SVGs at the scale factor (added 2026-11-07)
-
-`border-image` and `background-image` SVGs were drawn at 1× and blurred
-on HiDPI or under `UiScale`. The redraw system now also takes
-`ImageNode`s the build owns: `CssFrame` entities, and roots whose
-`CssRoot` owns the image. An app's own `ImageNode` is left alone.
-
-- **Sliced or tiled:** drawn at intrinsic size × the node's scale factor
-  (`1 / ComputedNode::inverse_scale_factor`).
-- **Stretched:** drawn at the node's physical size.
-
-Bevy's slicer (`bevy_ui_render` `compute_texture_slices`) reads the slice
-insets in image px twice: as `inset / image_size` to cut the texture, and
-as `inset × min(node / image, max_corner_scale)` to size the corners on
-screen. Tiles are drawn at `image × stretch_value`. So for a raster `s`×
-larger, `scale_mode` multiplies the insets by `s` and divides
-`max_corner_scale` and every tile `stretch_value` by `s`. That cuts the
-same regions and draws them at the same logical size, with `s`× the
-pixels. Only `NodeImageMode::Auto` sizes a node from its image
-(`update_image_content_size_system`), and the build never uses it, so
-layout is unaffected.
-
-As for `<img>`, the build re-inserts the 1× `ImageNode` on every update;
-`SvgFrame` keeps the 1× mode, and the system restores the raster and the
-scaled mode the same frame.
-
-Tests (`html_ui` `svg_css_images`, `UiScale` 2):
-- a 40×20 frame with 25% slices draws at 80×40, insets 10/5 → 20/10,
-  corner cap 0.5, and no frame shows the 1× image across a restyle;
-- a tiled background draws 2× with `stretch_value` 0.5;
-- a stretched background draws at 200×100 for a 100×50 node;
-- scale factor 1 is untouched.
-
-Without the mode scaling two tests fail; without the put-back, one.
-`.slice.ron` frames (`NineSliceFrame`, app nodes) are still 1×.
-
-### 10. The `svg` example (added 2026-11-07)
-
-`examples/svg/` (`required-features = ["svg"]`; `svg-text` for its
-badge) shows every path on one page:
-- inline icons recolored by the theme's context `var()`s and `:hover`;
-- `star.svg` as `<img>` at 16–96 px;
-- `frame.svg` as `border-image` and `tile.svg` as a tiled
-  `background-image`;
-- `badge.svg` with `<text>`;
-- `refused.svg`, a `<use>` cycle;
-- a `UiScale` button (1×, 1.5×, 2×).
-
-The content lint renders it in every theme × scale context, but only
-with `--features svg`: without the feature its sheet's SVG `url()`s
-never load, and `settle()` never returns for a sheet whose `url()` image
-fails. CI's svg step runs the lint.
-
-Its first run (`--offscreen`) panicked at startup, which found bug_0187:
-the plugin's `init_asset::<Image>()` (and `<Font>` under `svg-text`)
-replaced the stores `ImagePlugin`/`TextPlugin` had made. It's now
-registered only when absent.
-
-Checked in the running example, through the harness's `game/ui` and
-screenshots: at 1.5× every SVG is drawn again at the new density, with
-frame corners and rivets at their logical size. The harness's
-`game/keyboard` doesn't reach `just_pressed` hotkeys: it writes
-`ButtonInput` outside the frame, and Bevy clears `just_pressed` in
-`PreUpdate`. So the scale change was driven by clicking the button.
-
-### 9. Testbench scenarios and profiling (added 2026-11-07)
-
-With `--features svg`, the testbench has three SVG scenarios:
-- **perf, `svg-icons`:** N rows with an inline `<svg>` whose
-  `currentColor` follows the row's state.
-- **perf, `svg-images`:** N `<img>` rows of one SVG file at a CSS width
-  that steps every 30 frames: redraw bursts.
-- **security, `svg-bombs`:** the probe report's hostile constructs as
-  `<img>` files and inline.
-
-Two new checks: `svg-drawn` (every inline image of the main UI shows a
-drawn image) and `svg-refused` (no hostile SVG produced an image, and
-every `<img>` one failed its load).
-
-The SVG systems and hot internals carry `#[hotpath::measure]`:
-`rasterize_svg_images`, `finish_inline_svgs`, `sync_svg_fonts`,
-`InlineSvgs::image`, `parse_with`, `recursion_depth`, `estimate_cost` and
-`draw`.
-
-First run (release, `--size 500 --no-render --exit-after 600`):
-- every check passed, worst frames 16.7–21.8 ms against the 250 ms
-  budget;
-- in `svg-icons`, `rasterize_svg_images` and `finish_inline_svgs`
-  averaged about 20 µs per frame each (≈0.1% of the run).
-
-The first `svg-bombs` run found bug_0186: an inline SVG over the render
-budget was refused only on its draw task, after the build had already
-sized its box. It's now refused while the build collects it.
-
-### 8. Benchmarks (added 2026-11-07)
-
-`benches/svg.rs` (criterion) and `benches/svg-divan.rs` (divan,
-allocation counts) measure the loader's stages through doc-hidden glue in
-`bevy_markup::fuzz` (`svg_depth`, `svg_parse`, `svg_cost`, `svg_draw`,
-`svg_prepare_inline`; hence `--features fuzzing`). They also measure
-frame workloads on the shared headless app: inline icons idle, inline
-icons recolored every frame (each a new drawing), and `<img>` SVGs idle
-after their redraw. Both run nightly next to the pipeline suites.
-
-First run (release, best of criterion's samples, Ryzen 7 9800X3D):
-
-| Stage | icon | illustration (40 groups) | drop-shadowed 512² | 30-pattern chain |
-|---|---|---|---|---|
-| depth check (incl. the XML parse) | 0.78 µs | 21.5 µs | 1.2 µs | 14.7 µs |
-| full parse | 3.5 µs | 135 µs | 4.2 µs | 57 µs |
-| cost estimate | 11 ns | 0.68 µs | 19 ns | 0.23 µs |
-| draw 1× | 7.9 µs | 2.9 ms | 16 ms | 53 µs |
-| draw 2× | 28 µs | 9.9 ms | 67 ms | 143 µs |
-
-Notes on the table:
-- The depth check's own share of a parse is less than its column: in the
-  real path its XML parse is the one usvg reuses.
-- Drawing dominates whenever there are filters or many layers, which is
-  what the render budget bounds.
-
-| Frame workload | 120 | 600 |
-|---|---|---|
-| inline icons, idle | 0.14 ms | 0.27 ms |
-| inline icons, all recolored per frame | 1.2 ms | 4.8 ms |
-| `<img>` SVGs, idle after redraw | 0.15 ms | 0.30 ms |
-
-### 6. SVG `<text>`: the `svg-text` feature (added 2026-11-07)
-
-usvg converts `<text>` to outlines while it parses, so the fonts must be
-known then. The feature turns on resvg's text stack (fontdb, harfrust,
-skrifa); `svg` alone stays lean for icon-only apps.
-
-- **Which fonts.** `svg_fonts::SvgFontSet` loads into a fontdb database
-  every face of `FontFamilies` given as a font file (`FontSource::Handle`:
-  its `Font::data` blob, not copied), plus Bevy's default font (its
-  default handle).
-- **How `font-family` resolves.** A custom `usvg::FontResolver` resolves
-  the SVG's `font-family` as the page's CSS does: registered names in any
-  case, generics through `set_generic`, `FontFaces::face`'s fallback
-  (bold-italic → italic → bold → regular), and an unknown family → the
-  default font. Names inside the font files are never used. Unit test:
-  three copies of FiraMono as distinct faces, each glyph's resolved
-  `fontdb::ID` (`Text::layouted`) checked (fails when the resolver
-  ignores the family list).
-- **Fonts that arrive later.** `sync_svg_fonts` rebuilds the set when
-  its signature changes: families × face handles × loaded. It then
-  reloads every `.svg` path whose source has `<text>` (the loaders note
-  them), and the redraw cache drops rasters of a `Modified`
-  `SvgDocument`. It also signals a `FontFamilies` change, which restyles
-  the UIs: inline text is keyed by the set's generation, so the build
-  draws it again. The next run sees the same signature, so it doesn't
-  loop (tested). `a_font_that_arrives_later_redraws_the_text` fails
-  without the reload and without the generation key.
-- **Limit.** System font families (`FontSource::Family`, `Generic`,
-  `system_fonts`) have no bytes in Bevy's assets, so SVG text naming them
-  uses the default font.
-
 ### 5. Safety limits
 
 SVG is untrusted input, like every other loader input here. The probe
@@ -486,7 +329,202 @@ SVG is untrusted input, like every other loader input here. The probe
   draws that; the `html` target doesn't build, so it never reaches inline
   `<svg>`.
 
-### 6. Verification
+### 6. SVG `<text>`: the `svg-text` feature (added 2026-11-07)
+
+usvg converts `<text>` to outlines while it parses, so the fonts must be
+known then. The feature turns on resvg's text stack (fontdb, harfrust,
+skrifa); `svg` alone stays lean for icon-only apps.
+
+- **Which fonts.** `svg_fonts::SvgFontSet` loads into a fontdb database
+  every face of `FontFamilies` given as a font file (`FontSource::Handle`:
+  its `Font::data` blob, not copied), plus Bevy's default font (its
+  default handle).
+- **How `font-family` resolves.** A custom `usvg::FontResolver` resolves
+  the SVG's `font-family` as the page's CSS does: registered names in any
+  case, generics through `set_generic`, `FontFaces::face`'s fallback
+  (bold-italic → italic → bold → regular), and an unknown family → the
+  default font. Names inside the font files are never used. Unit test:
+  three copies of FiraMono as distinct faces, each glyph's resolved
+  `fontdb::ID` (`Text::layouted`) checked (fails when the resolver
+  ignores the family list).
+- **Fonts that arrive later.** `sync_svg_fonts` rebuilds the set when
+  its signature changes: families × face handles × loaded. It then
+  reloads every `.svg` path whose source has `<text>` (the loaders note
+  them), and the redraw cache drops rasters of a `Modified`
+  `SvgDocument`. It also signals a `FontFamilies` change, which restyles
+  the UIs: inline text is keyed by the set's generation, so the build
+  draws it again. The next run sees the same signature, so it doesn't
+  loop (tested). `a_font_that_arrives_later_redraws_the_text` fails
+  without the reload and without the generation key.
+- **Limit (lifted 2026-11-11).** System font families
+  (`FontSource::Family`, `Generic`, `system_fonts`) have no bytes in
+  Bevy's assets, so SVG text naming them used the default font. Now
+  `sync_svg_fonts` takes such a face from Bevy's own font collection
+  (`FontCx`, the faces page text is drawn with): the named family's face
+  closest to the requested style, then weight, its font data loaded into
+  the fontdb set (`system_families_resolve_through_bevys_font_collection`,
+  falsified by dropping the lookup). fontique's types are used through
+  inference only, so bevy_markup gains no dependency that would have to
+  follow Bevy's parley version.
+
+### 7. CSS-loaded SVGs at the scale factor (added 2026-11-07)
+
+`border-image` and `background-image` SVGs were drawn at 1× and blurred
+on HiDPI or under `UiScale`. The redraw system now also takes
+`ImageNode`s the build owns: `CssFrame` entities, and roots whose
+`CssRoot` owns the image. An app's own `ImageNode` is left alone.
+
+- **Sliced or tiled:** drawn at intrinsic size × the node's scale factor
+  (`1 / ComputedNode::inverse_scale_factor`).
+- **Stretched:** drawn at the node's physical size.
+
+Bevy's slicer (`bevy_ui_render` `compute_texture_slices`) reads the slice
+insets in image px twice: as `inset / image_size` to cut the texture, and
+as `inset × min(node / image, max_corner_scale)` to size the corners on
+screen. Tiles are drawn at `image × stretch_value`. So for a raster `s`×
+larger, `scale_mode` multiplies the insets by `s` and divides
+`max_corner_scale` and every tile `stretch_value` by `s`. That cuts the
+same regions and draws them at the same logical size, with `s`× the
+pixels. Only `NodeImageMode::Auto` sizes a node from its image
+(`update_image_content_size_system`), and the build never uses it, so
+layout is unaffected.
+
+As for `<img>`, the build re-inserts the 1× `ImageNode` on every update;
+`SvgFrame` keeps the 1× mode, and the system restores the raster and the
+scaled mode the same frame.
+
+Tests (`html_ui` `svg_css_images`, `UiScale` 2):
+- a 40×20 frame with 25% slices draws at 80×40, insets 10/5 → 20/10,
+  corner cap 0.5, and no frame shows the 1× image across a restyle;
+- a tiled background draws 2× with `stretch_value` 0.5;
+- a stretched background draws at 200×100 for a 100×50 node;
+- scale factor 1 is untouched.
+
+Without the mode scaling two tests fail; without the put-back, one.
+`.slice.ron` frames (`NineSliceFrame`, app nodes) were still 1× until
+2026-11-11: the redraw now takes `NineSliceFrame` entities too, ordered
+after `apply_nine_slices` (a manifest reload writes the 1× image back,
+put right the same frame). `a_nine_slice_frame_svg_is_drawn_at_the_scale_factor`
+(insets doubled, corner cap and side tiles halved at `UiScale` 2; no 1×
+frame across a manifest change) fails without it.
+
+### 8. Benchmarks (added 2026-11-07)
+
+`benches/svg.rs` (criterion) and `benches/svg-divan.rs` (divan,
+allocation counts) measure the loader's stages through doc-hidden glue in
+`bevy_markup::fuzz` (`svg_depth`, `svg_parse`, `svg_cost`, `svg_draw`,
+`svg_prepare_inline`; hence `--features fuzzing`). They also measure
+frame workloads on the shared headless app: inline icons idle, inline
+icons recolored every frame (each a new drawing), and `<img>` SVGs idle
+after their redraw. Both run nightly next to the pipeline suites.
+
+First run (release, best of criterion's samples, Ryzen 7 9800X3D):
+
+| Stage | icon | illustration (40 groups) | drop-shadowed 512² | 30-pattern chain |
+|---|---|---|---|---|
+| depth check (incl. the XML parse) | 0.78 µs | 21.5 µs | 1.2 µs | 14.7 µs |
+| full parse | 3.5 µs | 135 µs | 4.2 µs | 57 µs |
+| cost estimate | 11 ns | 0.68 µs | 19 ns | 0.23 µs |
+| draw 1× | 7.9 µs | 2.9 ms | 16 ms | 53 µs |
+| draw 2× | 28 µs | 9.9 ms | 67 ms | 143 µs |
+
+Notes on the table:
+- The depth check's own share of a parse is less than its column: in the
+  real path its XML parse is the one usvg reuses.
+- Drawing dominates whenever there are filters or many layers, which is
+  what the render budget bounds.
+
+| Frame workload | 120 | 600 |
+|---|---|---|
+| inline icons, idle | 0.14 ms | 0.27 ms |
+| inline icons, all recolored per frame | 1.2 ms | 4.8 ms |
+| `<img>` SVGs, idle after redraw | 0.15 ms | 0.30 ms |
+
+The Consequences' measurements (2026-11-11, same machine): a 1920×1080
+`background` (gradients, three ridges, six translucent cloud layers) and
+a 1024-icon `sheet` (32 × 32 cells of 32 px) joined the stage documents.
+
+| Stage | background | sheet |
+|---|---|---|
+| depth check | 8.7 µs | 595 µs |
+| full parse | 31 µs | 2.9 ms |
+| cost estimate | 0.12 µs | 12 µs |
+| draw 1× | 10.5 ms (1920×1080) | 9.3 ms (1024²) |
+| draw 2× | 40 ms (3840×2160) | 32 ms (2048²) |
+
+Against the render budget (`estimate_cost` / `MAX_SVG_COST`): the
+background 6.7% at 1080p and 26.8% at 4K, the sheet 2.6% and 9.5%, the
+drop-shadowed 512² panel 21.1% at 1024². So a full-window background
+three to four times busier still draws at 4K, but a full-window drop
+shadow at 4K (≈ 8 × that panel's 2× cost) is refused.
+
+Build cost (debug, `-j 2`, a fresh target dir, Ryzen 7 9800X3D): the
+library alone 76.6 s cold, 79.8 s cold with `svg-text` (resvg's crates
+build beside Bevy's); on a warm build `svg` adds 32.7 s and `svg-text`
+12.0 s more (both include rebuilding bevy_markup). Binary size: the
+release `quickstart` example, stripped, is 123.9 MB without the features
+(the examples build all of Bevy), +1.5 MB with `svg`, +2.7 MB with
+`svg-text`.
+
+### 9. Testbench scenarios and profiling (added 2026-11-07)
+
+With `--features svg`, the testbench has three SVG scenarios:
+- **perf, `svg-icons`:** N rows with an inline `<svg>` whose
+  `currentColor` follows the row's state.
+- **perf, `svg-images`:** N `<img>` rows of one SVG file at a CSS width
+  that steps every 30 frames: redraw bursts.
+- **security, `svg-bombs`:** the probe report's hostile constructs as
+  `<img>` files and inline.
+
+Two new checks: `svg-drawn` (every inline image of the main UI shows a
+drawn image) and `svg-refused` (no hostile SVG produced an image, and
+every `<img>` one failed its load).
+
+The SVG systems and hot internals carry `#[hotpath::measure]`:
+`rasterize_svg_images`, `finish_inline_svgs`, `sync_svg_fonts`,
+`InlineSvgs::image`, `parse_with`, `recursion_depth`, `estimate_cost` and
+`draw`.
+
+First run (release, `--size 500 --no-render --exit-after 600`):
+- every check passed, worst frames 16.7–21.8 ms against the 250 ms
+  budget;
+- in `svg-icons`, `rasterize_svg_images` and `finish_inline_svgs`
+  averaged about 20 µs per frame each (≈0.1% of the run).
+
+The first `svg-bombs` run found bug_0186: an inline SVG over the render
+budget was refused only on its draw task, after the build had already
+sized its box. It's now refused while the build collects it.
+
+### 10. The `svg` example (added 2026-11-07)
+
+`examples/svg/` (`required-features = ["svg"]`; `svg-text` for its
+badge) shows every path on one page:
+- inline icons recolored by the theme's context `var()`s and `:hover`;
+- `star.svg` as `<img>` at 16–96 px;
+- `frame.svg` as `border-image` and `tile.svg` as a tiled
+  `background-image`;
+- `badge.svg` with `<text>`;
+- `refused.svg`, a `<use>` cycle;
+- a `UiScale` button (1×, 1.5×, 2×).
+
+The content lint renders it in every theme × scale context, but only
+with `--features svg`: without the feature its sheet's SVG `url()`s
+never load, and `settle()` never returns for a sheet whose `url()` image
+fails. CI's svg step runs the lint.
+
+Its first run (`--offscreen`) panicked at startup, which found bug_0187:
+the plugin's `init_asset::<Image>()` (and `<Font>` under `svg-text`)
+replaced the stores `ImagePlugin`/`TextPlugin` had made. It's now
+registered only when absent.
+
+Checked in the running example, through the harness's `game/ui` and
+screenshots: at 1.5× every SVG is drawn again at the new density, with
+frame corners and rivets at their logical size. The harness's
+`game/keyboard` doesn't reach `just_pressed` hotkeys: it writes
+`ButtonInput` outside the frame, and Bevy clears `just_pressed` in
+`PreUpdate`. So the scale change was driven by clicking the button.
+
+### Verification
 
 - Loader unit tests: intrinsic size from `width`/`height` vs `viewBox`,
   `scale`, the pixel cap, a refused `<image href>`.
@@ -499,6 +537,19 @@ SVG is untrusted input, like every other loader input here. The probe
   are exactly what a browser can arbitrate.
 - A golden scene `tests/golden/svg/`: committed SVGs with fills,
   strokes, a gradient, `currentColor` and an SVG `border-image`.
+
+Done 2026-11-11: `tests/vectors/layout_svg/` (`<img>` by its own size,
+by one CSS side and a `viewBox` ratio, by CSS height; inline `<svg>` by
+its attributes and by CSS; mixed on wrapping lines) matches Chromium to
+the pixel — the oracle now also compares each inline image's box, and
+the oracle page's reset skips SVG elements (Chrome maps an `<svg>`'s
+`width`/`height` to CSS). It found bug_0203: an inline image taller than
+the font's ascent is placed by parley 0.11's line metrics, not CSS's
+(UPSTREAM U37, fixed in parley 0.12, which Bevy 0.20 doesn't use; the
+vector keeps its images shorter). `tests/golden/svg/` draws an `<img>`
+at 1× and redrawn at 64 px, inline `<svg>` recolored by `currentColor`,
+an SVG 9-slice frame and a tiled SVG background; the golden settle also
+waits for the redraws.
 - `content_lint`'s CSS `url()` check already covers `.svg` URLs.
 
 ### Implementation order
@@ -507,6 +558,10 @@ SVG is untrusted input, like every other loader input here. The probe
    CSS `url()` SVGs work at 1×.
 2. Display-size re-rasterization for `<img>` (§3).
 3. Inline `<svg>` (§4).
+
+Added after step 3, each in its own section: `svg-text` (§6), CSS
+images at the scale factor (§7), benchmarks (§8), testbench scenarios
+(§9) and the `svg` example (§10).
 
 Each step ships on its own with its vectors, a CHANGELOG line and the
 `AGENTS.md` updates (Public API row for `SvgLoaderSettings`, Layout,
@@ -576,21 +631,29 @@ Limits).
 - SVG icons, frames and backgrounds work through the paths authors
   already use, in every renderer Bevy supports, and testable headlessly.
 - New dependency tree under `svg` only: resvg, usvg, tiny-skia,
-  roxmltree, kurbo, svgtypes and their dependencies. Compile time and
-  binary size need measuring in step 1 (cold build of `--features svg`
-  vs without, `cargo bloat` or the release `.rlib` sizes).
-- CPU cost at load and on each re-rasterization. Measure a large icon
-  sheet and a full-window SVG background at 4K in step 2 (criterion,
-  next to the existing benches). Raster memory grows with the number of
+  roxmltree, kurbo, svgtypes and their dependencies. Measured (§8): a
+  cold build barely changes (+3 s of 77 s at `-j 2`), a warm one adds
+  33 s (`svg`) and 12 s more (`svg-text`); a stripped binary grows by
+  1.5 MB (`svg`) or 2.7 MB (`svg-text`).
+- CPU cost at load and on each re-rasterization, measured in §8: a
+  full-window background draws in 10.5 ms at 1080p and 40 ms at 4K, a
+  1024-icon sheet in 9.3 ms, all on a task (late pixels, not slow
+  frames). Raster memory grows with the number of
   distinct display sizes. Loaders run on Bevy's `IoTaskPool`, so a slow
   SVG holds an IO thread and delays other loads, not frames.
 - The render budget rejects some legitimate heavy SVGs (deep filter
   stacks at large sizes). Each rejection is a load error naming the
   cause, and `MAX_SVG_COST` is one constant to revisit.
 - Static SVG only: no SMIL animation, no scripts. `<text>` inside SVG
-  renders nothing without the `text` feature.
-- Open:
-  - SVG `<text>` with system font families (§6: font files only).
-  - Page CSS reaching inside inline `<svg>` (usvg's
-    `Options::style_sheet` could carry the matching rules).
-  - Whether `svg` should join a future default feature set.
+  renders nothing without the `svg-text` feature.
+- Decided at acceptance (2026-11-11):
+  - Page CSS doesn't reach inside inline `<svg>`, by design. Theming goes
+    through `currentColor` (the element's computed CSS `color`, so
+    `:hover` and themes recolor it), template values (`fill="{{ accent
+    }}"`) and the SVG's own attributes and `<style>`. Forwarding page
+    rules through usvg's `Options::style_sheet` would match only selectors
+    wholly inside the SVG (not `.toolbar svg path`, not pseudo-classes);
+    real page CSS inside SVG needs the cascade to walk SVG elements, with
+    its own invalidation: a new ADR if it's ever wanted.
+  - `svg` and `svg-text` stay opt-in: the crate has no default features,
+    and the measured cost (§8) is the app's choice to pay.

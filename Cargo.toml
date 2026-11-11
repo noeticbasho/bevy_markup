@@ -46,8 +46,9 @@ text-input = ["bevy/bevy_ui_widgets", "bevy/keyboard"]
 # raster decoders, no svgz. Opt-in: apps that don't use SVG pay nothing.
 svg = ["dep:resvg", "dep:roxmltree", "dep:simplecss", "dep:svgtypes", "dep:wgpu-types"]
 # SVG `<text>` (ADR 0038 §6): resvg's text stack (fontdb, harfrust,
-# skrifa), fed the font files registered in `FontFamilies` plus Bevy's
-# default font. Its own feature: icon-only apps don't pay for it.
+# skrifa), fed the fonts registered in `FontFamilies` (font files, and
+# system families from Bevy's font collection) plus Bevy's default font.
+# Its own feature: icon-only apps don't pay for it.
 svg-text = ["svg", "resvg/text"]
 # Bevy's asset file watcher, for the `hot-reload` example (edit an asset
 # file and the UI restyles without a restart — the library already reacts

@@ -232,6 +232,7 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0200](bug_0200.md) | A huge pattern tile aborted the process | `src/svg.rs` (`estimate_cost`); upstream resvg (U36) | high | fixed: tiles charged in the cost estimate | `hostile_magnitudes_never_panic` proptest |
 | [bug_0201](bug_0201.md) | A huge filter subregion or offset panicked tiny-skia-path | `src/svg.rs` (`check_extent`); upstream tiny-skia-path (U35) | high | fixed: refused past `MAX_SVG_FILTER_REGION` | `hostile_magnitudes_never_panic` proptest |
 | [bug_0202](bug_0202.md) | `<canvas>` attributes and inline content didn't follow HTML | `src/canvas.rs`, `src/build.rs` | low | fixed | expanding the canvas tests |
+| [bug_0203](bug_0203.md) | An inline image taller than the text's ascent overlaps the line above | upstream parley 0.11 via bevy_text 0.20 (U37) | low | upstream-unfixed (fixed in parley 0.12.0; Bevy 0.20 pins 0.11) | `layout_svg` layout oracle vector |
 
 ## Discovery session metadata: bug_0001–0005
 
@@ -478,6 +479,18 @@ settle (rebuild observed) and the resulting dump to match a reference model.
   `fix/later-sibling-scaling`.
 - **Machine/toolchain:** Arch Linux (kernel 7.2.11), AMD Ryzen 7 9800X3D,
   rustc 1.98.1, `nightly-2026-09-09` for cargo-fuzz 0.13.2.
+
+## Discovery session metadata: bug_0203 (2026-11-11)
+
+- **Method:** the new `layout_svg` layout oracle vector (ADR 0038's
+  verification plan, inline images compared with Chromium's rects for the
+  first time) put every image taller than the font's ascent a few px off;
+  reading parley 0.11.1's `finish_line` found the line metrics, and parley
+  0.12.0's source (downloaded from crates.io) showed them replaced.
+- **Discovery agent:** Claude Code session, `claude-opus-5-5`.
+- **Commit at discovery:** `3590604`.
+- **Machine/toolchain:** Arch Linux (kernel 7.2.14), AMD Ryzen 7 9800X3D,
+  rustc 1.98.1; Chromium 156.0.8078.79.
 
 ## Discovery session metadata: bug_0188–0202 (2026-11-08 to 2026-11-09)
 

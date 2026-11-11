@@ -4619,10 +4619,11 @@ const LAYOUT_TOLERANCE: f32 = 1.0;
 
 /// Every `tests/vectors/layout_*/` with a `browser.json` is laid out by Bevy
 /// UI headlessly (in the oracle's viewport, under a full-width column root)
-/// and each root/block/container border box compared with Chromium's
+/// and each root/block/container border box — and each inline image's
+/// (`<img>`, inline `<svg>`) — compared with Chromium's
 /// `getBoundingClientRect` under the oracle's bevy_markup layout stylesheet
 /// (`BEVY_MARKUP_CSS` in `scripts/browser_oracle.py`), within [`LAYOUT_TOLERANCE`]
-/// per value.
+/// per value. Vectors with SVG files run with the `svg` feature.
 #[test]
 fn layout_oracle() {
     let vectors: Vec<String> = vectors_with("browser.json")
@@ -4642,6 +4643,8 @@ fn layout_oracle() {
         );
         let mut ui = TestUi::from_layout_vector(name, viewport);
         ui.settle();
+        // Inline images take their size at layout time (`size_images`).
+        ui.update(4);
         let root = ui.root();
         let world = ui.world_mut();
         let pairs = match pair_elements(world, root, &oracle) {
@@ -4651,8 +4654,17 @@ fn layout_oracle() {
                 continue;
             }
         };
-        for (entity, record, label) in pairs {
-            let rect = node_rect(world, entity).expect("laid out");
+        let mut rects: Vec<(Rect, &serde_json::Value, String)> = pairs
+            .into_iter()
+            .map(|(entity, record, label)| {
+                (node_rect(world, entity).expect("laid out"), record, label)
+            })
+            .collect();
+        match pair_inline_images(world, root, &oracle) {
+            Ok(images) => rects.extend(images),
+            Err(problem) => failures.push(format!("{name}: {problem}")),
+        }
+        for (rect, record, label) in rects {
             let ours = [rect.min.x, rect.min.y, rect.width(), rect.height()];
             let theirs: Vec<f32> = record["rect"]
                 .as_array()
@@ -5117,6 +5129,57 @@ fn pair_elements<'o>(
     Ok(pairs)
 }
 
+/// The inline images (`<img>`, inline `<svg>`) of the laid-out UI paired
+/// with the browser's records of the same tags, both in document order: ours
+/// are the text blocks' inline boxes (`TextLayoutInfo::inline_boxes`, placed
+/// in the block's content box), each as a viewport rect.
+fn pair_inline_images<'o>(
+    world: &World,
+    root: Entity,
+    oracle: &'o serde_json::Value,
+) -> Result<Vec<(Rect, &'o serde_json::Value, String)>, String> {
+    fn walk(world: &World, entity: Entity, out: &mut Vec<Rect>) {
+        let entity_ref = world.entity(entity);
+        if let (Some(layout), Some(node), Some(transform)) = (
+            entity_ref.get::<bevy::text::TextLayoutInfo>(),
+            entity_ref.get::<ComputedNode>(),
+            entity_ref.get::<UiGlobalTransform>(),
+        ) {
+            let origin = transform.translation + node.content_box().min;
+            for (_, _, rect) in &layout.inline_boxes {
+                out.push(Rect::from_corners(origin + rect.min, origin + rect.max));
+            }
+        }
+        for &child in entity_ref.get::<Children>().into_iter().flatten() {
+            walk(world, child, out);
+        }
+    }
+    let mut ours = Vec::new();
+    walk(world, root, &mut ours);
+    let theirs: Vec<&serde_json::Value> = oracle["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| matches!(e["tag"].as_str().unwrap(), "img" | "svg"))
+        .collect();
+    if ours.len() != theirs.len() {
+        return Err(format!(
+            "inline image count: bevy_markup {} vs browser {}",
+            ours.len(),
+            theirs.len()
+        ));
+    }
+    Ok(ours
+        .into_iter()
+        .zip(theirs)
+        .enumerate()
+        .map(|(index, (rect, record))| {
+            let label = format!("{} #{index}", record["tag"].as_str().unwrap());
+            (rect, record, label)
+        })
+        .collect())
+}
+
 /// Entities with an `HtmlElement` below `entity`, in document order.
 fn collect_elements(world: &World, entity: Entity, out: &mut Vec<Entity>) {
     if let Some(children) = world.entity(entity).get::<Children>() {
@@ -5485,6 +5548,56 @@ padded { padding: 10px } p#padded { padding: 10px } img.stretch { width: 100%; h
             "image box {actual:?} != {expected:?} (all {sized:?})"
         );
     }
+}
+
+/// bug_0203 (UPSTREAM U37): an inline image taller than the font's ascent
+/// sits on the baseline and the line box grows to hold it *and* the text
+/// below the baseline, as in CSS. Chromium (the `layout_svg` oracle's
+/// setup at 20px, line height 24): the paragraph is 45px tall and the
+/// 40px image starts at its top. Bevy 0.20's parley 0.11 caps the line at
+/// the box's height and lifts the box 3px above the paragraph; parley
+/// 0.12 computes CSS line boxes. Run with `--ignored` after a Bevy bump.
+#[test]
+#[ignore = "bug_0203: parley 0.11 line metrics (UPSTREAM U37); passes once Bevy uses parley >= 0.12"]
+fn a_tall_inline_image_grows_the_line_like_css() {
+    let page = r#"<p>Tall <img class="tall" src="frame.png"> icon</p>"#;
+    let css = "html { font-size: 20px } img.tall { width: 20px; height: 40px }";
+    let mut ui = TestUi::with_layout(
+        "tall-inline-image",
+        &[("page.html", page), ("style.css", css)],
+        UVec2::new(640, 480),
+    )
+    .stylesheet("style.css")
+    .spawn(
+        "page.html",
+        TemplateContext::new(),
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            ..default()
+        },
+    );
+    ui.settle();
+    ui.update(4);
+    let world = ui.world_mut();
+    let mut texts = world.query::<(
+        Entity,
+        &bevy::text::TextLayoutInfo,
+        &ComputedNode,
+        &UiGlobalTransform,
+    )>();
+    let (entity, layout, node, transform) = texts.single(world).unwrap();
+    let paragraph = node_rect(world, entity).unwrap();
+    let (_, _, rect) = layout.inline_boxes[0];
+    let origin = transform.translation + node.content_box().min;
+    let image = Rect::from_corners(origin + rect.min, origin + rect.max);
+    // 5 characters ("Tall ") at 0.6em = 60px; the image's top is the line's.
+    assert_eq!(
+        [image.min.x, image.min.y, image.width(), image.height()],
+        [60.0, 0.0, 20.0, 40.0]
+    );
+    // 40px above the baseline + the strut's 5px below it.
+    assert_eq!(paragraph.height(), 45.0);
 }
 
 /// ADR 0021 regression tests: a build that reuses its clean skeleton must
@@ -11404,6 +11517,10 @@ mod svg_css_images {
             &[
                 ("frame.svg", FRAME),
                 ("tile.svg", TILE),
+                (
+                    "frame.slice.ron",
+                    r#"(image: "frame.svg", border: (left: 10, right: 10, top: 5, bottom: 5), sides: Tile(1.0))"#,
+                ),
                 ("page.html", r#"<div class="box"><p>x</p></div>"#),
                 ("style.css", css),
                 ("other.css", &format!("{css} p {{ color: #00ff00 }}")),
@@ -11504,6 +11621,70 @@ mod svg_css_images {
             2.0,
         );
         until(&mut ui, UVec2::new(200, 100));
+    }
+
+    /// A `.slice.ron` frame on an app node (`NineSliceFrame`) is drawn at
+    /// the scale factor like a CSS frame: at `UiScale` 2 the 40x20 SVG is
+    /// drawn at 80x40, the insets double, the corner cap and the sides'
+    /// tile stretch halve. A manifest change writes the 1x image back
+    /// (`apply_nine_slices`) and no frame shows it.
+    #[test]
+    fn a_nine_slice_frame_svg_is_drawn_at_the_scale_factor() {
+        let mut ui = page("svg-nine-slice", "html { color: #ffffff }", 2.0);
+        let slice = ui.load::<NineSlice>("frame.slice.ron");
+        let entity = ui
+            .world_mut()
+            .spawn((
+                Node {
+                    width: Val::Px(100.0),
+                    height: Val::Px(50.0),
+                    ..default()
+                },
+                NineSliceFrame(slice.clone()),
+            ))
+            .id();
+        let shown = |ui: &mut TestUi| {
+            let world = ui.world_mut();
+            let node = world.get::<ImageNode>(entity)?;
+            let size = world.resource::<Assets<Image>>().get(&node.image)?.size();
+            Some((size, node.image_mode.clone()))
+        };
+        let mut mode = None;
+        for _ in 0..500 {
+            if let Some((size, shown_mode)) = shown(&mut ui)
+                && size == UVec2::new(80, 40)
+            {
+                mode = Some(shown_mode);
+                break;
+            }
+            ui.update(1);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let Some(bevy::ui::widget::NodeImageMode::Sliced(slicer)) = mode else {
+            panic!("never drawn at 80x40: {:?}", shown(&mut ui));
+        };
+        assert_eq!(slicer.border.min_inset, Vec2::new(20.0, 10.0));
+        assert_eq!(slicer.border.max_inset, Vec2::new(20.0, 10.0));
+        assert_eq!(slicer.max_corner_scale, 0.5);
+        assert_eq!(
+            slicer.sides_scale_mode,
+            SliceScaleMode::Tile { stretch_value: 0.5 }
+        );
+        // A manifest change (as a reload): `apply_nine_slices` re-applies
+        // the 1x image; the redraw puts the raster back the same frame.
+        ui.world_mut()
+            .resource_mut::<Assets<NineSlice>>()
+            .get_mut(&slice)
+            .expect("loaded");
+        ui.update(5);
+        assert_eq!(
+            shown(&mut ui).map(|(size, _)| size),
+            Some(UVec2::new(80, 40))
+        );
+        assert!(
+            !ui.world_mut().resource::<Smallest>().1,
+            "a frame showed the 1x image"
+        );
     }
 
     /// At scale factor 1 a frame keeps the loaded image and its mode.

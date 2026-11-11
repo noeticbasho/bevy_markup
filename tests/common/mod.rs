@@ -3,7 +3,7 @@
 
 use std::fmt::Write as _;
 use std::marker::PhantomData;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bevy::asset::uuid::Uuid;
@@ -76,13 +76,31 @@ pub fn vectors_with(file: &str) -> Vec<String> {
         .unwrap()
         .filter_map(|entry| {
             let path = entry.ok()?.path();
-            path.join(file)
-                .exists()
+            // A vector with SVG files needs the `svg` feature to load them.
+            let needs_svg = !svg_files(&path).is_empty();
+            (path.join(file).exists() && (cfg!(feature = "svg") || !needs_svg))
                 .then(|| path.file_name()?.to_str().map(str::to_owned))?
         })
         .collect();
     names.sort();
     names
+}
+
+/// The `*.svg` files in a vector directory, as (file name, contents), sorted.
+#[allow(dead_code)] // not every test binary exercises every helper
+pub fn svg_files(dir: &Path) -> Vec<(String, String)> {
+    let mut files: Vec<(String, String)> = std::fs::read_dir(dir)
+        .unwrap()
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            (path.extension()? == "svg").then(|| {
+                let name = path.file_name()?.to_str()?.to_owned();
+                Some((name, std::fs::read_to_string(&path).ok()?))
+            })?
+        })
+        .collect();
+    files.sort();
+    files
 }
 
 pub struct TestUi {
@@ -323,19 +341,26 @@ impl TestUi {
     }
 
     /// A layout vector from `tests/vectors/<name>/` (`page.html` +
-    /// `style.css`, see [`with_layout`](Self::with_layout)) under a
-    /// full-width column root, the way bevy_markup apps set up their `HtmlUi` node.
+    /// `style.css` + its `*.svg` files, see [`with_layout`](Self::with_layout))
+    /// under a full-width column root, the way bevy_markup apps set up their
+    /// `HtmlUi` node.
     #[allow(dead_code)] // not every test binary exercises every helper
     pub fn from_layout_vector(name: &str, viewport: UVec2) -> Self {
         let dir = vectors_dir().join(name);
         let read = |file: &str| std::fs::read_to_string(dir.join(file)).unwrap();
         let (page, css) = (read("page.html"), read("style.css"));
+        let svgs = svg_files(&dir);
+        let mut files = vec![("page.html", page.as_str()), ("style.css", css.as_str())];
+        files.extend(
+            svgs.iter()
+                .map(|(name, text)| (name.as_str(), text.as_str())),
+        );
         let root = Node {
             width: Val::Percent(100.0),
             flex_direction: FlexDirection::Column,
             ..default()
         };
-        Self::with_layout(name, &[("page.html", &page), ("style.css", &css)], viewport)
+        Self::with_layout(name, &files, viewport)
             .stylesheet("style.css")
             .spawn("page.html", TemplateContext::new(), root)
     }

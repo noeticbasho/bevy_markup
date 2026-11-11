@@ -1,0 +1,13 @@
+/* Golden scene: SVG drawn by resvg (ADR 0038, `svg` feature): an <img>
+   at its intrinsic 24 px and redrawn at 64 px (gradient, stroke), inline
+   <svg> recolored through currentColor, an SVG 9-slice frame and a tiled
+   SVG background. */
+html { color: #ffffff; font-size: 14px; padding: 8px; gap: 8px }
+img.big { width: 64px }
+.dot { width: 24px; color: #4fa3ff }
+.dot.warm { color: #ff9a3c }
+.framed {
+  border-image: url("frame.svg") 8 fill stretch;
+  border-width: 8px; padding: 4px 8px;
+}
+.tiled { background-image: url("tile.svg"); background-repeat: repeat; padding: 8px }

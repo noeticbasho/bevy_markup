@@ -31,15 +31,16 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   (`load_with_settings::<Image, SvgLoaderSettings>`) draws them larger.
   An `<img>` SVG is redrawn at the size it's shown at (its CSS size ×
   the display's scale factor and `UiScale`), so it stays sharp; CSS
-  `border-image`/`background-image` SVGs are drawn at the display's
-  scale factor too (frame corners and background tiles keep their size).
+  `border-image`/`background-image` SVGs and SVG `*.slice.ron` frames
+  (`NineSliceFrame`) are drawn at the display's scale factor too (frame
+  corners and background tiles keep their size).
   Inline `<svg>` in templates (HTML or Markdown) draws too, as one inline
   image sized like an `<img>`; its `currentColor` is the element's CSS
   `color`, so `svg { color: … }`, `:hover` and themes recolor it. It must
   be well-formed XML (quoted attributes, closed tags); page CSS doesn't
   reach inside it. Static SVG only. `<text>` inside an SVG needs the
-  `svg-text` feature, which draws it with the font files registered in
-  `FontFamilies` (resolved as the page's CSS resolves `font-family`, falling
+  `svg-text` feature, which draws it with the fonts registered in
+  `FontFamilies`, font files and system families alike (resolved as the page's CSS resolves `font-family`, falling
   back to Bevy's default font) and redraws it when a font loads later. The loader
   treats files as untrusted:
   - `<image href>` is never resolved, so an SVG can't read other files;

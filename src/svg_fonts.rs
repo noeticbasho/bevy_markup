@@ -2,8 +2,12 @@
 //!
 //! usvg turns `<text>` into outlines while it parses, so the fonts must be
 //! known then. [`SvgFontSet`] is a snapshot of the fonts the app registered
-//! in [`FontFamilies`]: every face given as a font file (`FontSource::Handle`)
-//! is loaded into a `fontdb` database, plus Bevy's default font. A custom
+//! in [`FontFamilies`], loaded into a `fontdb` database, plus Bevy's default
+//! font: a face given as a font file (`FontSource::Handle`) is that file;
+//! one given as a family (`FontSource::Family`, `Generic`, `Families`,
+//! `List`: system fonts) is the face of that family in Bevy's own font
+//! collection ([`FontCx`](bevy::text::FontCx)) closest to the requested
+//! weight and style — the same data page text is drawn with. A custom
 //! resolver maps an SVG's `font-family` list through the same names,
 //! generic keywords and face fallback (bold-italic → italic → bold →
 //! regular) as the page's CSS, never through the names inside the font
@@ -13,9 +17,6 @@
 //! a font it names finishes loading; then `.svg` files that contain
 //! `<text>` are reloaded and UIs with inline `<svg>` text restyle, so text
 //! drawn before its font arrived is drawn again.
-//!
-//! Limit: system font families (`FontSource::Family`, `Generic`, …) have no
-//! bytes in Bevy's assets; SVG text naming them uses the default font.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
@@ -38,7 +39,88 @@ pub(crate) struct SvgFontSet {
     generics: HashMap<GenericFamily, String>,
     default: Option<fontdb::ID>,
     /// What the set was built from, to tell a real change from a repeat.
-    signature: Vec<(String, [Option<AssetId<Font>>; 4], [bool; 4])>,
+    signature: Vec<(String, [FaceKey; 4])>,
+}
+
+/// One face of a family, as the set loads it.
+enum Face {
+    /// A font file the app loaded (`FontSource::Handle`).
+    Asset(Handle<Font>),
+    /// A face from Bevy's font collection (system fonts): its file's data,
+    /// that data's id, and the face's index in it.
+    System {
+        data: Arc<dyn AsRef<[u8]> + Send + Sync>,
+        id: u64,
+        index: u32,
+    },
+}
+
+/// What a face was built from, for the set's signature.
+#[derive(Clone, PartialEq)]
+enum FaceKey {
+    None,
+    /// The font asset and whether it had loaded.
+    Asset(AssetId<Font>, bool),
+    /// The font data's id and the face's index.
+    System(u64, u32),
+}
+
+/// The face for a family source in Bevy's font collection: the first family
+/// the source names that the collection has, and in it the face closest to
+/// the requested style (italic or not) and then weight (700 or 400).
+fn system_face(
+    cx: &mut bevy::text::FontCx,
+    source: &FontSource,
+    bold: bool,
+    italic: bool,
+) -> Option<Face> {
+    let names: Vec<String> = match source {
+        FontSource::Handle(_) => return None,
+        FontSource::Family(name) => vec![name.to_string()],
+        FontSource::Generic(_) => vec![cx.get_family(source)?.to_owned()],
+        FontSource::Families(list) => list
+            .split(',')
+            .map(|name| name.trim().trim_matches(['"', '\'']).to_owned())
+            .collect(),
+        FontSource::List(sources) => {
+            return sources
+                .iter()
+                .find_map(|source| system_face(cx, source, bold, italic));
+        }
+    };
+    let weight = if bold { 700.0 } else { 400.0 };
+    for name in names {
+        let Some(family) = cx.context.collection.family_by_name(&name) else {
+            continue;
+        };
+        // fontique's types are used through inference (bevy_markup doesn't
+        // depend on fontique): `FontStyle::default()` is `Normal`.
+        let Some(font) = family.fonts().iter().min_by_key(|font| {
+            let style = font.style();
+            let upright = style == default_of(&style);
+            (
+                upright == italic,
+                (font.weight().value() - weight).abs() as u32,
+            )
+        }) else {
+            continue;
+        };
+        let index = font.index();
+        let Some(blob) = font.load(Some(&mut cx.context.source_cache)) else {
+            continue;
+        };
+        return Some(Face::System {
+            id: blob.id(),
+            data: Arc::new(blob),
+            index,
+        });
+    }
+    None
+}
+
+/// `T::default()` for a value's type (a type bevy_markup can't name).
+fn default_of<T: Default>(_: &T) -> T {
+    T::default()
 }
 
 impl SvgFontSet {
@@ -135,6 +217,7 @@ pub(crate) fn sync_svg_fonts(
     assets: Res<Assets<Font>>,
     mut events: MessageReader<AssetEvent<Font>>,
     server: Res<AssetServer>,
+    mut font_cx: Option<ResMut<bevy::text::FontCx>>,
 ) {
     let loaded = events.read().any(|event| {
         matches!(
@@ -150,29 +233,38 @@ pub(crate) fn sync_svg_fonts(
     let shared = fonts.shared();
     let previous = shared.current();
     let default_handle: Handle<Font> = Handle::default();
-    let handle_of = |source: &FontSource| match source {
-        FontSource::Handle(handle) => Some(handle.clone()),
-        _ => None,
-    };
-    // What a set would be built from now.
+    // Each family's four faces, resolved now: a font file, or a face of a
+    // family in Bevy's font collection.
     let combos = [(false, false), (false, true), (true, false), (true, true)];
-    let mut signature: Vec<(String, [Option<AssetId<Font>>; 4], [bool; 4])> = families
+    let resolved: Vec<(String, [Option<Face>; 4])> = families
         .iter()
         .map(|(name, faces)| {
-            let handles = combos.map(|(bold, italic)| handle_of(&faces.face(bold, italic)));
-            (
-                name.to_ascii_lowercase(),
-                handles
-                    .clone()
-                    .map(|handle| handle.map(|handle| handle.id())),
-                handles.map(|handle| handle.is_some_and(|handle| assets.contains(&handle))),
-            )
+            let faces = combos.map(|(bold, italic)| match faces.face(bold, italic) {
+                FontSource::Handle(handle) => Some(Face::Asset(handle)),
+                source => font_cx
+                    .as_deref_mut()
+                    .and_then(|cx| system_face(cx, &source, bold, italic)),
+            });
+            (name.to_ascii_lowercase(), faces)
         })
+        .collect();
+    let key = |face: &Option<Face>| match face {
+        None => FaceKey::None,
+        Some(Face::Asset(handle)) => FaceKey::Asset(handle.id(), assets.contains(handle)),
+        Some(Face::System { id, index, .. }) => FaceKey::System(*id, *index),
+    };
+    let mut signature: Vec<(String, [FaceKey; 4])> = resolved
+        .iter()
+        .map(|(name, faces)| (name.clone(), faces.each_ref().map(key)))
         .collect();
     signature.push((
         String::new(),
-        [Some(default_handle.id()), None, None, None],
-        [assets.contains(&default_handle), false, false, false],
+        [
+            FaceKey::Asset(default_handle.id(), assets.contains(&default_handle)),
+            FaceKey::None,
+            FaceKey::None,
+            FaceKey::None,
+        ],
     ));
     let generics_now: HashMap<GenericFamily, String> = [
         GenericFamily::Serif,
@@ -188,29 +280,41 @@ pub(crate) fn sync_svg_fonts(
         return;
     }
 
-    // Build: each loaded font file once, then the families' faces by id.
+    // Build: each loaded font file (or collection data) once, then the
+    // families' faces by id.
     let mut db = fontdb::Database::new();
-    let mut ids: HashMap<AssetId<Font>, fontdb::ID> = HashMap::new();
-    let mut load = |handle: &Handle<Font>, db: &mut fontdb::Database| -> Option<fontdb::ID> {
-        if let Some(id) = ids.get(&handle.id()) {
-            return Some(*id);
+    let mut asset_ids: HashMap<AssetId<Font>, fontdb::ID> = HashMap::new();
+    let mut system_ids: HashMap<u64, Vec<fontdb::ID>> = HashMap::new();
+    let mut load = |face: &Face, db: &mut fontdb::Database| -> Option<fontdb::ID> {
+        match face {
+            Face::Asset(handle) => {
+                if let Some(id) = asset_ids.get(&handle.id()) {
+                    return Some(*id);
+                }
+                let font = assets.get(handle)?;
+                let id = *db
+                    .load_font_source(fontdb::Source::Binary(Arc::new(font.data.clone())))
+                    .first()?;
+                asset_ids.insert(handle.id(), id);
+                Some(id)
+            }
+            Face::System { data, id, index } => {
+                let faces = system_ids.entry(*id).or_insert_with(|| {
+                    db.load_font_source(fontdb::Source::Binary(data.clone()))
+                        .to_vec()
+                });
+                faces.get(*index as usize).copied()
+            }
         }
-        let font = assets.get(handle)?;
-        let blob = font.data.clone();
-        let id = *db
-            .load_font_source(fontdb::Source::Binary(Arc::new(blob)))
-            .first()?;
-        ids.insert(handle.id(), id);
-        Some(id)
     };
     let mut by_name = HashMap::new();
-    for (name, faces) in families.iter() {
-        let faces = combos.map(|(bold, italic)| {
-            handle_of(&faces.face(bold, italic)).and_then(|handle| load(&handle, &mut db))
-        });
-        by_name.insert(name.to_ascii_lowercase(), faces);
+    for (name, faces) in &resolved {
+        let faces = faces
+            .each_ref()
+            .map(|face| face.as_ref().and_then(|face| load(face, &mut db)));
+        by_name.insert(name.clone(), faces);
     }
-    let default = load(&default_handle, &mut db);
+    let default = load(&Face::Asset(default_handle), &mut db);
     let set = SvgFontSet {
         generation: previous.generation + 1,
         db: Arc::new(db),
@@ -357,6 +461,54 @@ mod tests {
             .insert("Gamma", FontFaces::new(handles[2].clone()));
         app.update();
         assert_eq!(current(&app), before + 1);
+    }
+
+    /// A family given by name (`FontSource::Family`, as for a system font)
+    /// resolves through Bevy's font collection (`FontCx`): its face's data
+    /// is loaded into the set, apart from the default font, and SVG text
+    /// naming the registered family is drawn with it. Bold asks the same
+    /// family (the collection has one face: it's used).
+    #[test]
+    fn system_families_resolve_through_bevys_font_collection() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Font>()
+            .init_resource::<FontFamilies>()
+            .init_resource::<crate::svg::SvgFonts>()
+            .init_resource::<bevy::text::FontCx>()
+            .add_systems(Update, sync_svg_fonts);
+        let font = || Font::from_bytes(bevy::text::DEFAULT_FONT_DATA.to_vec());
+        let _ = app
+            .world_mut()
+            .resource_mut::<Assets<Font>>()
+            .insert(AssetId::default(), font());
+        let family = {
+            let mut cx = app.world_mut().resource_mut::<bevy::text::FontCx>();
+            let registered = cx.context.collection.register_fonts(font().data, None);
+            let id = registered[0].0;
+            cx.context.collection.family_name(id).unwrap().to_owned()
+        };
+        app.world_mut().resource_mut::<FontFamilies>().insert(
+            "Desktop",
+            FontFaces::new(FontSource::Family(family.as_str().into())),
+        );
+        app.update();
+        app.update();
+        let fonts = app.world().resource::<crate::svg::SvgFonts>().clone();
+        let set = fonts.shared().current();
+        let desktop = set.families["desktop"];
+        assert!(desktop[0].is_some(), "the family's face is loaded");
+        assert!(desktop[2].is_some(), "bold resolves in the family too");
+        assert_ne!(desktop[0], set.default);
+        let source = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="40">
+            <text y="10" font-family="Desktop">a</text>
+            <text y="30" font-family="nobody">b</text>
+        </svg>"#;
+        let tree = crate::svg::parse_with(source.as_bytes(), &fonts).unwrap();
+        assert_eq!(
+            glyph_faces(&tree),
+            vec![desktop[0].unwrap(), set.default.unwrap()]
+        );
     }
 
     #[test]

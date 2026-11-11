@@ -51,4 +51,4 @@ if [ "${1:-}" = --update ]; then
     export BEVY_MARKUP_UPDATE_GOLDEN=1
 fi
 cd "$root"
-exec cargo test --test golden -- --ignored --nocapture
+exec cargo test --features svg --test golden -- --ignored --nocapture

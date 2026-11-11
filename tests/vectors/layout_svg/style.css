@@ -1,0 +1,9 @@
+/* Layout vector: SVG images (ADR 0038). Default font only (FiraMono, 0.6em
+   advance), line height 1.2; 60px keeps 1.2 x size whole (Bevy rounds each
+   text node up to whole pixels, browsers don't). Every image is shorter
+   than the font's ascent: a taller inline box hits parley's line metrics
+   (bug_0203, UPSTREAM U37). */
+html { font-size: 60px }
+.sized { width: 40px }
+.high { height: 24px }
+.icon { width: 30px }
