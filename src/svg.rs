@@ -155,6 +155,21 @@ pub const MAX_SVG_COST: u64 = 1 << 27;
 /// million path segments fits.
 pub const MAX_SVG_WORK: u64 = 1 << 23;
 
+/// The most memory the drawn SVG rasters may hold, in bytes (RGBA, 4 per
+/// pixel), in each of two caches: the redraws of `<img>` and CSS-image
+/// SVGs at their displayed size, and the inline `<svg>` images. One
+/// drawing is bounded by [`MAX_SVG_SIDE`]; their number is the page's to
+/// choose (bug_0209: sixteen `<img>`s of one icon at 1 500 px held 145 MB,
+/// a hundred at 4 096 px would hold 6.4 GB). Past it, an `<img>` or a CSS
+/// image keeps its 1× drawing, and an inline `<svg>` shows nothing until
+/// others are dropped. 256 MiB: four full-size 4 096² drawings.
+pub const MAX_SVG_RASTER_BYTES: u64 = 256 << 20;
+
+/// An RGBA raster's bytes.
+fn raster_bytes(size: UVec2) -> u64 {
+    u64::from(size.x) * u64::from(size.y) * 4
+}
+
 /// The farthest any drawn path may reach from the image's origin, in the
 /// drawn image's pixels (2¹⁹). Shapes may extend past the image, as they
 /// often do (a background larger than the view, a map cropped by its
@@ -410,6 +425,16 @@ impl SvgFonts {
         &self.shared
     }
 
+    /// Bevy's default font only (the fuzz harness's fonts).
+    #[cfg(feature = "fuzzing")]
+    pub(crate) fn default_font() -> Self {
+        Self {
+            shared: std::sync::Arc::new(crate::svg_fonts::Shared::fixed(
+                crate::svg_fonts::SvgFontSet::default_font(),
+            )),
+        }
+    }
+
     /// The font set's generation: inline `<svg>` with text keys its drawing
     /// by it (0 without `svg-text`).
     fn generation(&self) -> u64 {
@@ -475,7 +500,20 @@ pub(crate) fn parse_within(
     fonts: &SvgFonts,
     max_work: u64,
 ) -> Result<usvg::Tree, SvgError> {
-    guarded(|| parse_unguarded(bytes, fonts, max_work))
+    guarded(|| {
+        parse_unguarded(bytes, fonts, max_work, u64::MAX).map(|tree| tree.expect("no deferral"))
+    })
+}
+
+/// [`parse_with`], unless its conversion work is over `sync_work`: then
+/// `Ok(None)`, after only the XML parse and the bounds (an inline
+/// document converts on a task then, bug_0208).
+pub(crate) fn parse_unless_costly(
+    bytes: &[u8],
+    fonts: &SvgFonts,
+    sync_work: u64,
+) -> Result<Option<usvg::Tree>, SvgError> {
+    guarded(|| parse_unguarded(bytes, fonts, MAX_SVG_WORK, sync_work))
 }
 
 /// Runs usvg or resvg work, turning a panic into [`SvgError::Panicked`].
@@ -500,7 +538,14 @@ fn guarded<T>(work: impl FnOnce() -> Result<T, SvgError>) -> Result<T, SvgError>
     })
 }
 
-fn parse_unguarded(bytes: &[u8], fonts: &SvgFonts, max_work: u64) -> Result<usvg::Tree, SvgError> {
+/// `Ok(None)` when the document is within `max_work` but its work is over
+/// `defer_over`.
+fn parse_unguarded(
+    bytes: &[u8],
+    fonts: &SvgFonts,
+    max_work: u64,
+    defer_over: u64,
+) -> Result<Option<usvg::Tree>, SvgError> {
     if bytes.starts_with(&[0x1f, 0x8b]) {
         return Err(SvgError::Parse(usvg::Error::SvgzFeatureNotEnabled));
     }
@@ -512,7 +557,7 @@ fn parse_unguarded(bytes: &[u8], fonts: &SvgFonts, max_work: u64) -> Result<usvg
     };
     let document = roxmltree::Document::parse_with_options(text, xml_options)
         .map_err(|err| SvgError::Parse(usvg::Error::ParsingFailed(err)))?;
-    let bounds = svg_bounds::bounds(&document, svg_bounds::MAX_REFERENCES)?;
+    let bounds = svg_bounds::bounds(&document, svg_bounds::MAX_REFERENCES, max_work)?;
     if bounds.depth > svg_bounds::MAX_DEPTH {
         return Err(SvgError::TooDeep {
             depth: bounds.depth,
@@ -525,12 +570,17 @@ fn parse_unguarded(bytes: &[u8], fonts: &SvgFonts, max_work: u64) -> Result<usvg
             max: max_work,
         });
     }
+    if bounds.work > defer_over {
+        return Ok(None);
+    }
     let options = options(fonts);
     if bounds.boxes {
         let largest = svg_boxes::largest_box(&document, &options)?;
         check_regions(largest, bounds.regions)?;
     }
-    usvg::Tree::from_xmltree(&document, &options).map_err(SvgError::Parse)
+    usvg::Tree::from_xmltree(&document, &options)
+        .map(Some)
+        .map_err(SvgError::Parse)
 }
 
 /// Refuses a document where usvg's `objectBoundingBox` arithmetic could
@@ -569,7 +619,7 @@ pub(crate) fn raster_size(
 }
 
 /// Parses, budgets and draws an SVG.
-#[cfg(any(test, feature = "fuzzing"))]
+#[cfg(test)]
 pub(crate) fn rasterize(bytes: &[u8], scale: f32, limits: Limits) -> Result<Raster, SvgError> {
     rasterize_with(bytes, scale, limits, &SvgFonts::default())
 }
@@ -735,6 +785,17 @@ pub(crate) struct SvgRasters {
     refused: std::collections::HashSet<(AssetId<SvgDocument>, UVec2)>,
 }
 
+impl SvgRasters {
+    /// The bytes the ready and in-flight rasters hold.
+    fn used_bytes(&self) -> u64 {
+        self.ready
+            .keys()
+            .chain(self.drawing.keys())
+            .map(|key| raster_bytes(key.1))
+            .sum()
+    }
+}
+
 /// Inline `<svg>` documents (ADR 0038 §4), keyed by their prepared source
 /// text ([`prepare_inline`]): each distinct text is parsed once and drawn
 /// once at its intrinsic size; every element showing it shares the image.
@@ -749,11 +810,40 @@ pub(crate) struct SvgRasters {
 pub(crate) struct InlineSvgs {
     inner: std::sync::Mutex<InlineInner>,
     fonts: SvgFonts,
+    /// The bytes the entries' images hold or will hold (reserved before a
+    /// drawing starts, also on a task; [`MAX_SVG_RASTER_BYTES`]).
+    bytes: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+/// Reserves `bytes` in `used` if they fit [`MAX_SVG_RASTER_BYTES`].
+fn reserve(used: &std::sync::atomic::AtomicU64, bytes: u64) -> bool {
+    use std::sync::atomic::Ordering;
+    used.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |held| {
+        held.checked_add(bytes)
+            .filter(|&total| total <= MAX_SVG_RASTER_BYTES)
+    })
+    .is_ok()
+}
+
+fn release(used: &std::sync::atomic::AtomicU64, bytes: u64) {
+    used.fetch_sub(bytes, std::sync::atomic::Ordering::SeqCst);
 }
 
 #[derive(Default)]
 struct InlineInner {
     entries: std::collections::HashMap<String, InlineEntry>,
+    /// Texts refused during the build, by hash (bug_0208: refusals weren't
+    /// remembered, so every build of the UI converted the text again, on
+    /// the main thread). Cleared when it grows past
+    /// [`INLINE_MAX_REFUSED`] or the fonts change.
+    refused: std::collections::HashSet<u64>,
+    /// Texts that didn't fit [`MAX_SVG_RASTER_BYTES`], by hash: retried
+    /// once an entry is dropped.
+    over_budget: std::collections::HashSet<u64>,
+    hasher: std::hash::RandomState,
+    /// The document behind each entry's image (bug_0211: the redraw
+    /// scanned every entry per span per frame).
+    documents: std::collections::HashMap<AssetId<Image>, Handle<SvgDocument>>,
     /// Drawn during the build, inserted by `finish_inline_svgs`.
     ready: Vec<(AssetId<Image>, Image)>,
     drawing: Vec<(
@@ -771,6 +861,8 @@ struct InlineEntry {
     document: Option<Handle<SvgDocument>>,
     /// Frames in a row no `InlineImage` showed it.
     unused: u32,
+    /// Its image's bytes, reserved in [`InlineSvgs::bytes`].
+    bytes: u64,
 }
 
 /// Inline source text up to this size is parsed during the build; larger
@@ -779,6 +871,14 @@ const INLINE_SYNC_BYTES: usize = 64 * 1024;
 /// A document estimated to cost up to this many units (~1–4 ms, probe
 /// report §7) is drawn during the build; a costlier one on a task.
 const INLINE_SYNC_COST: u64 = 1 << 20;
+/// Inline text whose conversion work ([`svg_bounds::bounds`]) is over
+/// this (~1 ms in release, ADR 0040's ~60 ns a unit) is converted on a
+/// task even when it's short: the build doesn't stall on it (bug_0208: a
+/// 1.2 KB `<use>` fan-out took 0.5 s on the main thread).
+const INLINE_SYNC_WORK: u64 = 1 << 14;
+/// Refused inline texts remembered at most (hashes; the set is cleared
+/// past it).
+const INLINE_MAX_REFUSED: usize = 4096;
 /// Frames an unused inline image is kept (a restyle that re-collects the
 /// element finds it again); then it's dropped.
 const INLINE_KEEP_FRAMES: u32 = 120;
@@ -796,12 +896,8 @@ pub(crate) fn prepare_inline(raw: &str, color: Option<[u8; 4]>) -> Option<String
     if !rest.starts_with(|c: char| c.is_ascii_whitespace() || c == '>' || c == '/') {
         return None;
     }
-    let start_tag = &rest[..rest.find('>')?];
-    let has = |name: &str| {
-        start_tag
-            .split(|c: char| c.is_ascii_whitespace())
-            .any(|part| part.split('=').next() == Some(name))
-    };
+    let names = attribute_names(rest)?;
+    let has = |name: &str| names.contains(&name);
     let mut added = String::new();
     if !has("xmlns") {
         added += r#" xmlns="http://www.w3.org/2000/svg""#;
@@ -816,6 +912,65 @@ pub(crate) fn prepare_inline(raw: &str, color: Option<[u8; 4]>) -> Option<String
         added += &format!(" color=\"rgba({r}, {g}, {b}, {alpha})\"");
     }
     Some(format!("<svg{added}{rest}"))
+}
+
+/// The attribute names of a start tag, from just after its name up to its
+/// `>` (`None` if there's none). Quoted values are skipped whole, as HTML
+/// reads them: a word inside `class="icon color"` is no attribute
+/// (bug_0210).
+fn attribute_names(tag: &str) -> Option<Vec<&str>> {
+    let bytes = tag.as_bytes();
+    let mut names = Vec::new();
+    let mut i = 0;
+    loop {
+        while bytes
+            .get(i)
+            .is_some_and(|&byte| byte.is_ascii_whitespace() || byte == b'/')
+        {
+            i += 1;
+        }
+        match bytes.get(i)? {
+            b'>' => return Some(names),
+            _ => {}
+        }
+        let start = i;
+        // An attribute name runs up to whitespace, `/`, `>` or `=` (a
+        // leading `=` is part of it, as HTML's tokenizer has it).
+        i += 1;
+        while bytes.get(i).is_some_and(|&byte| {
+            !(byte.is_ascii_whitespace() || matches!(byte, b'/' | b'>' | b'='))
+        }) {
+            i += 1;
+        }
+        names.push(&tag[start..i]);
+        while bytes.get(i).is_some_and(u8::is_ascii_whitespace) {
+            i += 1;
+        }
+        if bytes.get(i) != Some(&b'=') {
+            continue;
+        }
+        i += 1;
+        while bytes.get(i).is_some_and(u8::is_ascii_whitespace) {
+            i += 1;
+        }
+        match bytes.get(i) {
+            Some(&quote @ (b'"' | b'\'')) => {
+                i += 1;
+                while *bytes.get(i)? != quote {
+                    i += 1;
+                }
+                i += 1;
+            }
+            _ => {
+                while bytes
+                    .get(i)
+                    .is_some_and(|&byte| !(byte.is_ascii_whitespace() || byte == b'>'))
+                {
+                    i += 1;
+                }
+            }
+        }
+    }
 }
 
 impl InlineSvgs {
@@ -843,6 +998,21 @@ impl InlineSvgs {
             entry.unused = 0;
             return Some((entry.image.clone(), entry.intrinsic));
         }
+        let hash = {
+            use std::hash::BuildHasher;
+            inner.hasher.hash_one(&key)
+        };
+        if inner.refused.contains(&hash) || inner.over_budget.contains(&hash) {
+            return None;
+        }
+        let refuse = |inner: &mut InlineInner, err: &dyn std::fmt::Display| {
+            debug!("inline svg skipped: {err}");
+            if inner.refused.len() >= INLINE_MAX_REFUSED {
+                inner.refused.clear();
+            }
+            inner.refused.insert(hash);
+            None
+        };
         let image = images.reserve_handle();
         let mut entry = InlineEntry {
             image: image.clone(),
@@ -850,37 +1020,47 @@ impl InlineSvgs {
             tree: None,
             document: None,
             unused: 0,
+            bytes: 0,
         };
-        if text.len() <= INLINE_SYNC_BYTES {
-            let tree = match parse_with(text.as_bytes(), &self.fonts) {
-                Ok(tree) => std::sync::Arc::new(tree),
-                Err(err) => {
-                    debug!("inline svg skipped: {err}");
-                    return None;
-                }
+        let parsed = if text.len() <= INLINE_SYNC_BYTES {
+            match parse_unless_costly(text.as_bytes(), &self.fonts, INLINE_SYNC_WORK) {
+                Ok(parsed) => parsed,
+                Err(err) => return refuse(&mut inner, &err),
+            }
+        } else {
+            None
+        };
+        if let Some(tree) = parsed {
+            let tree = std::sync::Arc::new(tree);
+            let (width, height, _) = match raster_size(&tree, 1.0, MAX_SVG_SIDE) {
+                Ok(size) => size,
+                Err(err) => return refuse(&mut inner, &err),
             };
-            let (width, height, _) = raster_size(&tree, 1.0, MAX_SVG_SIDE).ok()?;
             entry.intrinsic = Some(Vec2::new(width as f32, height as f32));
             // Over the hard budget: refused now, no task, no empty image
             // (the element shows nothing, as a refused `<img>` does).
             let cost = estimate_cost(&tree, width, height, MAX_SVG_COST);
             if cost > MAX_SVG_COST {
-                debug!(
-                    "inline svg skipped: {}",
-                    SvgError::TooExpensive {
-                        estimate: cost,
-                        max: MAX_SVG_COST
-                    }
-                );
+                let err = SvgError::TooExpensive {
+                    estimate: cost,
+                    max: MAX_SVG_COST,
+                };
+                return refuse(&mut inner, &err);
+            }
+            let bytes = raster_bytes(UVec2::new(width, height));
+            if !reserve(&self.bytes, bytes) {
+                debug!("inline svg not drawn: the drawn SVGs hold MAX_SVG_RASTER_BYTES");
+                inner.over_budget.insert(hash);
                 return None;
             }
+            entry.bytes = bytes;
             let cheap = cost <= INLINE_SYNC_COST;
             if cheap {
                 match draw(&tree, width, height, Limits::DEFAULT) {
                     Ok((drawn, _)) => inner.ready.push((image.id(), drawn)),
                     Err(err) => {
-                        debug!("inline svg skipped: {err}");
-                        return None;
+                        release(&self.bytes, bytes);
+                        return refuse(&mut inner, &err);
                     }
                 }
             } else {
@@ -896,15 +1076,25 @@ impl InlineSvgs {
         } else {
             let task_text = text.clone();
             let task_fonts = self.fonts.clone();
+            let used = self.bytes.clone();
             let task = bevy::tasks::AsyncComputeTaskPool::get().spawn(async move {
                 let tree =
                     parse_with(task_text.as_bytes(), &task_fonts).map_err(|err| err.to_string())?;
                 let (width, height, _) =
                     raster_size(&tree, 1.0, MAX_SVG_SIDE).map_err(|err| err.to_string())?;
+                // Reserved here (the size wasn't known before the parse);
+                // `finish_inline_svgs` records it on the entry.
+                let bytes = raster_bytes(UVec2::new(width, height));
+                if !reserve(&used, bytes) {
+                    return Err("the drawn SVGs hold MAX_SVG_RASTER_BYTES".to_string());
+                }
                 let tree = std::sync::Arc::new(tree);
                 draw(&tree, width, height, Limits::DEFAULT)
                     .map(|(image, _)| (image, tree))
-                    .map_err(|err| err.to_string())
+                    .map_err(|err| {
+                        release(&used, bytes);
+                        err.to_string()
+                    })
             });
             inner.drawing.push((key.clone(), task));
         }
@@ -918,6 +1108,7 @@ impl InlineSvgs {
         Self {
             inner: std::sync::Mutex::default(),
             fonts,
+            bytes: std::sync::Arc::default(),
         }
     }
 
@@ -927,11 +1118,7 @@ impl InlineSvgs {
             .inner
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        inner
-            .entries
-            .values()
-            .find(|entry| entry.image.id() == image)
-            .and_then(|entry| entry.document.clone())
+        inner.documents.get(&image).cloned()
     }
 }
 
@@ -971,13 +1158,22 @@ pub(crate) fn finish_inline_svgs(
             Ok((image, tree)) => {
                 let id = entry.image.id();
                 entry.intrinsic = Some(image.size().as_vec2());
+                // A large text's task reserved its bytes; a costly
+                // document's were reserved during the build.
+                if entry.bytes == 0 {
+                    entry.bytes = raster_bytes(image.size());
+                }
                 entry.tree = Some(tree);
                 let _ = images.insert(id, image);
                 // `Modified`, which restyles the UI showing it (its box
                 // size wasn't known when the build collected it).
                 let _ = images.get_mut(id);
             }
-            Err(err) => debug!("inline svg not drawn: {err}"),
+            Err(err) => {
+                debug!("inline svg not drawn: {err}");
+                // A costly document's bytes were reserved during the build.
+                release(&inline.bytes, std::mem::take(&mut entry.bytes));
+            }
         }
     }
     let shown: std::collections::HashSet<AssetId<Image>> = spans
@@ -992,11 +1188,14 @@ pub(crate) fn finish_inline_svgs(
         .collect();
     let drawing: std::collections::HashSet<String> =
         inner.drawing.iter().map(|(text, _)| text.clone()).collect();
+    let inner = &mut *inner;
     for (text, entry) in inner.entries.iter_mut() {
         if entry.document.is_none()
             && let Some(tree) = &entry.tree
         {
-            entry.document = Some(documents.add(SvgDocument { tree: tree.clone() }));
+            let document = documents.add(SvgDocument { tree: tree.clone() });
+            inner.documents.insert(entry.image.id(), document.clone());
+            entry.document = Some(document);
         }
         if shown.contains(&entry.image.id()) || drawing.contains(text) {
             entry.unused = 0;
@@ -1004,9 +1203,20 @@ pub(crate) fn finish_inline_svgs(
             entry.unused += 1;
         }
     }
-    inner
-        .entries
-        .retain(|_, entry| entry.unused <= INLINE_KEEP_FRAMES);
+    let documents = &mut inner.documents;
+    let mut freed = false;
+    inner.entries.retain(|_, entry| {
+        let keep = entry.unused <= INLINE_KEEP_FRAMES;
+        if !keep {
+            documents.remove(&entry.image.id());
+            release(&inline.bytes, entry.bytes);
+            freed |= entry.bytes > 0;
+        }
+        keep
+    });
+    if freed {
+        inner.over_budget.clear();
+    }
 }
 
 /// On an element whose CSS `border-image`/`background-image` is an SVG:
@@ -1140,8 +1350,14 @@ pub(crate) fn rasterize_svg_images(
     if !reloaded.is_empty() {
         rasters.ready.retain(|key, _| !reloaded.contains(&key.0));
         rasters.refused.retain(|key| !reloaded.contains(&key.0));
+        // A draw of the old tree would land in `ready` under the same key
+        // (bug_0212); dropping its task cancels it.
+        rasters.drawing.retain(|key, _| !reloaded.contains(&key.0));
     }
 
+    // Over the budget, a span keeps its 1× drawing (bug_0209); a raster
+    // dropped below frees room for the next frame.
+    let mut used = rasters.used_bytes();
     let mut in_use = std::collections::HashSet::new();
     for (entity, parent, mut image, inline_box, mut raster) in &mut spans {
         if let Some(raster) = raster.as_mut()
@@ -1167,32 +1383,35 @@ pub(crate) fn rasterize_svg_images(
             }
             _ => image.image.clone(),
         };
-        // An `<img src="….svg">` (its document loads by the same path), or
-        // an inline `<svg>` (its document is the cache's).
-        let document = match source.path() {
-            Some(path)
-                if path
-                    .path()
-                    .extension()
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("svg")) =>
-            {
-                Some(DocumentSource::Path(path.clone_owned()))
-            }
-            Some(_) => None,
-            None => inline.document_of(source.id()).map(DocumentSource::Inline),
-        };
-        let Some(document) = document else {
-            if raster.is_some() {
-                commands.entity(entity).remove::<SvgRaster>();
-            }
-            continue;
-        };
-        let Some(intrinsic) = images.get(&source).map(|image| image.size().as_vec2()) else {
-            continue;
-        };
         let mut raster = match raster {
+            // The raster already names its document (bug_0211: the inline
+            // cache was searched for every span every frame).
             Some(raster) if raster.source == source => raster,
-            _ => {
+            raster => {
+                // An `<img src="….svg">` (its document loads by the same
+                // path), or an inline `<svg>` (its document is the cache's).
+                let document = match source.path() {
+                    Some(path)
+                        if path
+                            .path()
+                            .extension()
+                            .is_some_and(|extension| extension.eq_ignore_ascii_case("svg")) =>
+                    {
+                        Some(DocumentSource::Path(path.clone_owned()))
+                    }
+                    Some(_) => None,
+                    None => inline.document_of(source.id()).map(DocumentSource::Inline),
+                };
+                let Some(document) = document else {
+                    if raster.is_some() {
+                        commands.entity(entity).remove::<SvgRaster>();
+                    }
+                    continue;
+                };
+                let Some(intrinsic) = images.get(&source).map(|image| image.size().as_vec2())
+                else {
+                    continue;
+                };
                 // A new `<img>`, or its `src` changed: start over.
                 let document = match document {
                     DocumentSource::Path(path) => server.load(path),
@@ -1207,6 +1426,9 @@ pub(crate) fn rasterize_svg_images(
                 });
                 continue;
             }
+        };
+        let Some(intrinsic) = images.get(&source).map(|image| image.size().as_vec2()) else {
+            continue;
         };
         let logical = inline_box.size;
         if !(logical.cmpgt(Vec2::ZERO).all() && logical.is_finite()) {
@@ -1254,10 +1476,14 @@ pub(crate) fn rasterize_svg_images(
             image.width = Some(logical.x);
             image.height = Some(logical.y);
             raster.shown = Some((target, handle));
-        } else if !rasters.refused.contains(&key) && !rasters.drawing.contains_key(&key) {
+        } else if !rasters.refused.contains(&key)
+            && !rasters.drawing.contains_key(&key)
+            && used + raster_bytes(target) <= MAX_SVG_RASTER_BYTES
+        {
             let Some(document) = documents.get(&raster.document) else {
                 continue;
             };
+            used += raster_bytes(target);
             let tree = document.tree.clone();
             let task = bevy::tasks::AsyncComputeTaskPool::get().spawn(async move {
                 draw(&tree, target.x, target.y, Limits::DEFAULT)
@@ -1353,10 +1579,14 @@ pub(crate) fn rasterize_svg_images(
             node_image.image = handle.clone();
             node_image.image_mode = scale_mode(&frame.mode, target.x as f32 / intrinsic.x);
             frame.shown = Some((target, handle));
-        } else if !rasters.refused.contains(&key) && !rasters.drawing.contains_key(&key) {
+        } else if !rasters.refused.contains(&key)
+            && !rasters.drawing.contains_key(&key)
+            && used + raster_bytes(target) <= MAX_SVG_RASTER_BYTES
+        {
             let Some(document) = documents.get(&frame.document) else {
                 continue;
             };
+            used += raster_bytes(target);
             let tree = document.tree.clone();
             let task = bevy::tasks::AsyncComputeTaskPool::get().spawn(async move {
                 draw(&tree, target.x, target.y, Limits::DEFAULT)
@@ -1379,6 +1609,13 @@ const NODE_COST: u64 = 64;
 /// Cost of one path segment (tessellation; 10 million segments took 0.87 s,
 /// probe §3).
 const SEGMENT_COST: u64 = 24;
+/// Cost of one dash of a dashed stroke: tiny-skia cuts the path into
+/// dashes and strokes each as a path of its own (~65 ns a dash in
+/// review_0007's K02 probe; charged at about twice that).
+const DASH_COST: u64 = 32;
+/// tiny-skia's `MAX_DASH_COUNT`: a path that would cut into more dashes
+/// isn't dashed (nor drawn) at all.
+const MAX_DASH_COUNT: f64 = 1_000_000.0;
 /// Nesting deeper than this (groups, masks, clip paths, patterns) is
 /// refused: resvg recurses once per level.
 const MAX_COST_DEPTH: u32 = 512;
@@ -1611,6 +1848,47 @@ fn scale_of(transform: tiny_skia::Transform) -> tiny_skia::Transform {
     tiny_skia::Transform::from_scale(sx, sy)
 }
 
+/// How many dashes tiny-skia cuts `path`'s stroke into (bug_0205): the
+/// path's length × the dash pairs ÷ the pattern's length, as
+/// `tiny_skia_path::dash` counts them, at most [`MAX_DASH_COUNT`] (past
+/// it the stroke isn't drawn). Dashing runs in the path's own
+/// coordinates; the length is an upper bound, the control polygon's.
+/// `None` for an undashed stroke.
+fn dash_count(path: &usvg::Path, stroke: &usvg::Stroke) -> Option<u64> {
+    use tiny_skia::PathSegment;
+    let array = stroke.dasharray()?;
+    let interval: f64 = array.iter().map(|&len| f64::from(len)).sum();
+    let pairs = (array.len() / 2) as f64;
+    let distance =
+        |a: tiny_skia::Point, b: tiny_skia::Point| f64::from(b.x - a.x).hypot(f64::from(b.y - a.y));
+    let (mut length, mut start, mut at) = (0.0, tiny_skia::Point::zero(), tiny_skia::Point::zero());
+    for segment in path.data().segments() {
+        let points: &[tiny_skia::Point] = match &segment {
+            PathSegment::MoveTo(point) => {
+                (start, at) = (*point, *point);
+                continue;
+            }
+            PathSegment::LineTo(point) => &[*point],
+            PathSegment::QuadTo(a, point) => &[*a, *point],
+            PathSegment::CubicTo(a, b, point) => &[*a, *b, *point],
+            PathSegment::Close => &[start],
+        };
+        for &point in points {
+            length += distance(at, point);
+            at = point;
+        }
+    }
+    let dashes = length * pairs / interval;
+    // A NaN count (infinite length over an infinite interval) counts as
+    // the maximum; tiny-skia refuses a non-positive interval itself.
+    let dashes = if dashes.is_nan() {
+        MAX_DASH_COUNT
+    } else {
+        dashes.clamp(0.0, MAX_DASH_COUNT)
+    };
+    Some(dashes.ceil() as u64)
+}
+
 /// The walk stopped: the estimate is over the limit.
 struct Over;
 
@@ -1687,7 +1965,14 @@ impl CostWalk {
                 }
                 Ok(())
             }
-            usvg::Node::Text(_) => self.add(NODE_COST),
+            // Drawn as its flattened outlines, one path per glyph with the
+            // text's paint: a pattern on text allocates its tile like any
+            // path's (bug_0204), and each glyph is a path to fill
+            // (bug_0206).
+            usvg::Node::Text(text) => {
+                self.add(NODE_COST)?;
+                self.group(text.flattened(), depth + 1)
+            }
         }
     }
 
@@ -1695,6 +1980,9 @@ impl CostWalk {
         self.add(NODE_COST)?;
         let segments = path.data().len() as u64;
         self.add(segments.saturating_mul(SEGMENT_COST))?;
+        if let Some(dashes) = path.stroke().and_then(|stroke| dash_count(path, stroke)) {
+            self.add(dashes.saturating_mul(DASH_COST))?;
+        }
         let bbox = path.abs_stroke_bounding_box();
         let area = self.area(bbox.width(), bbox.height());
         let fill = path.fill().map(|fill| fill.paint());
@@ -1846,6 +2134,172 @@ mod tests {
         // Only an `<svg` start tag.
         assert!(prepare_inline("<svgx>", red).is_none());
         assert!(prepare_inline("<p>", red).is_none());
+        // Words inside quoted values aren't attributes (bug_0210: `color`
+        // in a class turned `currentColor` off, `xmlns` dropped the
+        // namespace), nor is a `>` inside one the tag's end.
+        for tag in [
+            "<svg class=\"icon color accent\" viewBox=\"0 0 1 1\">",
+            "<svg aria-label='pick a color here' viewBox=\"0 0 1 1\">",
+            "<svg class=\"x xmlns y\" viewBox=\"0 0 1 1\">",
+            "<svg title=\"a > b color\" viewBox=\"0 0 1 1\">",
+            // Unquoted: HTML, not XML (usvg refuses it either way).
+            "<svg data-x=a viewBox=\"0 0 1 1\">",
+        ] {
+            let prepared = prepare_inline(&format!("{tag}</svg>"), red).unwrap();
+            assert!(
+                prepared.contains("xmlns=\"http://www.w3.org/2000/svg\""),
+                "{prepared}"
+            );
+            assert!(
+                prepared.contains("color=\"rgba(255, 0, 0, 1)\""),
+                "{prepared}"
+            );
+            assert!(
+                tag.contains("=a ") || parse(prepared.as_bytes()).is_ok(),
+                "{prepared}"
+            );
+        }
+        // Spelled any way HTML allows, the author's own still win.
+        for tag in [
+            "<svg color = \"blue\" xmlns='http://www.w3.org/2000/svg'>",
+            "<svg\ncolor=blue\txmlns=\"http://www.w3.org/2000/svg\">",
+        ] {
+            let prepared = prepare_inline(&format!("{tag}</svg>"), red).unwrap();
+            assert!(!prepared.contains("rgba"), "{prepared}");
+            assert_eq!(prepared.matches("xmlns=").count(), 1, "{prepared}");
+        }
+        // An unterminated start tag isn't one.
+        assert!(prepare_inline("<svg class=\"x>", red).is_none());
+    }
+
+    /// A document's reload cancels its draws in flight: a draw of the old
+    /// tree would land in the ready rasters under the same key, and the
+    /// span would show the old drawing until its size changed (bug_0212).
+    #[test]
+    fn a_reload_cancels_draws_in_flight() {
+        let pool = bevy::tasks::AsyncComputeTaskPool::get_or_init(bevy::tasks::TaskPool::default);
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_asset::<SvgDocument>()
+            .init_resource::<InlineSvgs>()
+            .init_resource::<SvgRasters>()
+            .add_systems(Update, rasterize_svg_images);
+        let tree = std::sync::Arc::new(parse(svg(8, 8, "").as_bytes()).unwrap());
+        let mut documents = app.world_mut().resource_mut::<Assets<SvgDocument>>();
+        let old = documents.add(SvgDocument { tree: tree.clone() });
+        let other = documents.add(SvgDocument { tree });
+        // Draws that never finish.
+        let mut rasters = app.world_mut().resource_mut::<SvgRasters>();
+        for document in [old.id(), other.id()] {
+            let task = pool.spawn(async move {
+                std::future::pending::<()>().await;
+                Err("never".to_string())
+            });
+            rasters.drawing.insert((document, UVec2::new(16, 16)), task);
+        }
+        app.update();
+        app.world_mut()
+            .resource_mut::<Messages<AssetEvent<SvgDocument>>>()
+            .write(AssetEvent::Modified { id: old.id() });
+        app.update();
+        let rasters = app.world().resource::<SvgRasters>();
+        let drawing: Vec<_> = rasters.drawing.keys().map(|key| key.0).collect();
+        assert_eq!(
+            drawing,
+            vec![other.id()],
+            "the reloaded document's draw is gone"
+        );
+    }
+
+    /// Inline images share a memory budget (`MAX_SVG_RASTER_BYTES`,
+    /// bug_0209): four 4096² documents (64 MiB each) fit, a fifth doesn't
+    /// and is remembered as over the budget; dropping an entry frees its
+    /// bytes, and the fifth fits then.
+    #[test]
+    fn inline_images_share_a_memory_budget() {
+        bevy::tasks::AsyncComputeTaskPool::get_or_init(bevy::tasks::TaskPool::default);
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_asset::<SvgDocument>()
+            .init_resource::<InlineSvgs>()
+            .add_systems(Update, finish_inline_svgs);
+        let text = |i: u32| {
+            prepare_inline(
+                &format!("<svg width='4096' height='4096' data-i='{i}'/>"),
+                None,
+            )
+            .unwrap()
+        };
+        let world = app.world_mut();
+        let inline = world.resource::<InlineSvgs>();
+        let images = world.resource::<Assets<Image>>();
+        for i in 0..4 {
+            assert!(inline.image(text(i), images).is_some(), "{i} fits");
+        }
+        assert!(inline.image(text(4), images).is_none(), "the fifth doesn't");
+        assert_eq!(inline.inner.lock().unwrap().over_budget.len(), 1);
+        assert_eq!(
+            inline.bytes.load(std::sync::atomic::Ordering::SeqCst),
+            MAX_SVG_RASTER_BYTES
+        );
+        // Drawn (on the task pool), then unshown for INLINE_KEEP_FRAMES:
+        // the entries go, their bytes too.
+        for _ in 0..5000 {
+            app.update();
+            let inline = app.world().resource::<InlineSvgs>();
+            if inline.bytes.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let world = app.world_mut();
+        let inline = world.resource::<InlineSvgs>();
+        assert_eq!(inline.bytes.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(inline.inner.lock().unwrap().over_budget.is_empty());
+        let images = world.resource::<Assets<Image>>();
+        assert!(inline.image(text(4), images).is_some(), "retried, fits");
+    }
+
+    /// A refused inline document is remembered: the next build doesn't
+    /// convert it again (bug_0208: a 1.2 KB document refused by the cost
+    /// estimate took ~0.5 s per build, on the main thread). A document
+    /// whose conversion is costly converts on a task: the build gets a
+    /// handle without waiting.
+    #[test]
+    fn inline_refusals_are_remembered_and_costly_conversions_wait() {
+        bevy::tasks::AsyncComputeTaskPool::get_or_init(bevy::tasks::TaskPool::default);
+        let images = Assets::<Image>::default();
+        let inline = InlineSvgs::default();
+        // Refused by the cost estimate: a blur over a huge layer.
+        let refused = prepare_inline(
+            "<svg width='4096' height='4096'><filter id='f'><feTurbulence numOctaves='100'/>\
+             </filter><rect width='4096' height='4096' filter='url(#f)'/></svg>",
+            None,
+        )
+        .unwrap();
+        assert!(inline.image(refused.clone(), &images).is_none());
+        {
+            let inner = inline.inner.lock().unwrap();
+            assert_eq!(inner.refused.len(), 1, "remembered");
+            assert!(inner.entries.is_empty());
+        }
+        assert!(inline.image(refused, &images).is_none());
+        // A `<use>` fan-out: within the work budget, over the build's share.
+        let fan_out = prepare_inline(
+            &format!(
+                "<svg width='8' height='8'><defs><g id='a'>{}</g><g id='b'>{}</g></defs>\
+                 <use href='#b'/></svg>",
+                "<rect width='1' height='1'/>".repeat(40),
+                "<use href='#a'/>".repeat(40),
+            ),
+            None,
+        )
+        .unwrap();
+        let (_, intrinsic) = inline.image(fan_out, &images).expect("a handle");
+        assert_eq!(intrinsic, None, "converted on the task");
+        assert_eq!(inline.inner.lock().unwrap().drawing.len(), 1);
     }
 
     #[test]
@@ -2071,7 +2525,8 @@ mod tests {
             },
         )
         .unwrap();
-        svg_bounds::bounds(&document, svg_bounds::MAX_REFERENCES).map(|bounds| bounds.depth)
+        svg_bounds::bounds(&document, svg_bounds::MAX_REFERENCES, u64::MAX)
+            .map(|bounds| bounds.depth)
     }
 
     /// The deepest stack of `pick(i)` levels the check accepts, and the
@@ -2892,6 +3347,57 @@ mod tests {
         }
     }
 
+    /// tiny-skia cuts a dashed stroke into up to 10⁶ dashes per path and
+    /// strokes each (bug_0205: 16 lines of ~490 000 dashes drew for half a
+    /// second on an estimate under 1% of the budget). Each dash is charged,
+    /// so such a document is refused; ordinary dashes still draw.
+    #[test]
+    fn dashes_count_toward_the_cost() {
+        let lines = |count: usize, dash: &str| {
+            let body: String = (0..count)
+                .map(|y| {
+                    format!(
+                        "<path d='M0 {y} H4000' stroke='black' stroke-width='1' {dash}/>",
+                        y = y * 6 + 2
+                    )
+                })
+                .collect();
+            svg(4000, 100, &body)
+        };
+        let result = draw(&lines(16, "stroke-dasharray='0.0041'"));
+        assert!(
+            matches!(result, Err(SvgError::TooExpensive { .. })),
+            "{:?}",
+            result.err()
+        );
+        for document in [
+            lines(16, ""),
+            lines(16, "stroke-dasharray='4 2'"),
+            // Past tiny-skia's dash limit: not dashed, not drawn, charged
+            // the limit.
+            lines(1, "stroke-dasharray='0.0001'"),
+        ] {
+            let result = draw(&document);
+            assert!(result.is_ok(), "{:?}", result.err());
+        }
+        // Dashes in the path's own coordinates: a curve's length counts.
+        let tree = parse(
+            svg(
+                64,
+                64,
+                "<path d='M0 0 C64 0 64 64 0 64' stroke='black' stroke-dasharray='1'/>",
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        let usvg::Node::Path(path) = &tree.root().children()[0] else {
+            panic!("a path")
+        };
+        let dashes = dash_count(path, path.stroke().unwrap()).unwrap();
+        // The curve is ~112 long, its control polygon 192: one dash per 2.
+        assert!((56..=96).contains(&dashes), "{dashes}");
+    }
+
     /// resvg 0.49 draws a pattern's tile into a pixmap of its own at the
     /// drawn size (`render_pattern_pixmap`: the pattern rect × the scale of
     /// the path's transform with the pattern's), with no limit; a failed
@@ -2983,7 +3489,7 @@ mod tests {
         let work = |body: &str| {
             let source = svg(512, 512, body);
             let document = roxmltree::Document::parse(&source).unwrap();
-            svg_bounds::bounds(&document, svg_bounds::MAX_REFERENCES)
+            svg_bounds::bounds(&document, svg_bounds::MAX_REFERENCES, u64::MAX)
                 .unwrap()
                 .work
         };
@@ -3021,6 +3527,19 @@ mod tests {
                 "rounded",
                 "<rect width='100%' height='100%' rx='2em'/><circle r='45%'/>".repeat(1000),
             ),
+            (
+                // An editor's export: a class rule per style.
+                "classes",
+                format!(
+                    "<style>{}</style>{}",
+                    (0..200)
+                        .map(|i| format!(".st{i}{{fill:#{:06x}}}", i * 1000))
+                        .collect::<String>(),
+                    (0..5000)
+                        .map(|i| format!("<rect class='st{}' width='4' height='4'/>", i % 200))
+                        .collect::<String>()
+                ),
+            ),
         ];
         for (name, body) in cases {
             let work = work(&body);
@@ -3029,6 +3548,29 @@ mod tests {
                 "{name}: work {work} of {MAX_SVG_WORK}"
             );
         }
+    }
+
+    /// usvg matches every `<style>` rule against every element, and so do
+    /// the model and the box pass (bug_0207: 8 000 rules over 32 000
+    /// elements parsed for 1.5 s, inside the work budget). The pairs are
+    /// work, refused before the model's own pass runs.
+    #[test]
+    fn style_rules_count_as_work() {
+        let rules: String = (0..3000).map(|i| format!("q{i}{{r:1}}")).collect();
+        let source = svg(
+            64,
+            64,
+            &format!("<style>{rules}</style>{}", "<g/>".repeat(12_000)),
+        );
+        let start = std::time::Instant::now();
+        let result = parse(source.as_bytes());
+        assert!(
+            matches!(result, Err(SvgError::TooLarge { .. })),
+            "{:?}",
+            result.err()
+        );
+        // The refusal comes before any matching (3.6 × 10⁷ pairs).
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
     }
 
     /// Generated hostile documents (ADR 0040/0042's guards, bug_0192–0198):
@@ -3184,7 +3726,7 @@ mod tests {
                 );
                 let document = roxmltree::Document::parse(&source).unwrap();
                 let refused = matches!(
-                    svg_bounds::bounds(&document, svg_bounds::MAX_REFERENCES),
+                    svg_bounds::bounds(&document, svg_bounds::MAX_REFERENCES, u64::MAX),
                     Err(SvgError::OutOfRange { .. })
                 );
                 let panics = std::panic::catch_unwind(|| {

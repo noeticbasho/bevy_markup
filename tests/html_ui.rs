@@ -5495,9 +5495,16 @@ html-ui
 /// containing block's content box at layout time: one dimension scales
 /// with the aspect ratio preserved (the fixture is 32×24), both stretch,
 /// and padding insets the resolution. Without a declaration the image
-/// keeps its intrinsic size.
+/// keeps its intrinsic size. The same at any scale factor: the sizes are
+/// logical, the layout's content box physical (bug_0214).
 #[test]
 fn layout_image_css_sizes() {
+    for scale in [1.0, 2.0, 0.5] {
+        layout_image_css_sizes_at(scale);
+    }
+}
+
+fn layout_image_css_sizes_at(scale: f32) {
     let page = r#"<div id="root">
   <p id="half"><img class="half" src="frame.png"></p>
   <p id="padded"><img class="full" src="frame.png"></p>
@@ -5507,10 +5514,11 @@ fn layout_image_css_sizes() {
 </div>"#;
     let css = "img.half { width: 50% } img.full { width: 100% } \
 padded { padding: 10px } p#padded { padding: 10px } img.stretch { width: 100%; height: 50% } img.tall { height: 50% }";
+    // The camera scaled with it: the logical viewport stays 400 × 600.
     let mut ui = TestUi::with_layout(
         "image-css-sizes",
         &[("page.html", page), ("style.css", css)],
-        UVec2::new(400, 600),
+        (Vec2::new(400.0, 600.0) * scale).as_uvec2(),
     )
     .stylesheet("style.css")
     .spawn(
@@ -5522,6 +5530,7 @@ padded { padding: 10px } p#padded { padding: 10px } img.stretch { width: 100%; h
             ..default()
         },
     );
+    ui.world_mut().insert_resource(UiScale(scale));
     ui.settle();
     ui.update(4);
 
@@ -5545,7 +5554,7 @@ padded { padding: 10px } p#padded { padding: 10px } img.stretch { width: 100%; h
     for (actual, expected) in actual.iter().zip(&expected_sorted) {
         assert!(
             (actual - expected).max_element() <= LAYOUT_TOLERANCE,
-            "image box {actual:?} != {expected:?} (all {sized:?})"
+            "scale {scale}: image box {actual:?} != {expected:?} (all {sized:?})"
         );
     }
 }
@@ -10803,6 +10812,67 @@ mod svg_display_size {
             (box_ - Vec2::new(133.2, 33.3)).abs().max_element() < 0.01,
             "{box_}"
         );
+    }
+
+    /// The redraws share a memory budget (`MAX_SVG_RASTER_BYTES`, bug_0209:
+    /// each `<img>` of one icon at a new size was a raster of its own, with
+    /// nothing bounding their sum). Eight `<img>`s of ~36 MB each: seven
+    /// fit 256 MiB, the eighth keeps its 1× image.
+    #[test]
+    fn redraws_share_a_memory_budget() {
+        let html: String = (0..8)
+            .map(|i| format!(r#"<img class="i{i}" src="icon.svg">"#))
+            .collect();
+        let css: String = (0..8)
+            .map(|i| format!("img.i{i} {{ width: {}px; height: 3000px }}", 3000 + i))
+            .collect();
+        let mut ui = TestUi::with_layout(
+            "svg-raster-budget",
+            &[
+                ("icon.svg", ICON),
+                ("page.html", &format!("<p>{html}</p>")),
+                ("style.css", &format!("html {{ color: #ffffff }} {css}")),
+            ],
+            UVec2::new(400, 300),
+        )
+        .stylesheet("style.css")
+        .spawn("page.html", TemplateContext::new(), Node::default());
+        ui.app_mut()
+            .init_resource::<Shown>()
+            .add_systems(Last, record);
+        ui.settle();
+        let drawn = |ui: &mut TestUi| {
+            ui.world_mut()
+                .resource::<Shown>()
+                .last
+                .iter()
+                .filter(|(size, _)| size.y == 3000)
+                .count()
+        };
+        // Until seven are drawn and nothing changes for a while (the draws
+        // run on a task pool).
+        let (mut stable, mut last) = (0, usize::MAX);
+        for _ in 0..3000 {
+            ui.update(1);
+            let now = drawn(&mut ui);
+            stable = if now == last { stable + 1 } else { 0 };
+            last = now;
+            if now >= 7 && stable > 100 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let shown = ui.world_mut().resource::<Shown>().last.clone();
+        assert_eq!(drawn(&mut ui), 7, "{shown:?}");
+        assert!(
+            shown.iter().any(|(size, _)| *size == UVec2::new(32, 8)),
+            "one keeps its 1× image: {shown:?}"
+        );
+        let bytes: u64 = shown
+            .iter()
+            .map(|(size, _)| u64::from(size.x) * u64::from(size.y) * 4)
+            .sum();
+        assert!(bytes <= bevy_markup::svg::MAX_SVG_RASTER_BYTES + 32 * 8 * 4);
     }
 
     /// A size the render budget refuses (200 chained blurs over 2,000 ×

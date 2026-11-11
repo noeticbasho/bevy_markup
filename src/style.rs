@@ -33,7 +33,11 @@
 //!   `.a + .b p`), and the structural pseudo-classes `:first-child`,
 //!   `:last-child`, `:nth-child()`, `:first-of-type`, `:last-of-type`,
 //!   `:nth-of-type()`, `:empty`, `:focus-within` and `:not(compound)` —
-//!   `:not(:hover)` included. Every compound matches whole wherever it
+//!   `:not(:hover)` included; `:is()`, `:where()` and `:not()` take
+//!   selector lists (ADR 0034), with descendant and child combinators
+//!   inside one level only (`:is(.a p)`, not `:is(:is(.a p) div)`: matching
+//!   costs a factor of the document's depth per level, ADR 0044, so such a
+//!   rule is skipped). Every compound matches whole wherever it
 //!   stands: an ancestor's or sibling's compound tests its classes,
 //!   `data-*` attributes, pseudo-state and position like the subject's
 //!   (`li:first-child > span`, `[data-mode="dark"] p`, `.tab:hover + .panel`).

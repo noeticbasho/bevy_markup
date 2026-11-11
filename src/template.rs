@@ -55,14 +55,53 @@ impl HtmlTemplate {
         Ok(HtmlDocument::parse(source)?)
     }
 
-    /// Renders with `context` to HTML text, without parsing it.
+    /// Renders with `context` to HTML text, without parsing it. Output
+    /// past [`MAX_RENDERED_BYTES`] fails the render (bug_0220).
     pub fn render_source(&self, context: &tera::Context) -> tera::TeraResult<String> {
-        self.tera.render(&self.name, context)
+        let mut out = BoundedOutput::default();
+        match self.tera.render_to(&self.name, context, &mut out) {
+            Err(_) if out.over => Err(tera::Error::message(format!(
+                "the rendered HTML is larger than MAX_RENDERED_BYTES ({MAX_RENDERED_BYTES} bytes)"
+            ))),
+            Err(err) => Err(err),
+            Ok(()) => String::from_utf8(out.bytes)
+                .map_err(|_| tera::Error::message("the rendered HTML isn't UTF-8")),
+        }
     }
 
     /// The template's name (its asset path).
     pub fn name(&self) -> &str {
         &self.name
+    }
+}
+
+/// The most HTML text a template may render, in bytes (16 MiB). Templates
+/// are untrusted input (ADR 0044), and Tera bounds a `range` (10⁵ items)
+/// and component recursion, not output: two nested loops in 92 bytes
+/// render 10¹⁰ characters (bug_0220). A render past it fails with an error
+/// saying so, like a template error.
+pub const MAX_RENDERED_BYTES: usize = 16 << 20;
+
+/// Tera's output, refused past [`MAX_RENDERED_BYTES`] (Tera streams its
+/// output, so the render stops at the write that crosses it).
+#[derive(Default)]
+struct BoundedOutput {
+    bytes: Vec<u8>,
+    over: bool,
+}
+
+impl std::io::Write for BoundedOutput {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.bytes.len() + buf.len() > MAX_RENDERED_BYTES {
+            self.over = true;
+            return Err(std::io::ErrorKind::FileTooLarge.into());
+        }
+        self.bytes.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
 
@@ -722,7 +761,10 @@ async fn load_template(
         templates.push((path.to_string(), source));
     }
     let mut tera = new_tera();
-    tera.add_raw_templates(templates)?;
+    tera.add_raw_templates(templates.clone())?;
+    // ADR 0044: templates are untrusted; what Tera compiled is bounded
+    // before it renders (bug_0220).
+    crate::tera_check::check(&name, &templates).map_err(|err| format!("{name}: {err}"))?;
     Ok(HtmlTemplate { tera, name })
 }
 
@@ -1384,6 +1426,39 @@ mod tests {
     fn decoding_borrows_without_references() {
         assert!(matches!(decode_text("plain text"), Cow::Borrowed(_)));
         assert!(matches!(decode_attribute("card wide"), Cow::Borrowed(_)));
+    }
+
+    /// Output past `MAX_RENDERED_BYTES` fails the render, at the write that
+    /// crosses it (bug_0220: two nested loops in 92 bytes rendered n²
+    /// characters, 10¹⁰ at Tera's `range` limit). The rest renders.
+    #[test]
+    fn rendered_output_is_bounded() {
+        let template = |source: &str| {
+            let mut tera = new_tera();
+            tera.add_raw_template("t.html", source).unwrap();
+            HtmlTemplate {
+                tera,
+                name: "t.html".to_owned(),
+            }
+        };
+        let loops = |n: usize| {
+            template(&format!(
+                "{{% for i in range(end={n}) %}}{{% for j in range(end={n}) %}}xxxx{{% endfor %}}{{% endfor %}}"
+            ))
+        };
+        // 4 × 2 100² = 17.6 MB.
+        let err = loops(2100)
+            .render_source(&tera::Context::new())
+            .expect_err("over the limit");
+        assert!(err.to_string().contains("MAX_RENDERED_BYTES"), "{err}");
+        // 4 × 2 000² = 16 MB, just under 16 MiB.
+        let ok = loops(2000).render_source(&tera::Context::new()).unwrap();
+        assert_eq!(ok.len(), 16_000_000);
+        // Other errors stay what they were.
+        let err = template("{{ missing }}")
+            .render_source(&tera::Context::new())
+            .expect_err("undefined");
+        assert!(!err.to_string().contains("MAX_RENDERED_BYTES"), "{err}");
     }
 
     /// Concatenated text of every raw node in `document`, decoded.

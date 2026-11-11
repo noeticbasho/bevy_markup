@@ -1603,7 +1603,7 @@ pub(crate) fn build_html_ui(
                 && window
                     .tree
                     .get(current)
-                    .is_ok_and(|(.., nested_ui)| nested_ui);
+                    .is_ok_and(|(.., kept)| kept.0 || kept.1);
             if !nested_root && let Ok((children, ..)) = window.tree.get(current) {
                 stack.extend(
                     children
@@ -2862,7 +2862,9 @@ type Tree<'w, 's> = Query<
         Option<&'static HtmlElement>,
         Option<&'static ConnectedAs>,
         Has<CssFrame>,
-        Has<HtmlUi>,
+        // A child updates keep as they found it: an app-nested `HtmlUi`
+        // root, or a `<canvas>`'s picture (bug_0215).
+        (Has<HtmlUi>, Has<crate::canvas::CanvasPicture>),
     ),
 >;
 
@@ -3520,10 +3522,11 @@ fn spawn_attached(commands: &mut Commands, parent: Entity, spec: &NodeSpec) -> E
 /// node kind (text block or not) and the same element (tag, `id`, and `is`
 /// with its dataset). Spans and app-nested `HtmlUi` roots never match.
 fn same_identity(spec: &NodeSpec, entity: Entity, tree: &Tree) -> bool {
-    let Ok((_, has_text, has_span, element, connected, _, nested_ui)) = tree.get(entity) else {
+    let Ok((_, has_text, has_span, element, connected, _, (nested_ui, picture))) = tree.get(entity)
+    else {
         return false;
     };
-    if nested_ui || has_span || has_text != spec.text.is_some() {
+    if nested_ui || picture || has_span || has_text != spec.text.is_some() {
         return false;
     }
     let same_element = match (element, &spec.element) {
@@ -3586,7 +3589,7 @@ fn update_children(
             .map_or_else(Vec::new, |children| children.to_vec());
         let (owned, nested): (Vec<Entity>, Vec<Entity>) = current
             .iter()
-            .partition(|child| !tree.get(**child).is_ok_and(|(.., nested_ui)| nested_ui));
+            .partition(|child| !tree.get(**child).is_ok_and(|(.., kept)| kept.0 || kept.1));
         let id_of = |entity: Entity| {
             tree.get(entity)
                 .ok()
@@ -3695,7 +3698,9 @@ fn update_children(
                                     children
                                         .iter()
                                         .filter(|grand| {
-                                            !tree.get(*grand).is_ok_and(|(.., nested)| nested)
+                                            !tree
+                                                .get(*grand)
+                                                .is_ok_and(|(.., kept)| kept.0 || kept.1)
                                         })
                                         .count()
                                 })
@@ -3786,10 +3791,10 @@ fn update_children(
 fn refresh_cached_handles(commands: &mut Commands, entity: Entity, spec: &NodeSpec, tree: &Tree) {
     let mut stack = vec![(entity, spec)];
     while let Some((entity, spec)) = stack.pop() {
-        let Ok((children, .., nested_ui)) = tree.get(entity) else {
+        let Ok((children, .., (nested_ui, picture))) = tree.get(entity) else {
             continue;
         };
-        if nested_ui {
+        if nested_ui || picture {
             continue;
         }
         let Some(children) = children else {
@@ -3821,7 +3826,7 @@ fn refresh_cached_handles(commands: &mut Commands, entity: Entity, spec: &NodeSp
         let owned: Vec<Entity> = entities
             .iter()
             .copied()
-            .filter(|&child| !tree.get(child).is_ok_and(|(.., nested)| nested))
+            .filter(|&child| !tree.get(child).is_ok_and(|(.., kept)| kept.0 || kept.1))
             .collect();
         if owned.len() != spec.children.len() {
             continue;
@@ -6991,7 +6996,7 @@ fn run_walk<'a>(
                 // ADR 0041: a `<canvas>` inside text has no box here (only a
                 // canvas directly in a container is a node), and its
                 // content is fallback no browser shows: nothing at all.
-                if tag.name().as_utf8_str() == *"canvas" {
+                if tag.name().as_utf8_str().eq_ignore_ascii_case("canvas") {
                     debug!(
                         "html canvas: a <canvas> inside text isn't shown; put it directly in \
                          a container"
@@ -7341,11 +7346,14 @@ pub(crate) fn size_images(
         };
         // `size` is the border box; the insets (`min_inset` carries the
         // resolved border and padding per edge) come out of it.
+        // `ComputedNode` is in physical pixels; the inline box and the
+        // image's size are logical (bug_0214: a `width: 50%` image was 100%
+        // wide at scale factor 2).
         let inset = block.border + block.padding;
         let content = Vec2::new(
             (block.size.x - inset.min_inset.x - inset.max_inset.x).max(0.0),
             (block.size.y - inset.min_inset.y - inset.max_inset.y).max(0.0),
-        );
+        ) * block.inverse_scale_factor();
         // An SVG drawn at its display size (ADR 0038 §3) keeps the aspect
         // of its intrinsic size, not of the raster's rounded pixels.
         #[cfg(feature = "svg")]

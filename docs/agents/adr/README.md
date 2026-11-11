@@ -59,5 +59,7 @@ as `[INFERENCE]`.
 | [0040](./0040-svg-conversion-work-bound.md) | Bound usvg's conversion work before it runs | Accepted |
 | [0041](./0041-canvas-shows-app-render-targets.md) | `<canvas>` shows a render target the app registers | Accepted |
 | [0042](./0042-svg-boxes-measured-by-a-first-usvg-pass.md) | usvg's object bounding boxes are measured by a first conversion | Accepted |
+| [0043](./0043-canvas-picture-child.md) | A canvas shows its source on a child node | Accepted |
+| [0044](./0044-every-input-is-untrusted.md) | Every input is untrusted; templates are bounded by a static check at load | Accepted |
 
 Add new records to this index in the same commit that adds the file.

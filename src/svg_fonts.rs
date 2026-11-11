@@ -135,6 +135,26 @@ impl SvgFontSet {
         }
     }
 
+    /// Bevy's default font alone, every family falling back to it: what
+    /// the fuzz harness draws `<text>` with (bug_0221: without a font, text
+    /// drew nothing and its paths were never exercised).
+    #[cfg(feature = "fuzzing")]
+    pub(crate) fn default_font() -> Self {
+        let mut db = fontdb::Database::new();
+        let default = db
+            .load_font_source(fontdb::Source::Binary(Arc::new(
+                bevy::text::DEFAULT_FONT_DATA.to_vec(),
+            )))
+            .first()
+            .copied();
+        Self {
+            generation: 1,
+            db: Arc::new(db),
+            default,
+            ..Self::empty()
+        }
+    }
+
     /// The face for a usvg font request: the first family in its list the
     /// set knows, with CSS's weight/style fallback, else the default font.
     pub(crate) fn select(&self, font: &usvg::Font) -> Option<fontdb::ID> {
@@ -184,6 +204,15 @@ pub(crate) struct Shared {
 }
 
 impl Shared {
+    /// A shared set fixed at `set`.
+    #[cfg(feature = "fuzzing")]
+    pub(crate) fn fixed(set: SvgFontSet) -> Self {
+        Self {
+            current: RwLock::new(Some(Arc::new(set))),
+            text_paths: Mutex::default(),
+        }
+    }
+
     pub(crate) fn current(&self) -> Arc<SvgFontSet> {
         self.current
             .read()
@@ -509,6 +538,67 @@ mod tests {
             glyph_faces(&tree),
             vec![desktop[0].unwrap(), set.default.unwrap()]
         );
+    }
+
+    /// Text draws as one path per glyph with the text's paint, so the cost
+    /// estimate walks its outlines like paths: a pattern on text is
+    /// charged its tile (bug_0204: the estimate skipped it and the draw
+    /// aborted on a 4 TB allocation), and every glyph its area (bug_0206:
+    /// 800 glyphs drew for 0.7 s at the estimate of one).
+    #[test]
+    fn text_counts_toward_the_cost() {
+        use crate::svg::{Limits, MAX_SVG_COST, estimate_cost};
+        let (app, _) = app_with_families();
+        let fonts = app.world().resource::<crate::svg::SvgFonts>().clone();
+        let svg = |width: u32, body: &str| {
+            format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{width}">{body}</svg>"#
+            )
+        };
+        let many = |count: usize| {
+            let glyphs: String = (0..count).map(|_| "<tspan x='0'>M</tspan>").collect();
+            svg(
+                4096,
+                &format!("<text y='3000' font-size='3000'>{glyphs}</text>"),
+            )
+        };
+        let refused = [
+            svg(
+                64,
+                "<pattern id='p' width='1e4' height='1e4' patternUnits='userSpaceOnUse'>\
+                 <rect width='1' height='1'/></pattern>\
+                 <text y='8' font-size='8' fill='url(#p)' transform='scale(100)'>A</text>",
+            ),
+            many(800),
+        ];
+        for source in &refused {
+            let tree = crate::svg::parse_with(source.as_bytes(), &fonts).unwrap();
+            let width = tree.size().width() as u32;
+            // Checked before drawing: without the charge the first document
+            // aborts the test process.
+            let estimate = estimate_cost(&tree, width, width, MAX_SVG_COST);
+            assert!(estimate > MAX_SVG_COST, "{source}: {estimate}");
+            let result = crate::svg::draw(&tree, width, width, Limits::DEFAULT);
+            assert!(
+                matches!(result, Err(crate::svg::SvgError::TooExpensive { .. })),
+                "{source}"
+            );
+        }
+        for source in [
+            many(1),
+            svg(64, "<text y='40' font-size='16' fill='gold'>Gold</text>"),
+            svg(
+                64,
+                "<pattern id='p' width='4' height='4' patternUnits='userSpaceOnUse'>\
+                 <rect width='2' height='2'/></pattern>\
+                 <text y='40' font-size='32' fill='url(#p)'>A</text>",
+            ),
+        ] {
+            let tree = crate::svg::parse_with(source.as_bytes(), &fonts).unwrap();
+            let width = tree.size().width() as u32;
+            let result = crate::svg::draw(&tree, width, width, Limits::DEFAULT);
+            assert!(result.is_ok(), "{source}: {:?}", result.err());
+        }
     }
 
     #[test]

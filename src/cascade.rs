@@ -7131,6 +7131,10 @@ mod tests {
             "p:not(.a ~ p)",
             "p:not(:not(.a))",
             "p:not(:is(:not(.a)))",
+            // A combinator inside a second level of arguments (bug_0213).
+            ":is(:is(.a div) div) p",
+            ":is(.x, :where(.a > div)) p",
+            "p:not(:is(.a .b))",
             "p[href]",
             "p::before",
             ":root",
@@ -7144,6 +7148,10 @@ mod tests {
             ":where(.a) > p",
             "p:not(.a, .b)",
             "p:not(.a .b)",
+            // One level of combinators, and nested lists of compounds.
+            ":is(.a div) :is(.b div) :where(.c > div) p",
+            ":is(.a, :where(.b, .c)) p",
+            "p:not(:is(.a, .b))",
             "li:only-child",
             "li:only-of-type",
             "li:nth-last-child(2n)",
@@ -7170,6 +7178,40 @@ mod tests {
             &ElementState::default(),
         );
         assert_eq!(style.color, None);
+    }
+
+    /// What the allowlist still admits matches in time linear in the
+    /// depth times the compounds: bug_0213's document (95 nested `<div>`s)
+    /// under six compounds with one level of `:is()` each, where nesting
+    /// them six deep took two minutes. Scaling, not wall time: the deep
+    /// document against a quarter as deep, best of three, at most 8× for
+    /// 4× the depth (depth² would be 16×).
+    #[test]
+    fn allowed_is_arguments_match_in_linear_time() {
+        let selector = format!("{}p", ":is(.never div) div ".repeat(6));
+        assert!(Selector::parse(&selector).is_some(), "admitted");
+        let sheet = owned_sheet(&format!("{selector} {{ color: #ff0000 }}"));
+        let time = |depth: usize| {
+            let chain: Vec<Ancestor> = (0..depth).map(|_| ancestor("div", &[])).collect();
+            (0..3)
+                .map(|_| {
+                    let styles = HtmlStyles::from_sheet(&sheet);
+                    let start = std::time::Instant::now();
+                    for _ in 0..20 {
+                        let _ = styles.get(
+                            &element("p", None, &[]),
+                            Pseudo::default(),
+                            &chain,
+                            &ElementState::default(),
+                        );
+                    }
+                    start.elapsed()
+                })
+                .min()
+                .unwrap()
+        };
+        let (short, long) = (time(24), time(96));
+        assert!(long <= short * 8, "{long:?} for 4× the depth of {short:?}");
     }
 
     /// ADR 0029's reactivity record through ADR 0034's new arguments: a

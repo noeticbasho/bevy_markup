@@ -30,7 +30,7 @@ exclude = [
 system_fonts = ["bevy/system_font_discovery"]
 # Exposes `bevy_markup::fuzz` (`#[doc(hidden)]`, not covered by semver): internal
 # glue callable without a full Bevy app, for `fuzz/` targets.
-fuzzing = ["dep:wgpu-types", "svg"]
+fuzzing = ["dep:wgpu-types", "svg-text"]
 # Dev/QA only: serves the examples over localhost BRP + MCP
 # (bevy_mcp_harness), so an agent can playtest them — `game/screenshot`
 # (the examples' README screenshots), `game/ui`, input mocks. Never enabled
@@ -83,6 +83,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # HTML: Tera templating, then tl parsing.
 tera = { version = "2.4.0", features = ["fast"] }
+# The load-time template safety check (`tera_check`, ADR 0044): a port of
+# Tera's lexer, since Tera's parser is private.
+nom = "8.0.0"
 # astral-tl: astral-sh's maintained tl fork (same `tl` crate name). tl 0.7.8 drops the first
 # character of the attribute after a value-less one (`autofocus data-on-click` →
 # `ata-on-click`); see docs/agents/bugs/bug_0019.md and UPSTREAM.md.

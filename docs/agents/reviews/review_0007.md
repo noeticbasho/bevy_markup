@@ -11,7 +11,8 @@
 | Discovery agent | Claude Code session, `claude-fable-5-2` |
 | Machine | Arch Linux (kernel 7.2.14), AMD Ryzen 7 9800X3D, rustc 1.98.1 |
 
-Nothing is fixed in this session; no code changed.
+Nothing was fixed in the review session; no code changed. The fix session
+the same day (uncommitted) fixed K01–K17 (see Filed).
 
 ## Coverage — read this first
 
@@ -83,7 +84,7 @@ of a probe file I had left in `src/`. The lint works (but see K16).
 
 ### SVG
 
-**K01 · high · A pattern painted on SVG text aborts the process** (`svg-text`) [probe]
+**K01 · high · A pattern painted on SVG text aborts the process** (`svg-text`) [probe] — bug_0204 — **fixed**
 - `CostWalk::node` charges a text node `NODE_COST` and stops
   (`usvg::Node::Text(_) => self.add(NODE_COST)`, `svg.rs:1690`). resvg
   draws the node's flattened group: one path per glyph, with the text's
@@ -109,7 +110,7 @@ of a probe file I had left in `src/`. The lint works (but see K16).
 - **Fix direction:** walk `text.flattened()` in `CostWalk` as `ExtentWalk`
   does (that also fixes K04).
 
-**K02 · medium (DoS) · Dashed strokes cost about 1 000 times their estimate** [probe]
+**K02 · medium (DoS) · Dashed strokes cost about 1 000 times their estimate** [probe] — bug_0205 — **fixed**
 - The estimate charges a path its segments and its bounding box once per
   paint. `stroke-dasharray` appears nowhere in `src/`. tiny-skia dashes
   at draw time, up to 1 000 000 dashes per contour (`dash.rs`
@@ -134,7 +135,7 @@ of a probe file I had left in `src/`. The lint works (but see K16).
   contour (the length from the path's bounds is an upper bound per
   segment), or refuse dash intervals below a fraction of a pixel.
 
-**K03 · medium (DoS) · Glyph outlines aren't in the cost estimate** (`svg-text`) [probe]
+**K03 · medium (DoS) · Glyph outlines aren't in the cost estimate** (`svg-text`) [probe] — bug_0206 — **fixed**
 - The cause is K01's. Without a pattern, the drawing is merely unbounded.
 - **Probe** (release; a 4096 × 4096 document, one `<text font-size='3000'>`
   of N `M`s, each placed at `x='0'`):
@@ -152,7 +153,7 @@ of a probe file I had left in `src/`. The lint works (but see K16).
   `SvgFonts::default()` (no fonts, text draws nothing), and `fuzzing`
   doesn't imply `svg-text` (K16).
 
-**K04 · medium (DoS) · `<style>` rules × elements is quadratic, and outside every budget** [probe]
+**K04 · medium (DoS) · `<style>` rules × elements is quadratic, and outside every budget** [probe] — bug_0207 — **fixed**
 - `Graph::new` matches every kept rule against every element
   (`svg_bounds.rs:387`). usvg's `resolve_css` does the same, and
   `svg_boxes::open` a third time when the document has a filter, mask or
@@ -172,7 +173,7 @@ of a probe file I had left in `src/`. The lint works (but see K16).
 - **Fix direction:** add rules × elements to `Bounds::work` (it is known
   before the loop runs), or cap the product.
 
-**K05 · medium · A refused inline `<svg>` is parsed again on every build, on the main thread** [probe]
+**K05 · medium · A refused inline `<svg>` is parsed again on every build, on the main thread** [probe] — bug_0208 — **fixed**
 - `InlineSvgs::image` inserts a cache entry only on success. Each early
   `return None` (a parse error, `TooExpensive`, a failed draw:
   `svg.rs:857-884`) leaves nothing behind, so the next build converts the
@@ -198,7 +199,7 @@ of a probe file I had left in `src/`. The lint works (but see K16).
   like a success); send a document whose `Bounds::work` is over a small
   threshold to the task, as large text already goes.
 
-**K06 · medium (DoS) · Nothing bounds the rasters' sum** [probe]
+**K06 · medium (DoS) · Nothing bounds the rasters' sum** [probe] — bug_0209 — **fixed**
 - `MAX_SVG_SIDE` and `MAX_SVG_COST` bound one drawing. `SvgRasters` keeps
   one per (document, displayed size) in use, and `InlineSvgs` one per
   distinct text for 120 frames. A page chooses how many.
@@ -218,7 +219,7 @@ of a probe file I had left in `src/`. The lint works (but see K16).
   cache; past it, a span keeps its 1× image (it's what a non-SVG image
   gets).
 
-**K07 · low · The word `color` in any attribute value turns `currentColor` off** [probe]
+**K07 · low · The word `color` in any attribute value turns `currentColor` off** [probe] — bug_0210 — **fixed**
 - `prepare_inline`'s `has` splits the start tag on whitespace and
   compares each piece up to `=` (`svg.rs:800-804`). A quoted value with
   spaces splits too, and a bare word in its middle reads as an attribute.
@@ -236,7 +237,7 @@ of a probe file I had left in `src/`. The lint works (but see K16).
 - **Fix direction:** read the attributes with a scan that knows quotes
   (`normalize_self_closing` has one).
 
-**K08 · low (perf) · Idle frames cost O(spans × distinct inline documents)** [probe]
+**K08 · low (perf) · Idle frames cost O(spans × distinct inline documents)** [probe] — bug_0211 — **fixed**
 - `rasterize_svg_images` asks `InlineSvgs::document_of` for every inline
   span every frame, before it looks at the span's `SvgRaster`; that locks
   the cache and scans all its entries (`svg.rs:925-935`, `:1182`).
@@ -257,7 +258,7 @@ of a probe file I had left in `src/`. The lint works (but see K16).
 - **Fix direction:** a second map, image id → document; skip the lookup
   when the span's `SvgRaster::source` is still its image.
 
-**K09 · low · A draw in flight outlives its document's reload** [code]
+**K09 · low · A draw in flight outlives its document's reload** [code] — bug_0212 — **fixed**
 - On `AssetEvent::Modified` `rasterize_svg_images` drops the document's
   `ready` and `refused` entries but not `drawing`
   (`svg.rs:1140-1143`). A task started on the old tree finishes into
@@ -266,7 +267,7 @@ of a probe file I had left in `src/`. The lint works (but see K16).
 
 ### Selectors
 
-**K10 · high (DoS) · Nested `:is()` with descendant combinators costs depth^levels** [probe]
+**K10 · high (DoS) · Nested `:is()` with descendant combinators costs depth^levels** [probe] — bug_0213 — **fixed**
 - parcel's matcher is linear for a plain descendant chain: a failed
   walk to the root returns `NotMatchedGlobally` and ends the match. An
   `:is()` argument is matched by a call of its own, whose failure is
@@ -299,7 +300,7 @@ of a probe file I had left in `src/`. The lint works (but see K16).
 
 ### Images
 
-**K11 · medium · `%` image sizes are wrong at any scale factor but 1** [probe]
+**K11 · medium · `%` image sizes are wrong at any scale factor but 1** [probe] — bug_0214 — **fixed**
 - `size_images` resolves a percentage against `block.size` minus the
   insets: `ComputedNode`'s **physical** pixels. The result goes into
   `InlineBox::size` and `InlineImage::width`/`height`, which are
@@ -321,7 +322,7 @@ of a probe file I had left in `src/`. The lint works (but see K16).
 
 ### `<canvas>`
 
-**K12 · medium · A canvas with a CSS frame or background loses its picture, or its frame** [probe]
+**K12 · medium · A canvas with a CSS frame or background loses its picture, or its frame** [probe] — bug_0215 — **fixed**
 - An image canvas is an `ImageNode` on the element (`CanvasImage`). CSS
   `border-image`/`background-image` is an `ImageNode` on the same element
   (`CssFrame`). `sync_canvases` overwrites the frame when it binds;
@@ -344,7 +345,7 @@ of a probe file I had left in `src/`. The lint works (but see K16).
   (the frame stays on the element), or document that a canvas takes no
   CSS image and drop the declaration with a warning.
 
-**K13 · medium · Hiding a camera's only canvas resizes its image to 1 × 1** [probe]
+**K13 · medium · Hiding a camera's only canvas resizes its image to 1 × 1** [probe] — bug_0216 — **fixed**
 - With no visible canvas, the first one in document order still owns
   the camera (`.unwrap_or(&list[0])`, `canvas.rs:282`) and keeps its
   `ViewportNode`. `display: none` lays it out at 0 × 0, and Bevy's
@@ -359,7 +360,7 @@ of a probe file I had left in `src/`. The lint works (but see K16).
 - **Fix direction:** an invisible canvas owns nothing (`camera: None`
   while no candidate is visible).
 
-**K14 · low · An oversized canvas keeps the camera from one that fits** [probe]
+**K14 · low · An oversized canvas keeps the camera from one that fits** [probe] — bug_0217 — **fixed**
 - The size gate runs after the owner is chosen. A canvas over
   `MAX_CANVAS_SIDE` that comes first in the document is the owner and
   shows nothing; a fitting canvas of the same camera shows the image
@@ -369,7 +370,7 @@ of a probe file I had left in `src/`. The lint works (but see K16).
   shows `Nothing`, the second `Image`, the image stays 8 × 8.
 - **Fix direction:** leave oversized canvases out of the candidates.
 
-**K15 · low · A camera whose target image isn't in `Assets<Image>` panics in Bevy** [probe]
+**K15 · low · A camera whose target image isn't in `Assets<Image>` panics in Bevy** [probe] — bug_0218 — **fixed; its two smaller notes bug_0219, fixed**
 - Bevy's resize ends in `images.get_mut(image_handle).unwrap()`
   (`bevy_ui` `viewport.rs:188`). `sync_canvases` gates the size but not
   the image's presence.
@@ -386,7 +387,7 @@ of a probe file I had left in `src/`. The lint works (but see K16).
 
 ### Templates
 
-**K16 · low · The limits don't say what they defend; template output has none** [probe]/[code]
+**K16 · low · The limits don't say what they defend; template output has none** [probe]/[code] — bug_0220 — **fixed** (ADR 0044)
 - Tera caps component recursion (20) and `range` (100 000), not output:
   two nested loops over `range` in 92 bytes render n² characters.
   Probed linear in the output (1 200² = 1.44 MB: 62 ms to settle), so
@@ -403,7 +404,7 @@ of a probe file I had left in `src/`. The lint works (but see K16).
 
 ### Tests and records
 
-**K17 · low (tests) · Gaps in the guards** [code]
+**K17 · low (tests) · Gaps in the guards** [code] — bug_0221 — **fixed**
 - `tests/source_lint.rs` reads `src/*.rs` with `read_dir`, not
   recursively: `src/cascade/selector.rs` is never linted. A debug print
   or a file write there passes (review_0004 H05's class).
@@ -484,3 +485,12 @@ K07 bug_0210, K08 bug_0211, K09 bug_0212, K10 bug_0213, K11 bug_0214,
 K12 bug_0215, K13 bug_0216, K14 bug_0217, K15 bug_0218 (+ bug_0219 for
 its two smaller notes; UPSTREAM U38), K16 bug_0220, K17 bug_0221. K18
 is records drift, not a defect.
+
+Fixed the same day (uncommitted; each regression test failed with its
+fix reverted): K01–K05, K07–K09, K11–K15, K17, as each bug report
+describes. K12 took the first direction (the picture on a
+`CanvasPicture` child; the frame stays on the element, ADR 0043). K08
+has no test for its speed; it was measured with the probe above. K16's
+decision: every input is untrusted (ADR 0044); K10 restricts combinators
+to one level of `:is()` & co, K06 adds `MAX_SVG_RASTER_BYTES`, and
+templates are bounded by a static check at load (`src/tera_check/`).

@@ -107,7 +107,10 @@
 //!   compose: `{% extends %}` and `{% include %}` take paths relative to the
 //!   template's file, and an included file's `{% component %}`s are usable
 //!   in the whole template (`{{ <ui.button … /> }}`) — include a component
-//!   library to share widgets.
+//!   library to share widgets. Templates are untrusted input: each is
+//!   checked once at load ([`tera_check`]) and refused when its own loops,
+//!   values or copies of context data could pass the limits; loops over
+//!   your context data count once per element.
 //! - **Markdown** ([`template`](mod@template)): a `.md`/`.markdown` template is
 //!   the same Tera machinery; its Markdown converts to HTML once, at asset
 //!   load (CommonMark + tables, strikethrough, task lists, footnotes),
@@ -264,6 +267,7 @@ mod svg_boxes;
 #[cfg(feature = "svg-text")]
 mod svg_fonts;
 pub mod template;
+pub mod tera_check;
 pub mod tooltips;
 
 /// Dependencies whose types appear in this crate's API.
@@ -275,7 +279,7 @@ pub mod prelude {
         AnchorPlacement, AnchoredSide, HtmlAnchor, HtmlWorldAnchor, HtmlWorldAnchorView,
     };
     pub use crate::canvas::{
-        CanvasShowing, CanvasSource, HtmlCanvas, HtmlCanvases, MAX_CANVAS_SIDE,
+        CanvasPicture, CanvasShowing, CanvasSource, HtmlCanvas, HtmlCanvases, MAX_CANVAS_SIDE,
     };
     pub use crate::custom_elements::{ElementConnected, HtmlCustomElementsExt};
     pub use crate::focus::{

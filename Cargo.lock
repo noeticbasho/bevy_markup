@@ -1410,6 +1410,7 @@ dependencies = [
  "icu_casemap",
  "icu_segmenter",
  "lightningcss",
+ "nom",
  "parcel_selectors",
  "proptest",
  "proptest-stateful",

@@ -205,14 +205,21 @@ pub(crate) fn mark_canvas(
     }
 }
 
-/// The marker on an [`ImageNode`] this module inserted (an app's own stays
-/// app state).
+/// A canvas's picture: the child node showing its source (bug_0215).
 #[derive(Component)]
-pub(crate) struct CanvasImage;
+pub struct CanvasPicture;
 
 /// Binds every canvas to its source; runs after layout, before Bevy resizes
 /// viewport targets (`update_viewport_render_target_size`), so an oversized
 /// box never reaches the resize.
+///
+/// The source shows on a [`CanvasPicture`] child filling the canvas's
+/// padding box, never on the element itself: the element keeps its CSS
+/// `border-image`/`background-image` (bug_0215: both were an `ImageNode` on
+/// the element, and each update or bind replaced the other). Updates keep
+/// the child as they keep app-nested UIs. A camera's viewport goes on the
+/// picture once it's laid out (a zero size would resize the camera's image
+/// to 1 × 1).
 #[allow(clippy::type_complexity)]
 pub(crate) fn sync_canvases(
     mut commands: Commands,
@@ -223,10 +230,14 @@ pub(crate) fn sync_canvases(
         &mut HtmlCanvas,
         &ComputedNode,
         Option<&InheritedVisibility>,
-        Option<&ViewportNode>,
-        Has<CanvasImage>,
+        Option<&Children>,
     )>,
+    pictures: Query<
+        (&ComputedNode, Option<&ViewportNode>, Option<&ImageNode>),
+        With<CanvasPicture>,
+    >,
     targets: Query<&RenderTarget>,
+    images: Res<Assets<Image>>,
     parents: Query<&ChildOf>,
     children: Query<&Children>,
     mut warned: Local<HashSet<Entity>>,
@@ -239,14 +250,21 @@ pub(crate) fn sync_canvases(
         source: Option<CanvasSource>,
         size: Vec2,
         visible: bool,
-        /// The camera its viewport shows now.
+        /// Within [`MAX_CANVAS_SIDE`] on both sides.
+        fits: bool,
+        picture: Option<Entity>,
+        /// The camera its picture's viewport shows now.
         viewing: Option<Entity>,
     }
     let found: Vec<Found> = canvases
         .iter()
-        .map(|(entity, element, _, computed, visibility, viewport, _)| {
+        .map(|(entity, element, _, computed, visibility, kids)| {
             let name = element.data("canvas").map(str::to_owned);
             let size = computed.size();
+            let picture = kids
+                .into_iter()
+                .flat_map(|kids| kids.iter())
+                .find(|kid| pictures.contains(*kid));
             Found {
                 source: name.as_deref().and_then(|name| registry.get(name)).cloned(),
                 name,
@@ -254,39 +272,44 @@ pub(crate) fn sync_canvases(
                 visible: visibility.is_none_or(|visibility| visibility.get())
                     && size.x > 0.0
                     && size.y > 0.0,
-                viewing: viewport.and_then(|viewport| viewport.camera),
+                fits: size.x <= MAX_CANVAS_SIDE && size.y <= MAX_CANVAS_SIDE,
+                viewing: picture
+                    .and_then(|picture| pictures.get(picture).ok())
+                    .and_then(|(_, viewport, _)| viewport?.camera),
+                picture,
                 entity,
             }
         })
         .collect();
 
-    // One viewport per camera: the canvas that has it while it's visible,
-    // else the first visible one in document order, else the first.
+    // One viewport per camera: the canvas that has it while it's visible
+    // and fits, else the first such one in document order, else none — an
+    // invisible canvas owns nothing (bug_0216: a hidden canvas laid out at
+    // 0 × 0 resized the camera's image to 1 × 1) and neither does an
+    // oversized one (bug_0217: it kept the camera from one that fits).
     let mut candidates: HashMap<Entity, Vec<&Found>> = HashMap::new();
     for canvas in &found {
-        if let Some(CanvasSource::Camera(camera)) = canvas.source {
+        if let Some(CanvasSource::Camera(camera)) = canvas.source
+            && canvas.visible
+            && canvas.fits
+        {
             candidates.entry(camera).or_default().push(canvas);
         }
     }
     let mut owners: HashMap<Entity, Entity> = HashMap::new();
     for (camera, mut list) in candidates {
-        let owner = match list
-            .iter()
-            .find(|canvas| canvas.visible && canvas.viewing == Some(camera))
-        {
+        let owner = match list.iter().find(|canvas| canvas.viewing == Some(camera)) {
             Some(current) => current.entity,
             None => {
                 list.sort_by_cached_key(|canvas| document_path(canvas.entity, &parents, &children));
-                list.iter()
-                    .find(|canvas| canvas.visible)
-                    .unwrap_or(&list[0])
-                    .entity
+                list[0].entity
             }
         };
         owners.insert(camera, owner);
     }
 
     let mut shown = HashSet::new();
+    let mut missing = HashSet::new();
     for canvas in found {
         if canvas.visible
             && let Some(name) = &canvas.name
@@ -295,78 +318,135 @@ pub(crate) fn sync_canvases(
         }
         if canvas.source.is_none()
             && let Some(name) = &canvas.name
-            && unregistered.insert(name.clone())
         {
-            debug!("html canvas: no source registered as {name:?}; the canvas stays empty");
+            missing.insert(name.clone());
+            if unregistered.insert(name.clone()) {
+                debug!("html canvas: no source registered as {name:?}; the canvas stays empty");
+            }
         }
+        let target = |camera: Entity| targets.get(camera).ok().and_then(RenderTarget::as_image);
         let showing = match canvas.source {
             None => CanvasShowing::Nothing,
             Some(CanvasSource::Image(image)) => CanvasShowing::Image(image),
+            Some(CanvasSource::Camera(_)) if !canvas.fits => {
+                if canvas.visible && warned.insert(canvas.entity) {
+                    warn!(
+                        "html canvas {:?}: {}×{} px is larger than {MAX_CANVAS_SIDE} px on a \
+                         side; the camera isn't shown",
+                        canvas.name.as_deref().unwrap_or(""),
+                        canvas.size.x,
+                        canvas.size.y,
+                    );
+                }
+                CanvasShowing::Nothing
+            }
             Some(CanvasSource::Camera(camera)) if owners.get(&camera) != Some(&canvas.entity) => {
-                match targets.get(camera).ok().and_then(RenderTarget::as_image) {
+                match target(camera) {
                     Some(image) => CanvasShowing::Image(image.clone()),
                     None => CanvasShowing::Nothing,
                 }
             }
-            Some(CanvasSource::Camera(camera)) => {
-                let size = canvas.size;
-                if size.x > MAX_CANVAS_SIDE || size.y > MAX_CANVAS_SIDE {
-                    if warned.insert(canvas.entity) {
-                        warn!(
-                            "html canvas {:?}: {}×{} px is larger than {MAX_CANVAS_SIDE} px on a \
-                             side; the camera isn't shown",
-                            canvas.name.as_deref().unwrap_or(""),
-                            size.x,
-                            size.y,
-                        );
-                    }
-                    CanvasShowing::Nothing
-                } else {
-                    warned.remove(&canvas.entity);
-                    CanvasShowing::Viewport(camera)
-                }
-            }
+            // Bevy's resize unwraps the target image (UPSTREAM U38,
+            // bug_0218): a camera whose image isn't in the assets yet (or
+            // anymore) isn't bound.
+            Some(CanvasSource::Camera(camera)) => match target(camera) {
+                Some(image) if images.contains(image) => CanvasShowing::Viewport(camera),
+                _ => CanvasShowing::Nothing,
+            },
         };
+        if canvas.fits {
+            warned.remove(&canvas.entity);
+        }
 
-        let Ok((entity, _, mut current, _, _, viewport, has_image)) =
-            canvases.get_mut(canvas.entity)
-        else {
-            continue;
-        };
-        let mut entity_commands = commands.entity(entity);
-        let wanted = match showing {
-            CanvasShowing::Viewport(camera) => Some(camera),
-            _ => None,
-        };
-        match viewport {
-            Some(viewport) if viewport.camera != wanted => {
-                entity_commands.try_insert(ViewportNode { camera: wanted });
-            }
-            None if wanted.is_some() => {
-                entity_commands.try_insert(ViewportNode { camera: wanted });
-            }
-            _ => {}
+        bind(
+            &mut commands,
+            &canvas.entity,
+            canvas.picture,
+            &showing,
+            &pictures,
+        );
+        if let Ok((.., mut current, _, _, _)) = canvases.get_mut(canvas.entity) {
+            current.set_if_neq(HtmlCanvas {
+                name: canvas.name,
+                showing,
+            });
         }
-        match &showing {
-            CanvasShowing::Image(image) if current.showing != showing || !has_image => {
-                entity_commands.try_insert((
-                    ImageNode::new(image.clone()).with_mode(NodeImageMode::Stretch),
-                    CanvasImage,
-                ));
-            }
-            CanvasShowing::Image(_) => {}
-            _ if has_image => {
-                entity_commands.try_remove::<(ImageNode, CanvasImage)>();
-            }
-            _ => {}
-        }
-        current.set_if_neq(HtmlCanvas {
-            name: canvas.name,
-            showing,
-        });
     }
+    // Forget despawned canvases and names that came back or went.
+    warned.retain(|entity| canvases.contains(*entity));
+    unregistered.retain(|name| missing.contains(name));
     if registry.shown != shown {
         registry.bypass_change_detection().shown = shown;
+    }
+}
+
+/// Puts what `showing` asks for on `canvas`'s picture, spawning it or
+/// despawning it as needed.
+fn bind(
+    commands: &mut Commands,
+    canvas: &Entity,
+    picture: Option<Entity>,
+    showing: &CanvasShowing,
+    pictures: &Query<
+        (&ComputedNode, Option<&ViewportNode>, Option<&ImageNode>),
+        With<CanvasPicture>,
+    >,
+) {
+    let picture = match (showing, picture) {
+        (CanvasShowing::Nothing, Some(picture)) => {
+            commands.entity(picture).try_despawn();
+            return;
+        }
+        (CanvasShowing::Nothing, None) => return,
+        (_, Some(picture)) => picture,
+        (_, None) => {
+            // Laid out from the next frame: a viewport waits until then.
+            let picture = commands
+                .spawn((
+                    CanvasPicture,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(0.0),
+                        top: Val::Px(0.0),
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        ..default()
+                    },
+                    ChildOf(*canvas),
+                ))
+                .id();
+            if let CanvasShowing::Image(image) = showing {
+                commands
+                    .entity(picture)
+                    .insert(ImageNode::new(image.clone()).with_mode(NodeImageMode::Stretch));
+            }
+            return;
+        }
+    };
+    let Ok((computed, viewport, image_node)) = pictures.get(picture) else {
+        return;
+    };
+    let mut entity = commands.entity(picture);
+    match showing {
+        CanvasShowing::Viewport(camera) => {
+            let size = computed.size();
+            let wanted = (size.x > 0.0 && size.y > 0.0).then_some(*camera);
+            if viewport.map(|viewport| viewport.camera) != Some(wanted) {
+                entity.try_insert(ViewportNode { camera: wanted });
+            }
+            if image_node.is_some() {
+                entity.try_remove::<ImageNode>();
+            }
+        }
+        CanvasShowing::Image(image) => {
+            if viewport.is_some() {
+                entity.try_remove::<ViewportNode>();
+            }
+            if image_node.is_none_or(|node| node.image != *image) {
+                entity.try_insert(ImageNode::new(image.clone()).with_mode(NodeImageMode::Stretch));
+            }
+        }
+        CanvasShowing::Nothing => {}
     }
 }
 

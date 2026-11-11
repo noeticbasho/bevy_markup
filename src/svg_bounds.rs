@@ -17,7 +17,8 @@
 //! the number of paths to it from the root, each edge weighted by how many
 //! times it instantiates its target. The work is that count times the
 //! element's own cost (its conversion, its path segments and its text),
-//! summed. It over-approximates (a cached gradient counts per use, an
+//! summed, plus the `<style>` matching: every rule against every element
+//! (bug_0207). It over-approximates (a cached gradient counts per use, an
 //! inherited `fill` counts even where the shape overrides it) and never
 //! misses a reference usvg follows.
 
@@ -59,6 +60,12 @@ const SEGMENT_WORK: u64 = 4;
 /// of all its cubics, then hands them out with `Vec::remove(0)`, each
 /// moving the rest (UPSTREAM U22): ~0.18 ns per square, a fifth of this.
 const ARC_SQUARE_WORK: f64 = 1.0 / 64.0;
+/// `<style>` rule × element pairs per unit of work: usvg matches every
+/// rule against every element (`resolve_css`), the model does once more
+/// before it, and [`svg_boxes`](crate::svg_boxes) a third time when the
+/// document has boxes — ~9 ns a pair over the three in release
+/// (bug_0207); a quarter unit is ~15 ns.
+const RULE_MATCHES_PER_WORK: u64 = 4;
 /// Work of one gradient stop instance (~2 ns in release when an inherited
 /// gradient's stops are copied per shape; one unit, generously).
 const STOP_WORK: u64 = 1;
@@ -105,12 +112,14 @@ pub(crate) struct Bounds {
 pub(crate) fn bounds(
     document: &roxmltree::Document,
     max_references: usize,
+    max_work: u64,
 ) -> Result<Bounds, SvgError> {
     check_values(document)?;
-    let mut graph = Graph::new(document, max_references)?;
+    let mut graph = Graph::new(document, max_references, max_work)?;
     let order = graph.order().ok_or(SvgError::ReferenceCycle)?;
     graph.inherit(&order, max_references)?;
     let mut bounds = graph.measure()?;
+    bounds.work = bounds.work.saturating_add(graph.rule_work);
     bounds.boxes = graph.boxes;
     bounds.regions = graph.regions;
     Ok(bounds)
@@ -293,12 +302,15 @@ struct Graph<'a, 'input> {
     boxes: bool,
     /// [`Bounds::regions`], filled by [`Graph::inherit`].
     regions: f64,
+    /// The `<style>` matching's work: rules × elements.
+    rule_work: u64,
 }
 
 impl<'a, 'input> Graph<'a, 'input> {
     fn new(
         document: &'a roxmltree::Document<'input>,
         max_references: usize,
+        max_work: u64,
     ) -> Result<Self, SvgError> {
         let elements: Vec<roxmltree::Node> = document
             .descendants()
@@ -336,6 +348,17 @@ impl<'a, 'input> Graph<'a, 'input> {
                 sheet.parse_more(text);
             }
         }
+        // Every rule is matched against every element, three times over,
+        // whether it attaches anything or not: refused before this pass
+        // runs when that alone is over the budget (bug_0207).
+        let rule_work = (sheet.rules.len() as u64).saturating_mul(elements.len() as u64)
+            / RULE_MATCHES_PER_WORK;
+        if rule_work > max_work {
+            return Err(SvgError::TooLarge {
+                work: rule_work,
+                max: max_work,
+            });
+        }
         let filter_rule = sheet.rules.iter().any(|rule| {
             rule.declarations
                 .iter()
@@ -368,6 +391,7 @@ impl<'a, 'input> Graph<'a, 'input> {
                     matches!(element.tag_name().name(), "filter" | "mask" | "pattern")
                 }),
             regions: 2.0,
+            rule_work,
             edge_count: 0,
             kinds,
             elements,

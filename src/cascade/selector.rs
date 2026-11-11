@@ -99,7 +99,7 @@ impl Selector {
                 subject = false;
                 continue;
             }
-            let part = compound_part(component, false)?;
+            let part = compound_part(component, false, 0)?;
             reads.dataset |= part.attributes;
             if part.structural {
                 if subject {
@@ -271,7 +271,9 @@ impl PartReads {
 /// (`NthOf`, `Has`, `Nesting`, `:nth-col()`) away from it. `negated`:
 /// inside a `:not()`, which may not hold another (ADR 0029's reactivity
 /// record answers by negation parity, and parcel tracks one level).
-fn compound_part(component: &Component<'static>, negated: bool) -> Option<PartReads> {
+/// `depth`: how many `:is()`/`:where()`/`:not()` arguments hold the
+/// component (0 at the selector's top level).
+fn compound_part(component: &Component<'static>, negated: bool, depth: u32) -> Option<PartReads> {
     let reads = |attributes, structural, pseudo| PartReads {
         attributes,
         structural,
@@ -311,16 +313,22 @@ fn compound_part(component: &Component<'static>, negated: bool) -> Option<PartRe
             _ => return None,
         },
         Component::Empty => reads(false, true, false),
-        Component::Negation(list) if !negated => nested(list, true)?,
-        Component::Is(list) | Component::Where(list) => nested(list, negated)?,
+        Component::Negation(list) if !negated => nested(list, true, depth + 1)?,
+        Component::Is(list) | Component::Where(list) => nested(list, negated, depth + 1)?,
         _ => return None,
     })
 }
 
 /// The selectors of a `:not()`/`:is()`/`:where()` argument: descendant and
 /// child combinators only (a sibling combinator would need invalidation
-/// the cascade doesn't have, ADR 0034).
-fn nested(list: &[Parsed], negated: bool) -> Option<PartReads> {
+/// the cascade doesn't have, ADR 0034), and only in an argument at the
+/// first level (`depth` 1). parcel matches an argument by a call of its
+/// own whose failure is local, so the enclosing walk calls it again at
+/// every ancestor: an argument with a combinator inside another costs
+/// depth^levels (bug_0213: six levels of `:is(… div) div`, 104 bytes of
+/// CSS over 95 nested `<div>`s, took two minutes). Nested lists of
+/// compounds (`:is(.a, :not(.b))`) stay free.
+fn nested(list: &[Parsed], negated: bool, depth: u32) -> Option<PartReads> {
     let mut reads = PartReads::default();
     for selector in list {
         // The argument's own subject compound tests the same element as
@@ -328,12 +336,14 @@ fn nested(list: &[Parsed], negated: bool) -> Option<PartReads> {
         let mut subject = true;
         for part in selector.iter_raw_match_order() {
             match part {
-                Component::Combinator(CssCombinator::Descendant | CssCombinator::Child) => {
+                Component::Combinator(CssCombinator::Descendant | CssCombinator::Child)
+                    if depth == 1 =>
+                {
                     subject = false;
                 }
                 Component::Combinator(_) => return None,
                 part => {
-                    let mut part = compound_part(part, negated)?;
+                    let mut part = compound_part(part, negated, depth)?;
                     if !subject {
                         part.context_structural |= part.structural;
                         part.structural = false;

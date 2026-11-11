@@ -50,6 +50,9 @@ pub fn render_html(source: &str, context_json: &str) -> Result<String, String> {
     let mut tera = crate::template::new_tera();
     tera.add_raw_template(name, source)
         .map_err(|err| err.to_string())?;
+    // The loader's safety check (ADR 0044): only bounded templates render.
+    crate::tera_check::check(name, &[(name.to_owned(), source.to_owned())])
+        .map_err(|err| err.to_string())?;
     let value: serde_json::Value =
         serde_json::from_str(context_json).map_err(|err| err.to_string())?;
     let context = tera::Context::from_serialize(&value).map_err(|err| err.to_string())?;
@@ -67,6 +70,8 @@ pub fn render_html(source: &str, context_json: &str) -> Result<String, String> {
     crate::template::check_tera_operators(md_name, &md_source)?;
     let mut tera = crate::template::new_tera();
     tera.add_raw_template(md_name, &md_source)
+        .map_err(|err| err.to_string())?;
+    crate::tera_check::check(md_name, &[(md_name.to_owned(), md_source.clone())])
         .map_err(|err| err.to_string())?;
     let template = HtmlTemplate {
         tera,
@@ -479,6 +484,12 @@ pub const SVG_FUZZ_WORK: u64 = crate::svg::MAX_SVG_WORK / 16;
 /// and a budget scaled to that area, so one input stays fast; the fuzz
 /// target times the call, and a slow one means the estimate missed a cost.
 /// `Ok` carries the size and the estimate.
+/// The fonts the `svg` harness draws `<text>` with, built once.
+fn svg_fonts() -> &'static crate::svg::SvgFonts {
+    static FONTS: std::sync::OnceLock<crate::svg::SvgFonts> = std::sync::OnceLock::new();
+    FONTS.get_or_init(crate::svg::SvgFonts::default_font)
+}
+
 pub fn svg(source: &[u8]) -> Result<String, String> {
     let side = 256;
     let full = u64::from(crate::svg::MAX_SVG_SIDE).pow(2);
@@ -489,13 +500,17 @@ pub fn svg(source: &[u8]) -> Result<String, String> {
     };
     // The inline-`<svg>` path too (ADR 0038 §4): the same bytes as an
     // element's source text, prepared (namespaces, the cascade color).
+    // `<text>` draws with Bevy's default font (`fuzzing` implies
+    // `svg-text`; bug_0221: without fonts text drew nothing).
+    let fonts = svg_fonts();
     if let Some(prepared) = std::str::from_utf8(source)
         .ok()
         .and_then(|text| crate::svg::prepare_inline(text, Some([255, 0, 0, 255])))
     {
-        let _ = crate::svg::rasterize(prepared.as_bytes(), 1.0, limits);
+        let _ = crate::svg::rasterize_with(prepared.as_bytes(), 1.0, limits, fonts);
     }
-    let raster = crate::svg::rasterize(source, 1.0, limits).map_err(|err| err.to_string())?;
+    let raster =
+        crate::svg::rasterize_with(source, 1.0, limits, fonts).map_err(|err| err.to_string())?;
     Ok(format!(
         "{}x{} cost {}",
         raster.width, raster.height, raster.cost
@@ -567,7 +582,7 @@ pub fn svg_depth(source: &str) -> Result<u32, String> {
     };
     let document =
         roxmltree::Document::parse_with_options(source, options).map_err(|err| err.to_string())?;
-    crate::svg_bounds::bounds(&document, crate::svg_bounds::MAX_REFERENCES)
+    crate::svg_bounds::bounds(&document, crate::svg_bounds::MAX_REFERENCES, u64::MAX)
         .map(|bounds| bounds.depth)
         .map_err(|err| err.to_string())
 }
@@ -580,7 +595,7 @@ pub fn svg_work(source: &str) -> Result<(u32, u64), String> {
     };
     let document =
         roxmltree::Document::parse_with_options(source, options).map_err(|err| err.to_string())?;
-    crate::svg_bounds::bounds(&document, crate::svg_bounds::MAX_REFERENCES)
+    crate::svg_bounds::bounds(&document, crate::svg_bounds::MAX_REFERENCES, u64::MAX)
         .map(|bounds| (bounds.depth, bounds.work))
         .map_err(|err| err.to_string())
 }
@@ -613,6 +628,32 @@ pub fn svg_prepare_inline(raw: &str) -> Option<String> {
 
 #[cfg(test)]
 mod svg_tests {
+    /// The harness draws `<text>` with a font, so the fuzzer reaches text's
+    /// paths (bug_0221): bug_0204's pattern on text is refused, which
+    /// without a font drew nothing and passed.
+    #[test]
+    fn the_harness_draws_text() {
+        let svg = |body: &str| {
+            format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">{body}</svg>"#
+            )
+        };
+        let label = super::svg(svg("<text y='40' font-size='32'>A</text>").as_bytes());
+        assert!(label.is_ok(), "{label:?}");
+        let pattern = super::svg(
+            svg(
+                "<pattern id='p' width='1e4' height='1e4' patternUnits='userSpaceOnUse'>\
+                 <rect width='1' height='1'/></pattern>\
+                 <text y='8' font-size='8' fill='url(#p)' transform='scale(100)'>A</text>",
+            )
+            .as_bytes(),
+        );
+        assert!(
+            pattern.as_ref().is_err_and(|err| err.contains("expensive")),
+            "{pattern:?}"
+        );
+    }
+
     /// The input behind U20 (by `baseFrequency`) still panics in debug
     /// builds with the message `is_known_upstream_debug_panic` excuses. When
     /// upstream fixes it, this fails: drop the excuse. U24's input is

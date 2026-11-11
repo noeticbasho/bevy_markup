@@ -3,7 +3,10 @@
 Bevy 0.20 library: HTML templates (Tera) + Fluent + CSS → Bevy UI, with
 9-slice frames. Dependencies are limited to that; don't add unrelated crates.
 A maintained crate in that domain that replaces code the crate maintains
-is in scope (ADR 0036: `htmlize` replaced the generated entity table).
+is in scope (ADR 0036: `htmlize` replaced the generated entity table),
+and so is `nom` for the template safety check's lexer (ADR 0044). Every
+input — templates, CSS, FTL, SVG, images — is untrusted (ADR 0044): new
+input paths need bounds on work and memory.
 
 - `cargo run --example quickstart` — the API in one small app.
 - `cargo run --example grid` — CSS grid layout (page grid, responsive slots).
@@ -45,7 +48,7 @@ never reach library users. A missing feature shows up in `cargo check --lib`.
 | `SvgLoaderSettings { scale }` | Loader settings (`svg` feature) | `.svg` → `Image` (`svg.rs` `SvgLoader`, ADR 0038): drawn on the CPU at intrinsic size × `scale` (an `<img>` redrawn at its displayed px), ≤ `MAX_SVG_SIDE` per side; refusing `<image href>` resolver, depth and conversion-work bounds before usvg runs (`svg_bounds`: depth ≤ 256, U17; work ≤ `MAX_SVG_WORK`, ADR 0040), render-cost budget (`MAX_SVG_COST`); typed `Image` loads coexist with other crates' `.svg` loaders |
 | `NineSliceFrame(Handle<NineSlice>)` | Component | 9-slice image as a node's border-box background (non-HTML nodes; HTML uses CSS `border-image`) |
 | `HtmlCustomElementsExt::define_html_element(name, system)`, `ElementConnected { entity, root, name, dataset }` | App ext, system input | `is="<name>"` customized built-ins: the system (`In<ElementConnected>`, `data-*` attributes as `dataset`) runs on every spawn of the element, in document order, before `HtmlUiBuilt`; not on restyles |
-| `HtmlCanvases` (`insert`/`remove`/`get`/`shown`), `CanvasSource::{Camera, Image}`, `HtmlCanvas { name, showing }`, `CanvasShowing`, `MAX_CANVAS_SIDE` | Resource, enums, Component, const | ADR 0041: `<canvas data-canvas="name">` shows the source registered under `name` — a camera through Bevy's `ViewportNode` (resized to the box, pointer forwarded into its scene; one canvas per camera: the current owner while visible, else the first visible in document order; the others show its image stretched) or an image (`ImageNode`, stretched, never resized); a camera canvas over `MAX_CANVAS_SIDE` (4096) physical px gets no camera (Bevy's resize is unbounded); `shown(name)` = some canvas with the name visible at a non-zero size (the app's `Camera::is_active` switch); rebinding rebuilds nothing |
+| `HtmlCanvases` (`insert`/`remove`/`get`/`shown`), `CanvasSource::{Camera, Image}`, `HtmlCanvas { name, showing }`, `CanvasShowing`, `CanvasPicture`, `MAX_CANVAS_SIDE` | Resource, enums, Component ×2, const | ADR 0041: `<canvas data-canvas="name">` shows the source registered under `name` on its `CanvasPicture` child (filling the padding box; the element keeps CSS `border-image`/`background-image`, bug_0215) — a camera through Bevy's `ViewportNode` (resized to the box, pointer forwarded into its scene; one canvas per camera: the current owner while visible and within `MAX_CANVAS_SIDE`, else the first such in document order, else none — a hidden canvas never resizes the image, bug_0216/0217; the others show its image stretched; a camera whose target image isn't in `Assets<Image>` isn't bound, U38) or an image (`ImageNode`, stretched, never resized); a camera canvas over `MAX_CANVAS_SIDE` (4096) physical px gets no camera (Bevy's resize is unbounded); `shown(name)` = some canvas with the name visible at a non-zero size (the app's `Camera::is_active` switch); rebinding rebuilds nothing |
 | `HtmlWorldAnchor { target, offset, pivot, camera }`, `HtmlWorldAnchorView { distance, on_screen }` | Component | keeps a UI root's `pivot` (fraction of its size, default bottom center) over `target`'s translation + `offset` projected through `camera` / its `UiTargetCamera` / the default UI camera (viewport-relative and `UiScale`-divided: offset viewports and scale factors read correctly); owns its `Visibility` (hidden behind the camera, off screen, or over an invisible target); despawned with `target`; `place_world_anchored`, `PostUpdate` before `UiSystems::Prepare` (last frame's transforms) |
 | `HtmlAnchor { element, placement, gap, flip }`, `AnchorPlacement::{Right, Left, Above, Below}`, `AnchoredSide` | Component | keeps an (absolute, root) overlay node beside `element`, placed the same frame (after `ui_layout_system`: the overlay's and its descendants' `UiGlobalTransform`s move to this frame's rect; insets written for the next layout); flips to the mirror side when it doesn't fit there but fits better on the other (`flip`, default on; `AnchoredSide` = the side used), else clamped to the viewport; `UiTargetCamera` copied, despawned with the element |
 | `HtmlSignalsExt::on_html_click(name, system)` / `on_html_signal(name, system)` | App ext | route `ElementSignal`s by name to systems taking `In<ElementSignal>` (`on_html_click`: `Click` only); run by `dispatch_signals` (exclusive, `PostUpdate` before `Render`, own message cursor); messages still sent |
@@ -62,7 +65,8 @@ Re-exported crates (their types appear in the API): `tera`, `tl` (the
 `fluent`, `lightningcss`. Cargo features: `system_fonts` (Bevy's
 `system_font_discovery`), `text-input` (the editable-text widget),
 `hot-reload` (the file watcher), `svg` (`.svg` images via usvg/resvg,
-ADR 0038; `fuzzing` implies it), `svg-text` (`svg` + SVG `<text>`), `fuzzing` (the fuzz harness),
+ADR 0038), `svg-text` (`svg` + SVG `<text>`; `fuzzing` implies it, and the harness draws
+text with Bevy's default font, bug_0221), `fuzzing` (the fuzz harness),
 `dev-tools` (the examples' QA surface), and `hotpath` / `hotpath-alloc` /
 `hotpath-prometheus` / `hotpath-cloud` (hotpath profiling: `#[hotpath::measure]`
 on the pipeline systems and hot internals, `#[hotpath::main]` on every
@@ -88,8 +92,26 @@ src/
                    own root extension (a `.md` partial included from an `.html` page converts,
                    an `.html` partial from a `.md` page stays HTML), a tag holding more than
                    64 operators fails the load before Tera compiles it (tera_tag_over_limit,
-                   bug_0182), HtmlDocument (+ outline), decode_text / decode_attribute
-                   (htmlize, ADR 0036)
+                   bug_0182); after Tera compiles the set, `tera_check::check` bounds it (ADR
+                   0044); `render_source` renders through `BoundedOutput`, refused past
+                   `MAX_RENDERED_BYTES` 16 MiB (bug_0220), HtmlDocument (+ outline),
+                   decode_text / decode_attribute (htmlize, ADR 0036)
+  tera_check/      (ADR 0044, bug_0220) the load-time template safety check: every input is
+                   untrusted, and Tera 2.4 bounds no render's work or memory (UPSTREAM U39),
+                   its parser private. `lexer.rs` (Tera's lexer ported with `nom`: text,
+                   `{% raw %}`, comments, tokens), `parser.rs` (Tera's Pratt parser ported:
+                   same precedence, `loop.*`, components, blocks, `extends`; run only on what
+                   Tera compiled, an unreadable input is an error), `analysis.rs` (an abstract
+                   render over `Av` bounds — written size, item count, one item's size,
+                   numeric magnitude — each a `Lin` `c + k·A`, `A` one app value; a loop over
+                   app data counts one iteration, a template-made one multiplies; `set_global`
+                   in a loop runs once with symbols and must come out as constant + one
+                   carried symbol (linear growth); includes/`extends`+`super()`/components
+                   inline, recursion refused; `MAX_NESTING` 64 and `MAX_ANALYSIS_WORK` 2²²
+                   bound the check itself). Limits: `MAX_TEMPLATE_STEPS` 2²⁵,
+                   `MAX_TEMPLATE_VALUE_BYTES` 16 MiB, `MAX_TEMPLATE_APP_COPIES` 4 096.
+                   `tests.rs`: bombs refused by their limit, ordinary templates accepted,
+                   properties vs Tera (the parsers agree; renders stay within the bound)
   l10n.rs          LocaleBundle asset + loader (`.ftl.ron`: manifest → Fluent resources, read as
                    dependencies), ActiveLocale, LocalizedText; localize system (data-l10n-id/-args);
                    with `markdown: true`, each cacheable message's pattern pre-converts at load
@@ -118,9 +140,12 @@ src/
                    none; one declared side → `LayoutDecl::aspect_ratio`), `mark_canvas`
                    (observer: `HtmlCanvas` on `<canvas>` elements), `sync_canvases`
                    (`UiSystems::PostLayout`, before Bevy's
-                   `update_viewport_render_target_size`: binds `ViewportNode`/`ImageNode`
-                   + `CanvasImage` marker, the size gate, owners, `shown`); `update_spec`
-                   never owns these, so bindings survive updates
+                   `update_viewport_render_target_size`: owners (visible and within the
+                   size gate), the target image's presence (U38), `shown`; `bind` puts
+                   `ViewportNode`/`ImageNode` on a `CanvasPicture` child — spawned on
+                   demand, the viewport only once it's laid out, despawned on `Nothing`);
+                   the build's `Tree` treats the picture like an app-nested `HtmlUi` (kept
+                   by `update_children`, bug_0215), so bindings survive updates
   anchor.rs        HtmlAnchor/AnchorPlacement/AnchoredSide: place_anchored (PostUpdate, in
                    UiSystems::Layout after ui_layout_system, before clipping: this frame's
                    rects; moves the overlay subtree's UiGlobalTransforms like Bevy's Popover
@@ -168,7 +193,10 @@ src/
                    segments + 2 — per vertex, bug_0189; paint server 0 — converted once, a
                    shape's own work gains 2 × the server's content); own work = 16 per element,
                    1 per stop, 4 per path segment, (arc cubics)²/64 per path arc (svgtypes'
-                   quadratic drain), 16 per text byte. Segments are counted, never generated:
+                   quadratic drain), 16 per text byte; plus `<style>` rules × elements ÷ 4
+                   (usvg, the model and the box pass each match every pair; refused before
+                   the model's pass when that alone is over the budget, bug_0207). Segments
+                   are counted, never generated:
                    `path_segments` walks svgtypes' raw `PathParser` tracking the point like the
                    simplifier, each arc's cubics by kurbo's arithmetic (bug_0190, U22); shape
                    radii resolve like usvg's `convert_length` (`em` against the inherited
@@ -189,7 +217,9 @@ src/
                    document), refusing `<image href>` resolver (usvg's default reads any file,
                    U19), `raster_size` (side cap before allocating: tiny-skia aborts on a failed
                    allocation), `estimate_cost` (resvg's layer/filter/mask/clip model, early exit
-                   at `MAX_SVG_COST`; calibrated in docs/agents/performance/adr-0038-probe.md §7),
+                   at `MAX_SVG_COST`; calibrated in docs/agents/performance/adr-0038-probe.md §7;
+                   text walks its flattened glyph paths, bug_0204/0206; a dashed stroke is
+                   charged `DASH_COST` per dash, `dash_count` ≤ tiny-skia's 10⁶, bug_0205),
                    `check_extent` (before drawing: each path's control bounds, strokes padded,
                    through every transform resvg applies — groups, clips, masks, `feImage`,
                    pattern tiles, text outlines — must stay within `MAX_SVG_EXTENT` 2¹⁹ px of
@@ -213,13 +243,18 @@ src/
                    `push_runs` and the container branch treat it like `<img>` (an item, its
                    children never walked; `is_walked_through` excludes it); `inline_svg_of`
                    sends `tag.raw()` through `prepare_inline` (xmlns, xmlns:xlink, `color`
-                   = the computed CSS color) to `InlineSvgs` (keyed by that text; parsed
-                   and, under `INLINE_SYNC_COST`, drawn during the build into a reserved
+                   = the computed CSS color; `attribute_names` reads the start tag
+                   quote-aware, bug_0210) to `InlineSvgs` (keyed by that text; parsed
+                   during the build when its bounds' work is ≤ `INLINE_SYNC_WORK` 2¹⁴
+                   (`parse_unless_costly`, else on the task, bug_0208), refusals remembered
+                   by hash (≤ 4096), and, under `INLINE_SYNC_COST`, drawn during the build into a reserved
                    handle that `finish_inline_svgs` inserts the same frame — no blank
                    frame on a recolor; larger or costlier text on a task, inserted with a
                    `Modified` that restyles); `ImageRun::intrinsic` sizes the box at
                    collect; entries unshown for 120 frames are dropped; the redraw finds
-                   inline documents via `InlineSvgs::document_of`. CSS images (ADR 0038 §7):
+                   inline documents via `InlineSvgs::document_of` (a map, image → document;
+                   only for a span whose `SvgRaster` doesn't already name it, bug_0211; a
+                   document's `Modified` also cancels its draws in flight, bug_0212). CSS images (ADR 0038 §7):
                    the same system takes `CssFrame` entities and roots whose `CssRoot`
                    `owns_image`: sliced/tiled drawn at intrinsic × scale factor with
                    `scale_mode` (insets × s, `max_corner_scale` and tile `stretch_value`
@@ -1759,7 +1794,10 @@ Known limits (each skipped/ignored value is logged at `debug`):
   `:focus-within`; `:nth-child()`, `:nth-last-child()`, `:nth-of-type()`,
   `:nth-last-of-type()`, `:first-/last-/only-child`, `:first-/last-/only-of-type`,
   `:empty`; `:is()`/`:where()`/`:not()` with lists and descendant/child
-  combinators inside, but no `:not()` within a `:not()` (ADR 0029's
+  combinators inside — at the first level only, a combinator in an argument
+  nested in another skips the rule (`nested`'s depth: parcel re-matches an
+  argument per ancestor, so each level multiplied by the depth; bug_0213,
+  ADR 0044) — but no `:not()` within a `:not()` (ADR 0029's
   reactivity answers a pseudo-class by `!in_negation()`, exact only at one
   level). The allowlist also keeps out what parcel's matcher panics on
   (`:nth-child(… of S)`, `:has()`, `&` nesting, `:nth-col()`).

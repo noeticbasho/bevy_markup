@@ -17,7 +17,10 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   size unless CSS sets one (300 × 150 by default, as in HTML). One canvas
   per camera gets the live view, others show its image; a canvas larger
   than `MAX_CANVAS_SIDE` (4096 px) gets no camera; `HtmlCanvases::shown`
-  tells the app whether to keep a camera running. New example: `canvas`.
+  tells the app whether to keep a camera running. The source shows on a
+  `CanvasPicture` child filling the canvas's padding box, so a canvas
+  can have a CSS `border-image` or `background-image` frame too. New
+  example: `canvas`.
 - **`svg` example** (`--features svg`, `svg-text` for its text badge):
   inline `<svg>` icons recolored by the theme and `:hover`, one SVG file
   as `<img>` at four sizes, an SVG `border-image` and tiled
@@ -78,7 +81,58 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
     offset reaching more than `MAX_SVG_FILTER_REGION` (2²⁴ px) from the
     image fails with an error, instead of a renderer panic.
 
+### Security
+- **Templates are checked when they load** (ADR 0044): every input is
+  treated as untrusted, templates included. A template whose own work or
+  built values could pass `tera_check::MAX_TEMPLATE_STEPS`,
+  `MAX_TEMPLATE_VALUE_BYTES` or `MAX_TEMPLATE_APP_COPIES` fails to load
+  with an error naming the limit (nested loops printing nothing ran for
+  minutes; doubling a string in a loop aborted the app). Loops over your
+  `TemplateContext` data count once per element. **Possibly breaking:** a
+  `set_global` value that grows through a filter in a loop, a filter
+  combining two context values, or a filter or function the check doesn't
+  know is refused, and so is a template the check can't read. Rendered
+  output is capped at `template::MAX_RENDERED_BYTES` (16 MiB).
+- A descendant or child combinator inside an `:is()`/`:where()`/`:not()`
+  that is itself inside one skips its rule: each level multiplied the
+  matching cost by the document's depth (104 bytes of CSS froze an app for
+  two minutes). One level (`:is(.a p) span`) still works. **Possibly
+  breaking** for such selectors.
+- SVG drawings share a memory budget, `svg::MAX_SVG_RASTER_BYTES` (256 MiB
+  for display-size redraws, as much for inline `<svg>` images): past it
+  an `<img>` or CSS image keeps its 1× drawing and an inline `<svg>` waits
+  for room (a hundred large `<img>` tags held gigabytes).
+
 ### Fixed
+- An `<img>` sized in `%` (`width: 50%`) now has that size on HiDPI
+  displays and with `UiScale` other than 1; it was scaled by the factor
+  (a `50%` image was full width at scale 2).
+- SVG `<text>` (`svg-text`) counts toward the drawing budget like the
+  shapes it draws: a pattern painted on text aborted the app on a failed
+  allocation, and long texts in huge fonts drew for minutes.
+- SVG dashed strokes count toward the drawing budget per dash: tiny
+  `stroke-dasharray` intervals drew for minutes on an estimate under 1%.
+- An SVG's `<style>` sheet counts toward the conversion limit
+  (`MAX_SVG_WORK`) by rules × elements: a large file of rules and
+  elements took tens of seconds to parse.
+- An inline `<svg>` that can't be drawn is remembered instead of being
+  parsed again on every update of its UI (each `:hover` took up to half
+  a second), and one that's costly to convert converts on a background
+  task instead of stalling the update.
+- An inline `<svg>` whose attribute values contain the words `color` or
+  `xmlns` (`class="icon color"`) keeps following the CSS `color` and
+  draws (the words were read as attributes).
+- Pages with many inline `<svg>`s no longer slow down idle frames
+  (a per-frame lookup scanned every drawn document for each one).
+- An `.svg` reloaded while a redraw of it was in progress no longer
+  shows the old drawing.
+- `<canvas>`: a CSS `border-image` or `background-image` and the canvas's
+  picture no longer replace each other on every update; hiding a camera's
+  only canvas no longer resizes its image to 1 × 1; a canvas larger than
+  `MAX_CANVAS_SIDE` no longer keeps the camera from another canvas that
+  fits; a camera whose target image isn't loaded yet (or was removed)
+  waits for it instead of panicking; `<CANVAS>` in uppercase inside text
+  no longer shows its fallback content.
 - Clicking an image or inline `<svg>` inside a link (`<a href>`, a
   Markdown link) now follows the link, as clicking its text does
   (`:hover` and the link's `data-on-*` hooks apply to the icon too).

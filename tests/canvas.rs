@@ -1,5 +1,6 @@
 //! `<canvas>` (ADR 0041): intrinsic sizing on real headless layout, and the
-//! binding of named sources to Bevy's `ViewportNode` / `ImageNode`, with
+//! binding of named sources to Bevy's `ViewportNode` / `ImageNode` on the
+//! canvas's picture child (bug_0215), with
 //! Bevy's own viewport resize running (no renderer: a camera is an entity
 //! with a `RenderTarget`, which is all the resize reads).
 
@@ -67,6 +68,27 @@ fn camera(ui: &mut TestUi, width: u32, height: u32) -> (Entity, Handle<Image>) {
         ));
     let camera = world.spawn(RenderTarget::Image(image.clone().into())).id();
     (camera, image)
+}
+
+/// The canvas's picture: the child showing its source (bug_0215).
+fn picture(ui: &mut TestUi, canvas: Entity) -> Option<Entity> {
+    let world = ui.world_mut();
+    let children = world.get::<Children>(canvas)?.to_vec();
+    children
+        .into_iter()
+        .find(|&child| world.get::<CanvasPicture>(child).is_some())
+}
+
+/// The camera the canvas's picture views.
+fn viewport(ui: &mut TestUi, canvas: Entity) -> Option<Entity> {
+    let picture = picture(ui, canvas)?;
+    ui.world_mut().get::<ViewportNode>(picture)?.camera
+}
+
+/// The image the canvas's picture shows.
+fn shown_image(ui: &mut TestUi, canvas: Entity) -> Option<Handle<Image>> {
+    let picture = picture(ui, canvas)?;
+    Some(ui.world_mut().get::<ImageNode>(picture)?.image.clone())
 }
 
 fn image_size(ui: &mut TestUi, image: &Handle<Image>) -> Extent3d {
@@ -161,10 +183,9 @@ fn sources_bind_to_viewports_and_images() {
         panic!("four canvases");
     };
     assert_eq!(showing(&mut ui, live), CanvasShowing::Viewport(map));
-    assert_eq!(
-        ui.world_mut().get::<ViewportNode>(live).unwrap().camera,
-        Some(map)
-    );
+    assert_eq!(viewport(&mut ui, live), Some(map));
+    // On the picture, never on the element (which keeps its CSS images).
+    assert!(ui.world_mut().get::<ViewportNode>(live).is_none());
     let size = image_size(&mut ui, &map_image);
     assert_eq!(
         (size.width, size.height),
@@ -176,11 +197,9 @@ fn sources_bind_to_viewports_and_images() {
         showing(&mut ui, copy),
         CanvasShowing::Image(map_image.clone())
     );
-    assert!(ui.world_mut().get::<ViewportNode>(copy).is_none());
-    assert_eq!(
-        ui.world_mut().get::<ImageNode>(copy).unwrap().image,
-        map_image
-    );
+    assert_eq!(viewport(&mut ui, copy), None);
+    assert_eq!(shown_image(&mut ui, copy), Some(map_image));
+    assert!(ui.world_mut().get::<ImageNode>(copy).is_none());
 
     assert_eq!(showing(&mut ui, still), CanvasShowing::Image(photo.clone()));
     let size = image_size(&mut ui, &photo);
@@ -191,18 +210,15 @@ fn sources_bind_to_viewports_and_images() {
     );
 
     assert_eq!(showing(&mut ui, none), CanvasShowing::Nothing);
-    assert!(ui.world_mut().get::<ImageNode>(none).is_none());
+    assert_eq!(picture(&mut ui, none), None);
 
     // Unregistering takes the camera off the viewport; the copy's image
     // goes too.
     ui.world_mut().resource_mut::<HtmlCanvases>().remove("map");
     ui.update(2);
     assert_eq!(showing(&mut ui, live), CanvasShowing::Nothing);
-    assert_eq!(
-        ui.world_mut().get::<ViewportNode>(live).unwrap().camera,
-        None
-    );
-    assert!(ui.world_mut().get::<ImageNode>(copy).is_none());
+    assert_eq!(viewport(&mut ui, live), None);
+    assert_eq!(shown_image(&mut ui, copy), None);
     assert_eq!(ui.builds(), builds, "unregistering rebuilds nothing");
 }
 
@@ -261,6 +277,123 @@ fn oversized_canvases_get_no_camera() {
     assert_eq!(image_size(&mut ui, &image).width, MAX_CANVAS_SIDE as u32);
 }
 
+/// An oversized canvas isn't a candidate for the camera: a later canvas
+/// that fits gets the viewport (bug_0217: the first in document order
+/// owned it and showed nothing, the other only the stretched 8 × 8 image).
+#[test]
+fn an_oversized_canvas_leaves_the_camera_to_one_that_fits() {
+    let mut ui = page(
+        "canvas_oversized_first",
+        "<canvas data-canvas='map' width='5000' height='100'></canvas>\
+         <canvas data-canvas='map' width='60' height='30'></canvas>",
+        "",
+    );
+    let (map, image) = camera(&mut ui, 8, 8);
+    register(&mut ui, "map", CanvasSource::Camera(map));
+    ui.update(4);
+    let [big, small] = canvases(&mut ui)[..] else {
+        panic!("two canvases");
+    };
+    assert_eq!(showing(&mut ui, big), CanvasShowing::Nothing);
+    assert_eq!(showing(&mut ui, small), CanvasShowing::Viewport(map));
+    let size = image_size(&mut ui, &image);
+    assert_eq!((size.width, size.height), (60, 30));
+}
+
+/// A camera whose target image isn't in `Assets<Image>` (still loading,
+/// or removed) isn't bound: Bevy's resize unwraps the image and panicked
+/// (bug_0218, UPSTREAM U38). Once the image exists, the canvas binds.
+#[test]
+fn a_camera_without_its_image_waits_for_it() {
+    let mut ui = page(
+        "canvas_missing_target",
+        "<canvas data-canvas='map' width='40' height='20'></canvas>",
+        "",
+    );
+    let reserved = ui.world_mut().resource::<Assets<Image>>().reserve_handle();
+    let map = ui
+        .world_mut()
+        .spawn(RenderTarget::Image(reserved.clone().into()))
+        .id();
+    register(&mut ui, "map", CanvasSource::Camera(map));
+    ui.update(4);
+    let canvas = canvases(&mut ui)[0];
+    assert_eq!(showing(&mut ui, canvas), CanvasShowing::Nothing);
+
+    let _ = ui.world_mut().resource_mut::<Assets<Image>>().insert(
+        reserved.id(),
+        Image::new_target_texture(8, 8, TextureFormat::Bgra8UnormSrgb, None),
+    );
+    ui.update(4);
+    assert_eq!(showing(&mut ui, canvas), CanvasShowing::Viewport(map));
+    assert_eq!(image_size(&mut ui, &reserved).width, 40);
+}
+
+/// A canvas with a CSS `border-image` keeps both: the frame on the element,
+/// the source on its picture, through binding and in-place updates
+/// (bug_0215: both were the element's `ImageNode`; binding replaced the
+/// frame, and the next update the picture).
+#[test]
+fn a_framed_canvas_keeps_its_frame_and_its_picture() {
+    let mut ui = page_with(
+        "canvas_framed",
+        "<canvas class='framed {{ class }}' data-canvas='photo' width='60' height='30'></canvas>",
+        ".framed { border-image: url(frame.png) 4 stretch; border-width: 4px }",
+        TemplateContext::default().with("class", "a"),
+    );
+    let photo = ui
+        .world_mut()
+        .resource_mut::<Assets<Image>>()
+        .add(Image::new_target_texture(
+            16,
+            16,
+            TextureFormat::Bgra8UnormSrgb,
+            None,
+        ));
+    let frame: Handle<Image> = ui.load("frame.png");
+    let canvas = canvases(&mut ui)[0];
+    let element_image = |ui: &mut TestUi| {
+        ui.world_mut()
+            .get::<ImageNode>(canvas)
+            .map(|node| node.image.clone())
+    };
+    assert_eq!(element_image(&mut ui), Some(frame.clone()));
+
+    register(&mut ui, "photo", CanvasSource::Image(photo.clone()));
+    ui.update(3);
+    assert_eq!(
+        showing(&mut ui, canvas),
+        CanvasShowing::Image(photo.clone())
+    );
+    assert_eq!(
+        element_image(&mut ui),
+        Some(frame.clone()),
+        "the frame stays"
+    );
+    assert_eq!(shown_image(&mut ui, canvas), Some(photo.clone()));
+
+    // An in-place update re-inserts the element's frame, and keeps the
+    // picture entity (a respawn would rebind a camera through a zero-size
+    // frame).
+    let before = picture(&mut ui, canvas);
+    set(&mut ui, "class", "b");
+    ui.settle();
+    ui.update(2);
+    assert_eq!(canvases(&mut ui)[0], canvas, "updated in place");
+    assert_eq!(picture(&mut ui, canvas), before, "the same picture");
+    assert_eq!(element_image(&mut ui), Some(frame));
+    assert_eq!(
+        shown_image(&mut ui, canvas),
+        Some(photo),
+        "the picture stays"
+    );
+    // The picture fills the padding box, inside the 4px border.
+    let world = ui.world_mut();
+    let picture = world.get::<Children>(canvas).unwrap()[0];
+    let rect = node_rect(world, picture).unwrap();
+    assert_eq!(rect.size(), Vec2::new(60.0, 30.0));
+}
+
 /// `HtmlCanvases::shown` reports whether a canvas with the name is laid out
 /// at a non-zero size: the app's switch for its camera.
 #[test]
@@ -271,17 +404,23 @@ fn shown_reports_visible_canvases() {
         ".hidden { display: none }",
         TemplateContext::default().with("class", "shown"),
     );
-    let (map, _) = camera(&mut ui, 8, 8);
+    let (map, image) = camera(&mut ui, 8, 8);
     register(&mut ui, "map", CanvasSource::Camera(map));
-    ui.update(2);
+    ui.update(3);
     let canvases = ui.world_mut().resource::<HtmlCanvases>();
     assert!(canvases.shown("map"));
     assert!(!canvases.shown("other"));
+    let size = image_size(&mut ui, &image);
+    assert_eq!((size.width, size.height), (300, 150));
 
     set(&mut ui, "class", "hidden");
     ui.settle();
     ui.update(2);
     assert!(!ui.world_mut().resource::<HtmlCanvases>().shown("map"));
+    // A hidden canvas owns no camera: its image keeps its last size
+    // (bug_0216: laid out at 0 × 0, it was resized to 1 × 1).
+    let size = image_size(&mut ui, &image);
+    assert_eq!((size.width, size.height), (300, 150));
 }
 
 /// What the stub backend saw: the forwarded pointer's positions in the
@@ -451,6 +590,7 @@ fn canvas_content_never_shows() {
             (
                 "page.html",
                 "<p>Map: <canvas data-canvas='map'>fallback</canvas> end</p>\
+                 <p>Spelled <CANVAS>upper fallback</CANVAS> in capitals (bug_0219)</p>\
                  <canvas id='own' data-l10n-id='canvas-label'>own fallback</canvas>",
             ),
             (
@@ -555,18 +695,15 @@ fn sources_switch_and_cameras_are_independent() {
     register(&mut ui, "a", CanvasSource::Image(image_b.clone()));
     ui.update(2);
     assert_eq!(showing(&mut ui, a), CanvasShowing::Image(image_b.clone()));
-    assert_eq!(ui.world_mut().get::<ViewportNode>(a).unwrap().camera, None);
-    assert_eq!(ui.world_mut().get::<ImageNode>(a).unwrap().image, image_b);
+    assert_eq!(viewport(&mut ui, a), None);
+    assert_eq!(shown_image(&mut ui, a), Some(image_b));
 
     // And back: the image goes, the camera returns.
     register(&mut ui, "a", CanvasSource::Camera(camera_a));
     ui.update(2);
     assert_eq!(showing(&mut ui, a), CanvasShowing::Viewport(camera_a));
-    assert!(ui.world_mut().get::<ImageNode>(a).is_none());
-    assert_eq!(
-        ui.world_mut().get::<ViewportNode>(a).unwrap().camera,
-        Some(camera_a)
-    );
+    assert_eq!(shown_image(&mut ui, a), None);
+    assert_eq!(viewport(&mut ui, a), Some(camera_a));
 }
 
 /// A canvas is an element like any container: `HtmlElements` finds it by

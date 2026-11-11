@@ -1,6 +1,34 @@
 //! Lints over the library's own source.
 
 use std::fs;
+use std::path::PathBuf;
+
+/// The library's source files: every `.rs` under `src/`, subdirectories
+/// included (bug_0221: `src/cascade/selector.rs` was never linted), except
+/// `src/fuzz.rs` (the fuzz harness, feature-gated).
+fn library_sources() -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut dirs = vec![PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"))];
+    while let Some(dir) = dirs.pop() {
+        for entry in fs::read_dir(&dir).expect("a source directory") {
+            let path = entry.expect("an entry").path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "rs")
+                && path != PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src/fuzz.rs"))
+            {
+                found.push(path);
+            }
+        }
+    }
+    assert!(
+        found
+            .iter()
+            .any(|path| path.ends_with("cascade/selector.rs")),
+        "the walk reaches subdirectories"
+    );
+    found
+}
 
 /// No debug output in library code: `println!`, `eprintln!` and `dbg!`
 /// write to every app's stdout/stderr. Debug prints shipped three times —
@@ -12,13 +40,7 @@ use std::fs;
 #[test]
 fn library_code_has_no_debug_prints() {
     let mut found = Vec::new();
-    for entry in fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/src")).expect("src/") {
-        let path = entry.expect("an entry").path();
-        if path.extension().is_none_or(|extension| extension != "rs")
-            || path.file_name().is_some_and(|name| name == "fuzz.rs")
-        {
-            continue;
-        }
+    for path in library_sources() {
         let text = fs::read_to_string(&path).expect("a source file");
         for (number, line) in text.lines().enumerate() {
             let code = line.trim_start();
@@ -49,13 +71,7 @@ fn library_code_has_no_debug_prints() {
 #[test]
 fn library_code_writes_no_files() {
     let mut found = Vec::new();
-    for entry in fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/src")).expect("src/") {
-        let path = entry.expect("an entry").path();
-        if path.extension().is_none_or(|extension| extension != "rs")
-            || path.file_name().is_some_and(|name| name == "fuzz.rs")
-        {
-            continue;
-        }
+    for path in library_sources() {
         let text = fs::read_to_string(&path).expect("a source file");
         let lines: Vec<&str> = text.lines().collect();
         for (number, line) in lines.iter().enumerate() {

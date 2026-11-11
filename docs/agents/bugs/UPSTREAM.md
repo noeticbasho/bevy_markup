@@ -51,7 +51,8 @@ the issue may already be fixed or reported.
 | U35 | tiny-skia-path 0.12 (via resvg 0.49) | `NonZeroRect::to_int_rect` and `IntSize::to_int_rect(x, y)` unwrap `IntRect::from_xywh`, `None` once `x + width` passes `i32::MAX`; resvg converts filter regions, subregions and offsets with them ([bug_0201](bug_0201.md)) | panic in any build: a failed draw (`svg` feature) | regions, subregions and offsets past `MAX_SVG_FILTER_REGION` refused before drawing (`svg::check_extent`) | unreported |
 | U36 | resvg 0.49 (tiny-skia 0.12) | `render_pattern_pixmap` allocates a pattern's tile at its drawn size with no limit; `Pixmap::new` allocates with `vec![0; len]`, which aborts on failure ([bug_0200](bug_0200.md)) | process abort (`svg` feature) | the render-cost estimate charges each tile (`svg::estimate_cost`) | unreported |
 | U37 | parley 0.11 (via bevy_text 0.20) | An inline box's whole height counts as ascent and the line height is the tallest item's, so a box taller than the text's ascent gets negative leading ([bug_0203](bug_0203.md)) | an `<img>`/inline `<svg>` taller than the ascent overlaps the line above; the line is short by the text's descent | none | fixed upstream (parley 0.12.0); waiting for Bevy to depend on it |
-| U38 | Bevy (bevy_ui 0.20.1) | `update_viewport_render_target_size` ends in `images.get_mut(image_handle).unwrap()`: a `ViewportNode` camera whose `RenderTarget::Image` isn't in `Assets<Image>` panics ([bug_0218](bug_0218.md)) | a canvas camera over a not-yet-loaded or removed target image panics on the compute pool | none yet (planned: `sync_canvases` checks `Assets<Image>::contains` before binding) | unreported |
+| U38 | Bevy (bevy_ui 0.20.1) | `update_viewport_render_target_size` ends in `images.get_mut(image_handle).unwrap()`: a `ViewportNode` camera whose `RenderTarget::Image` isn't in `Assets<Image>` panics ([bug_0218](bug_0218.md)) | a canvas camera over a not-yet-loaded or removed target image panics on the compute pool | `sync_canvases` binds a camera only while its target image is in `Assets<Image>` (bug_0218) | unreported |
+| U39 | Tera 2.4.0 | A render's work and memory have no limit (only `range` ≤ 10⁵ and component recursion ≤ 20): nested loops run for hours, `set_global` doubling in a loop or unrolled `set` doubling ask for terabytes and abort ([bug_0220](bug_0220.md)) | a template stalls or aborts the app | `tera_check`: a static check at load bounds steps, built values and copies of context data (ADR 0044); output capped by `template::MAX_RENDERED_BYTES` | unreported |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -851,10 +852,35 @@ CI clippy command and workspace tests pass on both.
   `CanvasSource::Camera`) over a camera targeting a reserved handle:
   `called Option::unwrap() on a None value` on the first frame
   (review_0007 K15, bug_0218).
-- **Local workaround:** none yet; bug_0218's fix is to bind the
-  `ViewportNode` only once the image exists.
+- **Local workaround:** `canvas.rs` `sync_canvases` binds a camera's
+  viewport only while its target image is in `Assets<Image>` (bug_0218,
+  `tests/canvas.rs` `a_camera_without_its_image_waits_for_it`). Drop the
+  check once Bevy skips a missing image.
 - **PR sketch:** skip (or warn once) when `images.get_mut` returns
   `None`, as the render-target extraction does for missing images.
+
+## U39 — Tera: no limit on a render's work or memory
+
+- **Project:** Keats/tera. Affected: 2.4.0.
+- **Problem:** the interpreter bounds `range` (`MAX_RANGE_LEN`, 10⁵) and
+  component recursion (20) but nothing else: instructions run without a
+  budget, `~` concatenation, filters (`replace`, `join`, `indent`) and
+  captures allocate without a cap, and a list nested in itself (`[a, a]`,
+  shared `Arc`s) is exponential when written. A failed allocation aborts
+  the process.
+- **Reproduction** (release, 2026-11-11): `{% set_global s = "x" %}{% for i
+  in range(end=24) %}{% set_global s = s ~ s %}{% endfor %}` builds 16 MB in
+  5 ms (40 iterations: 1 TB); two nested `range(end=100000)` loops with an
+  empty body run 10¹⁰ iterations.
+- **Local workaround:** `src/tera_check/` (ADR 0044) ports Tera's lexer and
+  parser and refuses, at load, a template whose bounds pass the limits;
+  `template::MAX_RENDERED_BYTES` caps the output. A vendored Tera with an
+  instruction budget and a value cap was tried and dropped (~10% render
+  cost; `[patch]` doesn't reach dependents).
+- **PR sketch:** an optional render budget on `Tera` (instructions, bytes
+  written, largest value), checked in the interpreter loop with batched
+  counters; and expose the parser (`parsing::parser`) so checks like ours
+  don't have to port it.
 
 ## Not upstream bugs (recorded so they aren't re-filed)
 

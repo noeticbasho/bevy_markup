@@ -994,6 +994,18 @@ pub fn plan(scenario: &str, dir: &Dir, prefix: &str) -> Plan {
                 "p{} {{ color: #9fb3c8 }}\n",
                 (0..500).map(|i| format!(".q{i}")).collect::<String>()
             ));
+            // Combinators inside nested `:is()` (bug_0213: six levels over
+            // 95 nested `<div>`s took two minutes); the allowlist drops
+            // the rule. One level per compound is admitted and stays cheap.
+            let mut nested = String::from(".never div");
+            for _ in 0..6 {
+                nested = format!(":is({nested}) div");
+            }
+            css.push_str(&format!("{nested} p {{ color: red }}\n"));
+            css.push_str(&format!(
+                "{}p {{ word-spacing: 1px }}\n",
+                ":is(.never div) div ".repeat(6)
+            ));
             let mut html = String::from("<section>");
             html.push_str("<p id=\"probe\" data-x=\"a] b ~ c + d > e\">the quoted-value probe</p>");
             html.push_str("<p id=\"quotes\" data-y='say \"hi\"'>the escaped-quote probe</p>");
@@ -1007,6 +1019,11 @@ pub fn plan(scenario: &str, dir: &Dir, prefix: &str) -> Plan {
                     }
                 ));
             }
+            html.push_str(&format!(
+                "{}<p>deep</p>{}",
+                "<div>".repeat(90),
+                "</div>".repeat(90)
+            ));
             html.push_str("</section>");
             let paths = write(dir, prefix, &[("page.html", html), ("bomb.css", css)]);
             column(
