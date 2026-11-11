@@ -96,6 +96,10 @@ src/
                    0044); `render_source` renders through `BoundedOutput`, refused past
                    `MAX_RENDERED_BYTES` 16 MiB (bug_0220), HtmlDocument (+ outline),
                    decode_text / decode_attribute (htmlize, ADR 0036)
+  ftl_check.rs     (ADR 0045) the load-time FTL safety check: `bad_escape` (UPSTREAM U1) and
+                   a port of fluent-syntax 0.11.1's `parse_runtime` counting nesting
+                   (`MAX_FTL_NESTING` 64, UPSTREAM U2); `ftl_check/tests.rs` (the port vs
+                   fluent-syntax's entries, the limit on a 2 MB thread)
   tera_check/      (ADR 0044, bug_0220) the load-time template safety check: every input is
                    untrusted, and Tera 2.4 bounds no render's work or memory (UPSTREAM U39),
                    its parser private. `lexer.rs` (Tera's lexer ported with `nom`: text,
@@ -702,21 +706,24 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
   (uncached). `opacity` multiplies down the tree in the computed `Style`
   (the `<html>` element reuses the root style, or its opacity would square)
   and fades text/span colors at spec time and box colors in `collect_node`.
-- fluent-syntax comes from a fork, `nchashch/fluent-rs` branch
-  `fix/fuzzing-bugs-0.11` (upstream's 0.11.1 tag plus fixes; Cargo.lock pins
-  the commit), wired via `[patch.crates-io]` in the root and all four fuzz
-  manifests. It fixes two bugs reachable from any FTL asset:
-  - bug_0005: an invalid `\U` escape before a multi-byte character panicked
-    (the error quoted the escape plus one *byte* of the next character).
-  - bug_0015: expression nesting recursed without a limit (placeables *and*
-    call arguments), so a few KB of `{{{…}}}` or `F(F(…))` overflowed the
-    stack; `get_inline_expression` now fails past `MAX_NESTING_DEPTH` = 100
-    with `ErrorKind::NestingTooDeep` (the entry becomes Junk).
-  The same fixes are proposed upstream from branch `fix/fuzzing-bugs` (on
-  upstream `main`, 0.12). `[patch]` doesn't reach crates that depend on
-  bevy_markup: they need the same entry (README). Re-check when bumping
-  `fluent`; drop the patch once upstream releases the fixes in the
-  fluent-syntax version `fluent` uses (UPSTREAM.md U1/U2).
+- fluent-syntax is upstream 0.11.1 (what `fluent` 0.16 requires). Two of
+  its bugs are reachable from any FTL asset, and `src/ftl_check.rs` (ADR
+  0045) refuses the triggering resources at load, before
+  `FluentResource::try_new` (the bundle loader, the fuzz harness, the
+  Markdown fuzz path):
+  - bug_0005: an invalid `\u`/`\U` escape cut off by a multi-byte
+    character panicked (the error quoted one *byte* of it): `bad_escape`
+    scans the whole file, context-free.
+  - bug_0015: nesting recursed without a limit (placeables, select
+    variants, call arguments): a port of `parse_runtime`'s control flow
+    (same pointer moves and errors, so Junk recovery restarts where
+    fluent-syntax's does) counts the active `{` and `(` levels,
+    `MAX_FTL_NESTING` = 64 (a 2 MB debug thread fits 192 select levels).
+  `ftl_check::tests` compares the port's entries with fluent-syntax's on
+  generated FTL and runs the real parser and resolver at the limit on 2 MB.
+  The fork (`nchashch/fluent-rs` `fix/fuzzing-bugs-0.11`, proposed upstream
+  from `fix/fuzzing-bugs`) was the earlier fix; on a `fluent` bump re-run
+  those tests (the port follows 0.11.1) and UPSTREAM.md U1/U2.
 - `vendor/honggfuzz` is a patched fork of the honggfuzz crate used only by
   `honggfuzz/` targets: its bundled C source fails against current binutils
   (`bfd.h` no longer defines `TRUE`).

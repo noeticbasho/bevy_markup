@@ -16,4 +16,3 @@ fuzzcheck = "0.13"
 fuzzcheck = { path = "vendor/fuzzcheck" }
 fuzzcheck_mutators_derive = { path = "vendor/fuzzcheck_mutators_derive" }
 fuzzcheck_common = { path = "vendor/fuzzcheck_common" }
-fluent-syntax = { git = "https://github.com/nchashch/fluent-rs", branch = "fix/fuzzing-bugs-0.11" }

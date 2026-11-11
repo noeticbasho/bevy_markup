@@ -14,8 +14,8 @@ the issue may already be fixed or reported.
 
 | # | Project | Issue | Impact on bevy_markup | Local workaround | Status |
 |---|---|---|---|---|---|
-| U1 | fluent-syntax (fluent-rs) | Invalid unicode escape before a multi-byte character panics ([bug_0005](bug_0005.md)) | panic from any FTL asset | fork (git patch) | fix on fork; upstream PR pending |
-| U2 | fluent-syntax (fluent-rs) | Unbounded expression nesting overflows the stack ([bug_0015](bug_0015.md)) | stack overflow (abort) from a few KB of FTL | fork (git patch) | fix on fork; upstream PR pending |
+| U1 | fluent-syntax (fluent-rs) | Invalid unicode escape before a multi-byte character panics ([bug_0005](bug_0005.md)) | panic from any FTL asset | `ftl_check::bad_escape` at load (ADR 0045); the fork no longer wired in | fix on fork; upstream PR pending |
+| U2 | fluent-syntax (fluent-rs) | Unbounded expression nesting overflows the stack ([bug_0015](bug_0015.md)) | stack overflow (abort) from a few KB of FTL | `ftl_check` nesting limit at load (ADR 0045); the fork no longer wired in | fix on fork; upstream PR pending |
 | U3 | honggfuzz-rs | Bundled honggfuzz doesn't build against current binutils | honggfuzz driver doesn't build | vendored patch | unreported |
 | U4 | fuzzcheck | Coverage sensor misreads LLVM 21+ `__llvm_prf_data` | fuzzcheck driver gets no usable coverage | vendored patch | unreported |
 | U5 | fuzzcheck | `observing_only_files_from_current_dir` drops absolute paths | fuzzcheck observes no project code | vendored patch | unreported |
@@ -81,6 +81,7 @@ CI clippy command and workspace tests pass on both.
 - **Fix (fork):** take the whole offending character
   (`chars().next().map(char::len_utf8)`) instead of one byte. The first
   local fix (vendored, now removed) clamped every slice to a char boundary.
+- **Workaround now (2026-11-11, ADR 0045):** `ftl_check::bad_escape` refuses the file at load, before fluent-syntax parses it; the fork is no longer wired in (`[patch]` removed from every manifest), so dependents need nothing. Drop the check's part once a released fluent-syntax that `fluent` uses carries the fix.
 - **Tests:** fork `robustness.rs` `invalid_unicode_escape_before_multibyte_char`
   (includes the exact error text); bevy_markup `src/fuzz.rs`
   `broken_unicode_escape_after_multibyte_char_does_not_panic`.
@@ -106,6 +107,7 @@ CI clippy command and workspace tests pass on both.
   past `MAX_NESTING_DEPTH` = 100, and the entry becomes Junk. The first
   local fix (vendored, now removed) counted placeables only and missed the
   call cycle.
+- **Workaround now (2026-11-11, ADR 0045):** `ftl_check`'s port of the parser refuses nesting past `MAX_FTL_NESTING` (64) at load, before fluent-syntax parses it; the fork is no longer wired in (`[patch]` removed from every manifest), so dependents need nothing. Drop the check's part once a released fluent-syntax that `fluent` uses carries the fix.
 - **Tests:** fork `robustness.rs` (100,000 nested placeables and calls on a
   2 MiB stack; the boundaries 100/101 braces and 99/100 calls, derived by
   hand; a too-deep entry leaves the next message intact); bevy_markup

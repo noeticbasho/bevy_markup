@@ -30,8 +30,6 @@ doc = false
 bench = false
 
 # Vendored (path) so the bundled C source can be patched for current
-# binutils: bfd.h no longer defines TRUE/FALSE (see linux/bfd.c). Also
-# patches fluent-syntax (the fork, see the root Cargo.toml).
+# binutils: bfd.h no longer defines TRUE/FALSE (see linux/bfd.c).
 [patch.crates-io]
 honggfuzz = { path = "vendor/honggfuzz" }
-fluent-syntax = { git = "https://github.com/nchashch/fluent-rs", branch = "fix/fuzzing-bugs-0.11" }

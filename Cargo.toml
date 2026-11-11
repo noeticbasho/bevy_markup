@@ -125,7 +125,8 @@ pulldown-cmark = { version = "0.13.5", default-features = false, features = [
 ] }
 # The FTL AST (ADR 0020 Decision 3): the per-message Markdown patterns
 # pre-convert at bundle load. fluent doesn't re-export it; same version as
-# fluent's, patched below.
+# fluent's. Upstream 0.11.1: `ftl_check` (ADR 0045) refuses at load what
+# would panic or overflow it (UPSTREAM U1, U2).
 fluent-syntax = "0.11.1"
 # Profiling instrumentation (the `hotpath*` features). Inert without them:
 # no profiling code, no dependencies, macros expand to the plain function.
@@ -223,16 +224,6 @@ required-features = ["hot-reload"]
 name = "grid-names"
 test = true
 
-# fluent-syntax from the fork with fixes for two bugs reachable from any FTL
-# asset (docs/agents/bugs/UPSTREAM.md U1, U2): a panic on an invalid unicode
-# escape before a multi-byte character, and a stack overflow on deeply nested
-# expressions. Branch fix/fuzzing-bugs-0.11 is upstream's fluent-syntax 0.11.1
-# tag plus the fixes; 0.11 is what fluent 0.16's fluent-bundle requires.
-# Cargo.lock pins the commit. Applies only inside this repository: crates
-# depending on bevy_markup need the same entry (see README). The fuzz
-# workspaces repeat it.
-[patch.crates-io]
-fluent-syntax = { git = "https://github.com/nchashch/fluent-rs", branch = "fix/fuzzing-bugs-0.11" }
 
 
 # Mutation testing (scripts/mutants.sh, .github/workflows/mutants.yml).

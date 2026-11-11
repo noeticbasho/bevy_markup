@@ -206,6 +206,10 @@ impl AssetLoader for LocaleBundleLoader {
             // reloads every bundle that uses it.
             let bytes = load_context.read_asset_bytes(path.clone()).await?;
             let source = String::from_utf8(bytes)?;
+            // ADR 0045: FTL is untrusted, and fluent-syntax 0.11.1 panics or
+            // overflows its stack on some resources (UPSTREAM U1, U2): those
+            // are refused before it parses them.
+            crate::ftl_check::check(&source).map_err(|err| format!("`{path}`: {err}"))?;
             // A resource with syntax errors still loads: Fluent keeps its
             // valid messages and the errors name the broken ones.
             let resource = match FluentResource::try_new(source.clone()) {
@@ -496,6 +500,8 @@ where
 /// formatted value substitutes into it — never panics, errors are values.
 #[cfg(feature = "fuzzing")]
 pub(crate) fn markdown_fuzz(ftl: &str, id: &str, args_json: &str) -> Option<String> {
+    // As the loader: checked before fluent-syntax parses it (ADR 0045).
+    crate::ftl_check::check(ftl).ok()?;
     let cache = markdown_cache(&[ftl.to_owned()]);
     let entry = cache.messages.get(id)?;
     let text = translate_markdown_value(ftl, id, args_json)?;
@@ -507,6 +513,7 @@ pub(crate) fn markdown_fuzz(ftl: &str, id: &str, args_json: &str) -> Option<Stri
 /// substitute into the cache — the same text the real bundle produces.
 #[cfg(feature = "fuzzing")]
 fn translate_markdown_value(ftl: &str, id: &str, args_json: &str) -> Option<String> {
+    crate::ftl_check::check(ftl).ok()?;
     let resource = fluent::FluentResource::try_new(ftl.to_owned()).ok()?;
     let locale: unic_langid::LanguageIdentifier = "en".parse().ok()?;
     let mut bundle = fluent::concurrent::FluentBundle::new_concurrent(vec![locale]);

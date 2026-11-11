@@ -250,6 +250,7 @@ mod cascade;
 pub mod custom_elements;
 pub mod focus;
 pub mod fonts;
+pub mod ftl_check;
 pub mod html;
 pub mod l10n;
 pub(crate) mod md;

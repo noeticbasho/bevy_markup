@@ -3384,7 +3384,8 @@ dependencies = [
 [[package]]
 name = "fluent-syntax"
 version = "0.11.1"
-source = "git+https://github.com/nchashch/fluent-rs?branch=fix%2Ffuzzing-bugs-0.11#e31a854596e4c791b8f44381f3111b5e273b08d1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a530c4694a6a8d528794ee9bbd8ba0122e779629ac908d15ad5a7ae7763a33d"
 dependencies = [
  "thiserror 1.0.69",
 ]

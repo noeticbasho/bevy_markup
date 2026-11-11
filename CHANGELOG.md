@@ -81,7 +81,19 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
     offset reaching more than `MAX_SVG_FILTER_REGION` (2²⁴ px) from the
     image fails with an error, instead of a renderer panic.
 
+### Changed
+- **No `[patch]` for fluent-syntax needed any more**: remove the
+  `fluent-syntax` entry from your app's `[patch.crates-io]` if you added
+  it. bevy_markup now uses upstream fluent-syntax and refuses, at load, the
+  Fluent files that would crash it (ADR 0045).
+
 ### Security
+- **Fluent files are checked when they load** (ADR 0045): placeables and
+  function calls nested deeper than `ftl_check::MAX_FTL_NESTING` (64), or
+  an incomplete `\u`/`\U` escape right before a non-ASCII character, fail
+  the bundle's load with the line, instead of a stack overflow or a panic
+  in the Fluent parser. **Possibly breaking:** such a file used to load
+  (the deep message dropped) under the patched parser.
 - **Templates are checked when they load** (ADR 0044): every input is
   treated as untrusted, templates included. A template whose own work or
   built values could pass `tera_check::MAX_TEMPLATE_STEPS`,

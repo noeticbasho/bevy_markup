@@ -42,7 +42,3 @@ path = "fuzz_targets/ftl.rs"
 test = false
 doc = false
 bench = false
-
-# Same fluent-syntax fork as the root Cargo.toml.
-[patch.crates-io]
-fluent-syntax = { git = "https://github.com/nchashch/fluent-rs", branch = "fix/fuzzing-bugs-0.11" }

@@ -292,7 +292,9 @@ pub fn cascade(css: &str) -> Result<String, String> {
 /// `data-l10n-args` JSON: parse failures and missing messages are values.
 pub fn translate(ftl: &str, id: &str, args_json: &str) -> Result<String, String> {
     // Unparsable FTL is skipped: this fluent version drops the partial
-    // resource, so there is no recovery path to fuzz.
+    // resource, so there is no recovery path to fuzz. The loader's safety check (ADR 0045): what it refuses never reaches
+    // fluent-syntax.
+    crate::ftl_check::check(ftl).map_err(|err| err.to_string())?;
     let resource =
         fluent::FluentResource::try_new(ftl.to_owned()).map_err(|errors| format!("{errors:?}"))?;
     let locale: unic_langid::LanguageIdentifier = "en".parse().map_err(|err| format!("{err:?}"))?;
@@ -334,19 +336,18 @@ mod tests {
     /// bug_0005, found by honggfuzz (`ftl` target): fluent-syntax 0.11.1
     /// quotes an invalid `\U` escape plus the character that ended it, sliced
     /// one byte past the escape — inside that character if it's multi-byte.
-    /// Fixed in the fluent-syntax fork (root Cargo.toml `[patch]`); this must
-    /// never panic.
+    /// The load-time check (`ftl_check`, ADR 0045) refuses it before
+    /// fluent-syntax runs; this must never panic.
     #[test]
     fn broken_unicode_escape_after_multibyte_char_does_not_panic() {
         let ftl = "u={\"\\U\u{fffd}";
-        let _ = translate(ftl, "", "");
+        assert!(translate(ftl, "", "").is_err());
     }
 
-    /// bug_0015: expressions nested far beyond the fork's limit
-    /// (`MAX_NESTING_DEPTH`, 100) are a parse error, not a stack overflow,
-    /// even on a 2 MB thread, where unbounded debug builds overflowed
-    /// between 200 and 400 levels. Both recursion paths: placeables and
-    /// call arguments (the first fix covered placeables only).
+    /// bug_0015: expressions nested far beyond `MAX_FTL_NESTING` are refused
+    /// before fluent-syntax recurses, even on a 2 MB thread, where unbounded
+    /// debug builds overflowed between 200 and 400 levels. Both recursion
+    /// paths: placeables and call arguments.
     #[test]
     fn deeply_nested_expressions_are_an_error_not_a_stack_overflow() {
         let placeables = format!("x = {}\"a\"{}\n", "{".repeat(100_000), "}".repeat(100_000));
@@ -366,27 +367,22 @@ mod tests {
         }
     }
 
-    /// Nesting up to the limit still parses and formats, and the limit
-    /// leaves later entries alone (the deep entry becomes Junk).
+    /// Nesting up to the limit still parses and formats; one more level is
+    /// refused (the whole resource: fluent-syntax would recurse on it).
     #[test]
     fn nesting_up_to_the_limit_still_works() {
+        let limit = crate::ftl_check::MAX_FTL_NESTING;
         let nested = |depth: usize| format!("{}\"a\"{}", "{".repeat(depth), "}".repeat(depth));
         assert_eq!(
-            translate(&format!("x = {}\n", nested(100)), "x", "{}"),
+            translate(&format!("x = {}\n", nested(limit)), "x", "{}"),
             Ok("a".to_owned())
         );
-        let resource =
-            fluent::FluentResource::try_new(format!("deep = {}\nok = fine\n", nested(101)));
-        let (resource, errors) = resource.expect_err("depth 101 is an error");
-        assert_eq!(errors.len(), 1, "{errors:?}");
-        let ids: Vec<&str> = resource
-            .entries()
-            .filter_map(|entry| match entry {
-                fluent_syntax::ast::Entry::Message(message) => Some(message.id.name),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(ids, ["ok"], "the entry after the deep one survives");
+        let deeper = translate(
+            &format!("deep = {}\nok = fine\n", nested(limit + 1)),
+            "ok",
+            "{}",
+        );
+        assert!(deeper.is_err_and(|err| err.contains("MAX_FTL_NESTING")));
     }
 
     proptest::proptest! {

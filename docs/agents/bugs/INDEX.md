@@ -39,7 +39,7 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0002](bug_0002.md) | Non-ASCII selector panics `Compound::parse` (byte slice across char boundary) | `cascade.rs` | high | fixed (`017cfac`) | cargo-fuzz `css` target |
 | [bug_0003](bug_0003.md) | Removing `HtmlDebugOutline` never triggers a rebuild | `build.rs` (pipeline) | medium | fixed (`06b86ae`) | `proptest-stateful` (tests/stateful.rs) |
 | [bug_0004](bug_0004.md) | Global failed-stylesheet latch swallows a later re-select of the same broken sheet | `build.rs` (`FailedSheets`) | medium | fixed (`06b86ae`) | `proptest-stateful` (tests/stateful.rs) |
-| [bug_0005](bug_0005.md) | fluent-syntax panics on an invalid unicode escape before a multi-byte character | upstream `fluent-syntax` 0.11.1 | high | fixed in the fluent-syntax fork (git patch); **upstream unfixed**, PR pending | honggfuzz `ftl` target |
+| [bug_0005](bug_0005.md) | fluent-syntax panics on an invalid unicode escape before a multi-byte character | upstream `fluent-syntax` 0.11.1 | high | fixed: refused at load by `ftl_check` (ADR 0045; first by the fluent-syntax fork); **upstream unfixed**, PR pending | honggfuzz `ftl` target |
 | [bug_0006](bug_0006.md) | `data-l10n-id` on containers and inline elements is silently ignored | `build.rs` (translation walk) | medium | fixed (`94a4fb9`) | Fluent oracle (`fluent_oracle`) |
 | [bug_0007](bug_0007.md) | `data-l10n-name` overlays unsupported: source attributes lost | `build.rs` (translation walk) | medium | fixed (`94a4fb9`) | Fluent oracle (`fluent_oracle`) |
 | [bug_0008](bug_0008.md) | Removing a per-entity `HtmlStylesheet` never rebuilds | `src/build.rs` | medium | fixed (`0d9d6cb`) | targeted probe while designing proptest-stateful ops |
@@ -49,7 +49,7 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0012](bug_0012.md) | `HtmlElements` lookups were breadth-first, not document order | `src/html.rs` | medium | fixed (`0d9d6cb`) | unit test + arbtest model |
 | [bug_0013](bug_0013.md) | CSS padding on a boxed `pre` added to the default 8px | `src/build.rs` | low | fixed (`0d9d6cb`) | code reading while adding layout support; confirmed by the layout oracle |
 | [bug_0014](bug_0014.md) | Text in a boxed block never wraps: it overflows the box | `src/build.rs` | medium | fixed (`311c808`) | mutation-testing triage (layout oracle case) |
-| [bug_0015](bug_0015.md) | Deeply nested FTL expressions overflow the stack | upstream `fluent-syntax` 0.11.1 | medium | fixed in the fluent-syntax fork (git patch; first fix missed nested calls); **upstream unfixed**, PR pending | fuzz-corpus coverage replay |
+| [bug_0015](bug_0015.md) | Deeply nested FTL expressions overflow the stack | upstream `fluent-syntax` 0.11.1 | medium | fixed: refused at load by `ftl_check` (ADR 0045; first by the fluent-syntax fork, whose first fix missed nested calls); **upstream unfixed**, PR pending | fuzz-corpus coverage replay |
 | [bug_0016](bug_0016.md) | Rebuilding an `HtmlUi` under a rebuilding ancestor `HtmlUi` panics (commands on despawned entities) | `src/build.rs` | high | fixed (`9d21b17`) | user report (demo locale click), minimized to a vector |
 | [bug_0017](bug_0017.md) | Restyle fallback rebuild despawned app-nested `HtmlUi`s (same_shape counted them as shape mismatches) | `src/build.rs` (`same_shape`) | high | fixed (`d079b08`) | startup crash of the demo, traced via `bevy/debug` |
 | [bug_0018](bug_0018.md) | An app `ImageNode` on a built element turned every restyle into a rebuild (rebuild every frame) | `src/build.rs` (`same_shape`) | high | fixed (`f99c6ec`) | prototype_19 integration (entity-id sampling over BRP) |
@@ -256,6 +256,7 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0219](bug_0219.md) | Canvas bookkeeping: warning sets never shrink; `<CANVAS>` in text skips its warning | `src/canvas.rs`, `src/build.rs` | low | fixed (uncommitted) | review_0007 (K15) |
 | [bug_0220](bug_0220.md) | A template's render had no bound on work or memory (nested loops, `set_global` doubling) | `src/html.rs`, `src/template.rs` | high | fixed (uncommitted) | review_0007 (K16) |
 | [bug_0221](bug_0221.md) | `source_lint` skips `src/` subdirectories; SVG text is unfuzzed | `tests/source_lint.rs`, fuzz harness | low | fixed (uncommitted) | review_0007 (K17) |
+| [bug_0222](bug_0222.md) | A windowed build places a row one section gap (3 px) above the full build | `src/build.rs` (windowed build) | low | open | `windowing_model` property, random seed |
 
 ## Discovery session metadata: bug_0001–0005
 

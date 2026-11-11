@@ -228,6 +228,11 @@ or crashing the app:
   refused. Loops over your `TemplateContext` data count once per element:
   the data you send is yours to size. Rendered output is capped at
   `template::MAX_RENDERED_BYTES`.
+- **Fluent files** are checked once when they load
+  (`bevy_markup::ftl_check`): placeables and function calls nested deeper
+  than `MAX_FTL_NESTING`, and a broken `\u` escape that would crash the
+  Fluent parser, fail the bundle's load. No `[patch]` is needed in your
+  app.
 - **CSS**: nesting, `var()` substitution, grid tracks and selector forms
   whose matching cost explodes are bounded or skipped.
 - **SVG**: no external resources, size, depth, conversion-work and
@@ -311,22 +316,6 @@ remain your app's choice. Optional features:
 |---|---|
 | 0.5 to 0.8 | 0.20 |
 | 0.1 to 0.4 | 0.19 |
-
-### Recommended: patched fluent-syntax
-
-The fluent-syntax version `fluent` 0.16 (fluent-bundle 0.15) uses (0.11)
-has two bugs that a malformed translation file can trigger: a panic on a
-broken unicode escape, and a stack overflow (process abort) on deeply nested
-expressions. Until upstream fixes are released, add this to your app's
-`Cargo.toml` (cargo applies `[patch]` only in the top-level project, so
-bevy_markup can't do it for you):
-
-```toml
-[patch.crates-io]
-fluent-syntax = { git = "https://github.com/nchashch/fluent-rs", branch = "fix/fuzzing-bugs-0.11" }
-```
-
-It matters most if players can load their own translations or mods.
 
 ---
 
