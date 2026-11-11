@@ -60,18 +60,45 @@ const SEGMENT_WORK: u64 = 4;
 /// of all its cubics, then hands them out with `Vec::remove(0)`, each
 /// moving the rest (UPSTREAM U22): ~0.18 ns per square, a fifth of this.
 const ARC_SQUARE_WORK: f64 = 1.0 / 64.0;
-/// `<style>` rule × element pairs per unit of work: usvg matches every
-/// rule against every element (`resolve_css`), the model does once more
-/// before it, and [`svg_boxes`](crate::svg_boxes) a third time when the
-/// document has boxes — ~9 ns a pair over the three in release
-/// (bug_0207); a quarter unit is ~15 ns.
-const RULE_MATCHES_PER_WORK: u64 = 4;
+/// simplecss matcher calls per unit of work: usvg matches every rule
+/// against every element (`resolve_css`), the model does once more before
+/// it, and [`svg_boxes`](crate::svg_boxes) a third time when the document
+/// has boxes — ~9 ns a call over the three in release (bug_0207); a
+/// quarter unit is ~15 ns. A call tests one compound; a descendant
+/// combinator makes more calls ([`descendant_calls`], bug_0229).
+const RULE_MATCHES_PER_WORK: f64 = 4.0;
+/// Weight of one class, id, attribute or pseudo-class test in a matcher
+/// call, in calls (~25 ns each: 16 classes against an element with 16
+/// classes took 400 ns a pair, bug_0231), plus a call per this many bytes
+/// of the longest attribute value such a test reads (`Contains` splits
+/// it).
+const SUBSELECTOR_CALLS: f64 = 2.0;
+const SUBSELECTOR_BYTES_PER_CALL: f64 = 64.0;
+/// Bytes simplecss scans per unit of work while parsing a `<style>` text:
+/// each error it raises — and it raises one at every declaration's end, a
+/// unitless number or a `#` color, then drops it — counts the lines from
+/// the text's start (`gen_text_pos`, UPSTREAM U40), ~16 bytes a ns; usvg
+/// parses the text again and [`svg_boxes`](crate::svg_boxes) a third
+/// time.
+const STYLE_SCAN_BYTES_PER_WORK: u64 = 320;
 /// Work of one gradient stop instance (~2 ns in release when an inherited
 /// gradient's stops are copied per shape; one unit, generously).
 const STOP_WORK: u64 = 1;
 /// Work per byte of text content: as much as an element, for shaping with
 /// `svg-text` (without it usvg skips text).
 const TEXT_WORK: u64 = 16;
+/// Characters² of one `<text>` per unit of work: usvg lays a chunk out
+/// in time quadratic in its length — `code_point_at` counts from the
+/// chunk's start for every cluster, and a font fallback finds each glyph
+/// it replaces by a linear search (UPSTREAM U41). 10⁵ characters took
+/// 3.9 s, 13.5 s with a character the font lacks: ~1.35 ns a square,
+/// about 1/44 unit.
+const TEXT_SQUARE_PER_WORK: u64 = 32;
+/// Work per span × character of one `<text>`: usvg shapes the whole
+/// chunk once per span and merges each span's glyphs by a linear search
+/// (UPSTREAM U43); 4 000 one-character `<tspan>`s took 2.0 s (~120 ns a
+/// pair).
+const SPAN_RESHAPE_WORK: u64 = 2;
 /// usvg's default `font-size` (`Options::font_size`), the base of `em`.
 const DEFAULT_FONT_SIZE: f64 = 12.0;
 /// usvg's viewport when the root has no size: 100 × 100.
@@ -335,24 +362,33 @@ impl<'a, 'input> Graph<'a, 'input> {
         }
         // The rules that can attach a reference or a length the model
         // reads, as usvg collects them (`svgtree/parse.rs` `resolve_css`).
-        let mut sheet = simplecss::StyleSheet::new();
-        for node in document
+        // Parsing a sheet is quadratic in its length (UPSTREAM U40):
+        // bounded before simplecss sees it.
+        let styles: Vec<&str> = document
             .descendants()
             .filter(|node| node.has_tag_name("style"))
-        {
-            match node.attribute("type") {
-                Some("text/css") | None => {}
-                Some(_) => continue,
-            }
-            if let Some(text) = node.text() {
-                sheet.parse_more(text);
-            }
+            .filter(|node| matches!(node.attribute("type"), Some("text/css") | None))
+            .filter_map(|node| node.text())
+            .collect();
+        let parse_work = styles
+            .iter()
+            .map(|text| style_scan_bytes(text) / STYLE_SCAN_BYTES_PER_WORK)
+            .fold(0u64, u64::saturating_add);
+        if parse_work > max_work {
+            return Err(SvgError::TooLarge {
+                work: parse_work,
+                max: max_work,
+            });
+        }
+        let mut sheet = simplecss::StyleSheet::new();
+        for text in &styles {
+            sheet.parse_more(text);
         }
         // Every rule is matched against every element, three times over,
-        // whether it attaches anything or not: refused before this pass
-        // runs when that alone is over the budget (bug_0207).
-        let rule_work = (sheet.rules.len() as u64).saturating_mul(elements.len() as u64)
-            / RULE_MATCHES_PER_WORK;
+        // whether it attaches anything or not, and a descendant combinator
+        // backtracks (UPSTREAM U40): refused before any matching when that
+        // alone is over the budget (bug_0207, bug_0229, bug_0231).
+        let rule_work = parse_work.saturating_add(match_work(&sheet, &elements, &index));
         if rule_work > max_work {
             return Err(SvgError::TooLarge {
                 work: rule_work,
@@ -669,12 +705,31 @@ impl<'a, 'input> Graph<'a, 'input> {
     }
 
     fn text_work(&self, i: usize) -> u64 {
-        self.elements[i]
+        let element = &self.elements[i];
+        let own = element
             .children()
             .filter(|child| child.is_text())
             .map(|child| child.text().map_or(0, str::len) as u64)
             .sum::<u64>()
-            .saturating_mul(TEXT_WORK)
+            .saturating_mul(TEXT_WORK);
+        if !element.has_tag_name("text") {
+            return own;
+        }
+        // usvg lays a text chunk out in time quadratic in its characters
+        // (UPSTREAM U41, bug_0232); a chunk is at most the whole `<text>`.
+        // Each piece of text (a span) reshapes the whole chunk (UPSTREAM
+        // U43): spans × characters.
+        let (mut chars, mut spans) = (0u64, 0u64);
+        for node in element.descendants().filter(|node| node.is_text()) {
+            chars += node.text().map_or(0, |text| text.chars().count()) as u64;
+            spans += 1;
+        }
+        own.saturating_add(chars.saturating_mul(chars) / TEXT_SQUARE_PER_WORK)
+            .saturating_add(
+                spans
+                    .saturating_mul(chars)
+                    .saturating_mul(SPAN_RESHAPE_WORK),
+            )
     }
 
     /// The longest weighted path and the total work, over a topological
@@ -1030,6 +1085,111 @@ pub(crate) fn reference_targets<'a>(value: &'a str, targets: &mut Vec<&'a str>) 
     }
 }
 
+/// Bytes simplecss scans parsing `text` once, at most: the offsets of the
+/// places it raises (and drops) an error, each counting lines from the
+/// start (UPSTREAM U40). A declaration's end (one per `:`), a malformed
+/// block (per `{`), a `#` color starting with a digit (per `#`) and a
+/// number without a unit (per run of digits) are where its grammar
+/// fails; summing every such byte's offset is generous.
+fn style_scan_bytes(text: &str) -> u64 {
+    let mut total = 0u64;
+    let mut previous_digit = false;
+    for (offset, byte) in text.bytes().enumerate() {
+        let digit = byte.is_ascii_digit();
+        if matches!(byte, b':' | b'{' | b'#') || (digit && !previous_digit) {
+            total = total.saturating_add(offset as u64);
+        }
+        previous_digit = digit;
+    }
+    total
+}
+
+/// simplecss's matcher calls, at most, for one element `depth` elements
+/// deep against a selector with `descendants` descendant combinators:
+/// each such combinator tries every ancestor and recurses (UPSTREAM U40),
+/// so the calls are the ways to pick up to that many ancestors in order,
+/// Σ_{j ≤ k} C(depth, j) — reached when the leftmost compound never
+/// matches. A child or sibling combinator tries one element.
+fn descendant_calls(descendants: usize, depth: usize) -> f64 {
+    if descendants >= depth {
+        return 2f64.powi(depth.min(1100) as i32);
+    }
+    let mut binomial = 1.0f64;
+    let mut sum = 1.0;
+    for j in 1..=descendants {
+        binomial = binomial * (depth + 1 - j) as f64 / j as f64;
+        sum += binomial;
+    }
+    sum
+}
+
+/// The work of matching `sheet` against `elements`, three times over
+/// (usvg, the model, the box pass): per rule, its calls on every element
+/// ([`descendant_calls`] by depth) × the cost of a call.
+fn match_work(sheet: &simplecss::StyleSheet, elements: &[roxmltree::Node], index: &[u32]) -> u64 {
+    if sheet.rules.is_empty() {
+        return 0;
+    }
+    // Elements per depth, and each attribute's longest value.
+    let mut depths = vec![0usize; elements.len()];
+    let mut per_depth: Vec<f64> = Vec::new();
+    let mut longest: HashMap<&str, usize> = HashMap::new();
+    for (i, element) in elements.iter().enumerate() {
+        let depth = element
+            .parent_element()
+            .and_then(|parent| index.get(parent.id().get_usize()))
+            .filter(|&&parent| parent != u32::MAX)
+            .map_or(0, |&parent| depths[parent as usize] + 1);
+        depths[i] = depth;
+        if per_depth.len() <= depth {
+            per_depth.resize(depth + 1, 0.0);
+        }
+        per_depth[depth] += 1.0;
+        for attribute in element.attributes() {
+            let entry = longest.entry(attribute.name()).or_default();
+            *entry = (*entry).max(attribute.value().len());
+        }
+    }
+    let mut calls_by_descendants: HashMap<usize, f64> = HashMap::new();
+    let mut total = 0.0f64;
+    for rule in &sheet.rules {
+        let text = rule.selector.to_string();
+        let (mut descendants, mut tests, mut bytes) = (0usize, 0usize, 0usize);
+        for token in simplecss::SelectorTokenizer::from(text.as_str()).flatten() {
+            match token {
+                simplecss::SelectorToken::DescendantCombinator => descendants += 1,
+                simplecss::SelectorToken::ClassSelector(_) => {
+                    tests += 1;
+                    bytes = bytes.max(longest.get("class").copied().unwrap_or(0));
+                }
+                simplecss::SelectorToken::AttributeSelector(name, _) => {
+                    tests += 1;
+                    bytes = bytes.max(longest.get(name).copied().unwrap_or(0));
+                }
+                simplecss::SelectorToken::IdSelector(_)
+                | simplecss::SelectorToken::PseudoClass(_)
+                | simplecss::SelectorToken::LangPseudoClass(_) => tests += 1,
+                _ => {}
+            }
+        }
+        let calls = *calls_by_descendants.entry(descendants).or_insert_with(|| {
+            per_depth
+                .iter()
+                .enumerate()
+                .map(|(depth, &count)| count * descendant_calls(descendants, depth))
+                .sum()
+        });
+        let per_call =
+            1.0 + tests as f64 * (SUBSELECTOR_CALLS + bytes as f64 / SUBSELECTOR_BYTES_PER_CALL);
+        total += calls * per_call / RULE_MATCHES_PER_WORK;
+    }
+    if total >= u64::MAX as f64 {
+        u64::MAX
+    } else {
+        total as u64
+    }
+}
+
 /// usvg's `simplecss::Element` for roxmltree nodes (`svgtree/parse.rs`
 /// `XmlNode`), so `<style>` selectors match exactly what usvg applies.
 pub(crate) struct XmlNode<'a, 'input>(pub roxmltree::Node<'a, 'input>);
@@ -1169,5 +1329,132 @@ mod tests {
         // kurbo makes one; the rounding margin may count two.
         assert!((1.0..=2.0).contains(&quarter_arc(10.0)));
         assert!(quarter_arc(1e30) > 1e4);
+    }
+
+    /// simplecss's descendant matching, replayed: the calls one element
+    /// makes when every compound but the leftmost matches (the worst
+    /// case). [`descendant_calls`] is exactly that count.
+    #[test]
+    fn descendant_calls_count_simplecss_backtracking() {
+        // `matches_impl(idx, element)`: compound `idx` matches unless it's
+        // the leftmost; a descendant combinator tries every ancestor.
+        fn calls(idx: usize, ancestors: usize) -> u64 {
+            if idx == 0 {
+                return 1;
+            }
+            1 + (0..ancestors)
+                .map(|above| calls(idx - 1, above))
+                .sum::<u64>()
+        }
+        for descendants in 0..6 {
+            for depth in 0..14 {
+                assert_eq!(
+                    descendant_calls(descendants, depth),
+                    calls(descendants, depth) as f64,
+                    "{descendants} combinators at depth {depth}"
+                );
+            }
+        }
+    }
+
+    /// bug_0229 and bug_0231 (review_0008 L07, L09): a `<style>` sheet's
+    /// matching is charged by its selectors before anything matches — a
+    /// descendant chain over deep nesting (36 s to parse), or many
+    /// class-heavy rules — and a sheet long enough for simplecss's
+    /// quadratic parse is refused before it parses (UPSTREAM U40). The
+    /// ordinary forms pass.
+    #[test]
+    fn style_sheets_are_charged_before_they_run() {
+        let svg = |style: &str, body: &str| {
+            format!(
+                "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'>\
+                 <style>{style}</style>{body}</svg>"
+            )
+        };
+        let nest = |depth: usize| format!("{}<rect/>{}", "<g>".repeat(depth), "</g>".repeat(depth));
+        let classes: String = (0..16).map(|i| format!(" c{i}")).collect();
+        let compound: String = (0..16).map(|i| format!(".c{i}")).collect();
+        let class_rules: String = (0..2000)
+            .map(|_| format!("rect{compound}x {{ stroke-width: 2 }}\n"))
+            .collect();
+        let long_sheet: String = (0..40000).map(|_| "rect { fill: red }\n").collect();
+        for (name, document) in [
+            (
+                "descendants",
+                svg("q g g g g g g g { fill: red }", &nest(60)),
+            ),
+            (
+                "classes",
+                svg(
+                    &class_rules,
+                    &format!("<rect class='{classes}'/>").repeat(16000),
+                ),
+            ),
+            ("long sheet", svg(&long_sheet, "<rect/>")),
+        ] {
+            let start = std::time::Instant::now();
+            assert!(
+                matches!(
+                    crate::svg::parse(document.as_bytes()),
+                    Err(SvgError::TooLarge { .. })
+                ),
+                "{name}"
+            );
+            // Refused before the work (it took seconds): generous for a
+            // loaded debug build.
+            assert!(
+                start.elapsed().as_secs_f32() < 2.0,
+                "{name}: {:?}",
+                start.elapsed()
+            );
+        }
+        let ordinary: String = (0..200)
+            .map(|i| format!(".c{i} rect, g > rect.c{i} {{ stroke-width: 2; fill: url(#p) }}\n"))
+            .collect();
+        let body = format!(
+            "<defs><pattern id='p' width='4' height='4'><rect width='2' height='2'/></pattern></defs>{}{}",
+            "<g class='c1'><rect class='c2'/></g>".repeat(500),
+            nest(12)
+        );
+        assert!(crate::svg::parse(svg(&ordinary, &body).as_bytes()).is_ok());
+        assert!(crate::svg::parse(svg("g g g rect { fill: red }", &nest(30)).as_bytes()).is_ok());
+    }
+
+    /// bug_0232 (review_0008 L10): a `<text>` costs its characters
+    /// squared — usvg's layout of a chunk is quadratic (UPSTREAM U41;
+    /// 10⁵ characters converted for 13.5 s inside the budget). Split
+    /// across elements it stays linear, and ordinary labels are cheap.
+    #[test]
+    fn long_texts_cost_their_length_squared() {
+        let work = |body: &str| {
+            let svg = format!(
+                "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'>{body}</svg>"
+            );
+            let document = roxmltree::Document::parse(&svg).unwrap();
+            bounds(&document, MAX_REFERENCES, u64::MAX).unwrap().work
+        };
+        let text = |chars: usize| format!("<text>{}</text>", "M".repeat(chars));
+        let max = crate::svg::MAX_SVG_WORK;
+        assert!(work(&text(100_000)) > max, "one 10⁵-character text");
+        assert!(
+            work(&format!(
+                "<text><tspan>{}</tspan><tspan>{}</tspan></text>",
+                "M".repeat(10_000),
+                "M".repeat(10_000)
+            )) > max,
+            "its spans are one chunk"
+        );
+        assert!(
+            work(&text(1_000).repeat(100)) < max,
+            "10⁵ characters in 100 texts"
+        );
+        assert!(work(&text(200)) < max / 1000, "a label");
+        // Every span reshapes the whole chunk (UPSTREAM U43): 4 000
+        // one-character `<tspan>`s converted for 2 s.
+        let spans = "<tspan>M</tspan>".repeat(4000);
+        assert!(
+            work(&format!("<text>{spans}</text>")) > max,
+            "one-character spans"
+        );
     }
 }

@@ -1483,6 +1483,8 @@ impl<'a> HtmlStyles<'a> {
     pub fn from_sheet(sheet: &'a StyleSheet<'static>) -> Self {
         let mut rules = Vec::new();
         let mut variables: HashMap<String, TokenList<'static>> = HashMap::default();
+        let mut combinator_arguments = 0;
+        let mut over_combinator_budget = false;
         for (order, rule) in sheet.rules.0.iter().enumerate() {
             let CssRule::Style(rule) = rule else {
                 // ADR 0028: an `@font-face` rule (or any other at-rule) is
@@ -1523,6 +1525,23 @@ impl<'a> HtmlStyles<'a> {
                     );
                     continue;
                 };
+                // bug_0235: combinators inside `:is()` & co. cost depth²
+                // per element each; the sheet gets a budget of them.
+                if selector.combinator_arguments() > 0 {
+                    combinator_arguments += selector.combinator_arguments();
+                    if combinator_arguments > selector::MAX_COMBINATOR_ARGUMENTS {
+                        if !over_combinator_budget {
+                            debug!(
+                                "html css: more than MAX_COMBINATOR_ARGUMENTS ({}) combinators \
+                                 inside :is()/:where()/:not() in one stylesheet; skipping the \
+                                 rules past it",
+                                selector::MAX_COMBINATOR_ARGUMENTS
+                            );
+                        }
+                        over_combinator_budget = true;
+                        continue;
+                    }
+                }
                 let specificity = selector.specificity();
                 for (important, declarations) in [
                     (false, &rule.declarations.declarations),
@@ -7180,14 +7199,19 @@ mod tests {
         assert_eq!(style.color, None);
     }
 
-    /// What the allowlist still admits matches in time linear in the
-    /// depth times the compounds: bug_0213's document (95 nested `<div>`s)
+    /// What the allowlist still admits matches in time polynomial in the
+    /// depth, not exponential: bug_0213's document (95 nested `<div>`s)
     /// under six compounds with one level of `:is()` each, where nesting
-    /// them six deep took two minutes. Scaling, not wall time: the deep
-    /// document against a quarter as deep, best of three, at most 8× for
-    /// 4× the depth (depth² would be 16×).
+    /// them six deep took two minutes. One argument with a combinator is
+    /// walked to the root from every ancestor, so depth² per element
+    /// (review_0008 L13: the old name said linear, and an 8× bound for 4×
+    /// the depth passed only on fixed overhead). Scaling, not wall time:
+    /// best of three, at most 24× for 4× the depth (depth² is 16×; the
+    /// nesting bug_0213 refused, depth⁶, would be 4096×). The number of
+    /// such arguments per sheet is capped
+    /// (`combinator_arguments_are_budgeted_per_sheet`).
     #[test]
-    fn allowed_is_arguments_match_in_linear_time() {
+    fn allowed_is_arguments_match_in_quadratic_time() {
         let selector = format!("{}p", ":is(.never div) div ".repeat(6));
         assert!(Selector::parse(&selector).is_some(), "admitted");
         let sheet = owned_sheet(&format!("{selector} {{ color: #ff0000 }}"));
@@ -7211,7 +7235,45 @@ mod tests {
                 .unwrap()
         };
         let (short, long) = (time(24), time(96));
-        assert!(long <= short * 8, "{long:?} for 4× the depth of {short:?}");
+        assert!(long <= short * 24, "{long:?} for 4× the depth of {short:?}");
+    }
+
+    /// bug_0235: a sheet holds at most `MAX_COMBINATOR_ARGUMENTS`
+    /// combinators inside `:is()`/`:where()`/`:not()` arguments (each
+    /// costs depth² per element); the rules past it are skipped, and
+    /// arguments without a combinator don't count.
+    #[test]
+    fn combinator_arguments_are_budgeted_per_sheet() {
+        let max = selector::MAX_COMBINATOR_ARGUMENTS as usize;
+        let rules: String = (0..max + 4)
+            .map(|i| format!(":is(.a div) .x{i} {{ color: #ff0000 }}\n"))
+            .chain((0..200).map(|i| format!(":is(.a, .b) .y{i} {{ color: #ff0000 }}\n")))
+            .collect();
+        let sheet = owned_sheet(&rules);
+        let styles = HtmlStyles::from_sheet(&sheet);
+        let color = |class: &str| {
+            styles
+                .get(
+                    &element("p", None, &[class]),
+                    Pseudo::default(),
+                    &[ancestor("div", &[]), ancestor("section", &["a"])],
+                    &ElementState::default(),
+                )
+                .color
+        };
+        assert!(
+            color(&format!("x{}", max - 1)).is_some(),
+            "within the budget"
+        );
+        assert_eq!(color(&format!("x{max}")), None, "past it: skipped");
+        assert!(color("y199").is_some(), "compound arguments are free");
+        // Two arguments in one selector count twice.
+        assert_eq!(
+            Selector::parse(":is(.a div):not(.b p) span")
+                .unwrap()
+                .combinator_arguments(),
+            2
+        );
     }
 
     /// ADR 0029's reactivity record through ADR 0034's new arguments: a

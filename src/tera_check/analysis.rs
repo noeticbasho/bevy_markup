@@ -27,10 +27,16 @@ use super::{CheckError, MAX_TEMPLATE_APP_COPIES, MAX_TEMPLATE_STEPS, MAX_TEMPLAT
 /// bodies twice, components per call site): past it the template is too
 /// complex to check, and refused.
 const MAX_ANALYSIS_WORK: u64 = 1 << 22;
-/// Templates and components evaluated inside each other at most: the
-/// analysis recurses per level (a 2 MB asset thread), Tera's own
-/// component limit is 20.
+/// Templates and components evaluated inside each other at most (Tera's
+/// own component limit is 20).
 const MAX_NESTING: usize = 64;
+/// Statement and expression levels the analysis recurses through at most,
+/// across includes and components: it runs on an asset thread with a 2 MB
+/// stack, and Tera allows 40 statement levels in *each* template, so a
+/// chain of includes multiplied them past it (bug_0223). A level costs
+/// about 14 KB of a debug build's stack, so 96 take 1.4 MB
+/// (`the_deepest_accepted_template_fits_a_two_megabyte_stack`).
+pub(super) const MAX_DEPTH: usize = 96;
 /// Tera's `range` limit.
 const RANGE_MAX: u64 = 100_000;
 /// A written number, at most (`-9223372036854775808`, a float's digits).
@@ -161,6 +167,11 @@ struct Av {
     elem: Lin,
     /// Written without escaping.
     safe: bool,
+    /// For a value holding app data: the app loop whose element it is part
+    /// of (`None`: the context's own, or a mix). A loop over app data runs
+    /// inside another only over that loop's element (`group.cards`), so
+    /// nested loops stay linear in the app's data (bug_0226).
+    origin: Option<u32>,
 }
 
 impl Av {
@@ -171,6 +182,7 @@ impl Av {
             num: Lin::app(),
             elem: Lin::app(),
             safe: false,
+            origin: None,
         }
     }
 
@@ -181,6 +193,7 @@ impl Av {
             num: Lin::default(),
             elem: Lin::new(bytes),
             safe: false,
+            origin: None,
         }
     }
 
@@ -199,6 +212,7 @@ impl Av {
             // A character.
             elem: Lin::new(4),
             safe,
+            origin: None,
         }
     }
 
@@ -242,16 +256,33 @@ impl Av {
             num: self.num.clone(),
             elem: self.elem.clone(),
             safe: false,
+            origin: self.origin,
         }
     }
 
+    /// Holds app data (some part is `k·A`).
+    fn is_app(&self) -> bool {
+        [&self.bytes, &self.items, &self.elem]
+            .iter()
+            .any(|part| part.k > 0)
+    }
+
     fn max(&self, other: &Av) -> Av {
+        // One side's origin when the other holds no app data; a mix of two
+        // origins is the context's.
+        let origin = match (self.is_app(), other.is_app()) {
+            (true, false) => self.origin,
+            (false, true) => other.origin,
+            _ if self.origin == other.origin => self.origin,
+            _ => None,
+        };
         Av {
             bytes: self.bytes.max(&other.bytes),
             items: self.items.max(&other.items),
             num: self.num.max(&other.num),
             elem: self.elem.max(&other.elem),
             safe: self.safe && other.safe,
+            origin,
         }
     }
 
@@ -385,6 +416,18 @@ pub(super) struct Analyzer<'s> {
     lineage: Vec<&'s str>,
     /// The blocks being evaluated: name and lineage level (`super()`).
     block_stack: Vec<(String, usize)>,
+    /// Statement and expression levels being evaluated ([`MAX_DEPTH`]).
+    depth: usize,
+    /// The loops over app data being evaluated, innermost last (their ids:
+    /// [`Av::origin`]).
+    app_loops: Vec<u32>,
+    next_loop: u32,
+}
+
+fn entry_expr(entry: &Entry) -> &Expr {
+    match entry {
+        Entry::Pair(_, expr) | Entry::Spread(expr) => expr,
+    }
 }
 
 fn collect_blocks<'s>(nodes: &'s [Node], out: &mut HashMap<&'s str, &'s [Node]>) {
@@ -433,6 +476,9 @@ impl<'s> Analyzer<'s> {
             stack: Vec::new(),
             lineage: Vec::new(),
             block_stack: Vec::new(),
+            depth: 0,
+            app_loops: Vec::new(),
+            next_loop: 0,
         }
     }
 
@@ -555,7 +601,23 @@ impl<'s> Analyzer<'s> {
         out
     }
 
+    /// Enters one level of the analysis's own recursion ([`MAX_DEPTH`]).
+    fn descend(&mut self) -> Result<(), CheckError> {
+        if self.depth >= MAX_DEPTH {
+            return Err(CheckError::TooComplex);
+        }
+        self.depth += 1;
+        Ok(())
+    }
+
     fn nodes(&mut self, nodes: &'s [Node], env: &mut Env) -> Result<Lin, CheckError> {
+        self.descend()?;
+        let out = self.nodes_in(nodes, env);
+        self.depth -= 1;
+        out
+    }
+
+    fn nodes_in(&mut self, nodes: &'s [Node], env: &mut Env) -> Result<Lin, CheckError> {
         let mut out = Lin::default();
         for node in nodes {
             self.tick()?;
@@ -656,9 +718,24 @@ impl<'s> Analyzer<'s> {
     }
 
     /// The `set_global` targets a loop body can assign (through `if`s,
-    /// nested loops, captures and includes).
+    /// nested loops, captures, includes and component bodies, which run in
+    /// the caller's scope — bug_0224).
     fn carried(&self, nodes: &'s [Node], out: &mut Vec<String>, seen: &mut Vec<String>) {
         for node in nodes {
+            let exprs: Vec<&Expr> = match node {
+                Node::Expr(expr) | Node::Set { value: expr, .. } | Node::If(expr, ..) => {
+                    vec![expr]
+                }
+                Node::For { target, .. } => vec![target],
+                Node::BlockSet { filters, .. } | Node::FilterSection(filters, _) => filters
+                    .iter()
+                    .flat_map(|(_, kwargs)| kwargs.iter().map(|(_, expr)| expr))
+                    .collect(),
+                _ => Vec::new(),
+            };
+            for expr in exprs {
+                self.carried_expr(expr, out, seen);
+            }
             match node {
                 Node::Set {
                     name, global: true, ..
@@ -699,6 +776,45 @@ impl<'s> Analyzer<'s> {
         }
     }
 
+    /// [`Self::carried`] inside an expression: every component body in it.
+    fn carried_expr(&self, expr: &'s Expr, out: &mut Vec<String>, seen: &mut Vec<String>) {
+        let mut stack = vec![expr];
+        while let Some(expr) = stack.pop() {
+            match expr {
+                Expr::Lit(_) | Expr::Var(_) => {}
+                Expr::Array(items) => stack.extend(items.iter().map(|(_, item)| item)),
+                Expr::Map(entries) => stack.extend(entries.iter().map(entry_expr)),
+                Expr::Attr(inner, _) => stack.push(inner),
+                Expr::Item(inner, index) => stack.extend([&**inner, &**index]),
+                Expr::Slice(inner, parts) => {
+                    stack.push(inner);
+                    stack.extend(parts);
+                }
+                Expr::Filter(inner, _, kwargs) | Expr::Test(inner, kwargs) => {
+                    stack.push(inner);
+                    stack.extend(kwargs.iter().map(|(_, expr)| expr));
+                }
+                Expr::Call(_, kwargs) => stack.extend(kwargs.iter().map(|(_, expr)| expr)),
+                Expr::Ternary(a, b, c) => stack.extend([&**a, &**b, &**c]),
+                Expr::Comprehension {
+                    expr,
+                    target,
+                    condition,
+                    ..
+                } => {
+                    stack.extend([&**expr, &**target]);
+                    stack.extend(condition.as_deref());
+                }
+                Expr::Component { attrs, body, .. } => {
+                    stack.extend(attrs.iter().map(entry_expr));
+                    self.carried(body, out, seen);
+                }
+                Expr::Unary(_, inner) => stack.push(inner),
+                Expr::Binary(_, left, right) => stack.extend([&**left, &**right]),
+            }
+        }
+    }
+
     fn loop_scope(
         key: Option<&str>,
         value: &str,
@@ -730,13 +846,57 @@ impl<'s> Analyzer<'s> {
     ) -> Result<Lin, CheckError> {
         let target = self.expr(target, env)?;
         let count = target.items.fold();
-        let element = target.element();
+        let app_loop = self.enter_app_loop(&target)?;
+        let mut element = target.element();
+        if app_loop.is_some() {
+            element.origin = app_loop;
+        }
+        let out = self.for_body(key, value, &element, &count, body, env);
+        if app_loop.is_some() {
+            self.app_loops.pop();
+        }
+        let out = out?;
+        let otherwise = self.nodes(else_body, env)?;
+        Ok(out.max(&otherwise))
+    }
+
+    /// A loop over `target` starts: its id when it runs over app data
+    /// (pushed on [`Self::app_loops`]). Inside another loop over app data
+    /// it may only run over that loop's element, or the work would grow
+    /// with the product of the app's collections (bug_0226).
+    fn enter_app_loop(&mut self, target: &Av) -> Result<Option<u32>, CheckError> {
+        if target.items.k == 0 {
+            return Ok(None);
+        }
+        let allowed = match (self.app_loops.last(), target.origin) {
+            (None, _) => true,
+            (Some(&innermost), Some(origin)) => innermost == origin,
+            (Some(_), None) => false,
+        };
+        if !allowed {
+            return Err(CheckError::NestedAppLoops);
+        }
+        let id = self.next_loop;
+        self.next_loop += 1;
+        self.app_loops.push(id);
+        Ok(Some(id))
+    }
+
+    fn for_body(
+        &mut self,
+        key: Option<&str>,
+        value: &str,
+        element: &Av,
+        count: &Lin,
+        body: &'s [Node],
+        env: &mut Env,
+    ) -> Result<Lin, CheckError> {
         let mut carried = Vec::new();
         self.carried(body, &mut carried, &mut Vec::new());
         let finals = if carried.is_empty() {
             Vec::new()
         } else {
-            self.growth(&carried, key, value, &element, &count, body, env)?
+            self.growth(&carried, key, value, element, count, body, env)?
         };
         for (name, av) in &finals {
             env.globals.insert(name.clone(), av.clone());
@@ -744,8 +904,7 @@ impl<'s> Analyzer<'s> {
 
         // The worst iteration: carried values at their bounds.
         let before = self.steps;
-        env.loops
-            .push(Self::loop_scope(key, value, &element, &count));
+        env.loops.push(Self::loop_scope(key, value, element, count));
         let out = self.nodes(body, env);
         env.loops.pop();
         let out = out?;
@@ -758,9 +917,7 @@ impl<'s> Analyzer<'s> {
             self.steps = before;
             self.charge(per_iteration.saturating_mul(count.c))?;
         }
-        let out = self.mul(&count, &out)?;
-        let otherwise = self.nodes(else_body, env)?;
-        Ok(out.max(&otherwise))
+        self.mul(count, &out)
     }
 
     /// The bounds of the `carried` variables after the loop, or a refusal
@@ -779,11 +936,17 @@ impl<'s> Analyzer<'s> {
         self.work_on(env.size())?;
         let mut symbolic = env.clone();
         let mut inner = HashSet::new();
-        for name in carried {
+        // Each symbol's variable: a value may hold one variable's size and
+        // item count together (`max(bytes, items)`, from a nested loop's
+        // growth) — still one copy of it (bug_0228).
+        let mut owner = HashMap::new();
+        for (index, name) in carried.iter().enumerate() {
             let (bytes, items) = (self.next_sym, self.next_sym + 1);
             self.next_sym += 2;
             inner.insert(bytes);
             inner.insert(items);
+            owner.insert(bytes, index);
+            owner.insert(items, index);
             symbolic.globals.insert(
                 name.clone(),
                 Av {
@@ -792,6 +955,7 @@ impl<'s> Analyzer<'s> {
                     num: Lin::new(SAT),
                     elem: Lin::sym(bytes),
                     safe: false,
+                    origin: None,
                 },
             );
         }
@@ -810,12 +974,14 @@ impl<'s> Analyzer<'s> {
         for name in carried {
             let av = symbolic.globals.get(name).cloned().unwrap_or_else(Av::app);
             for part in [&av.bytes, &av.items, &av.elem] {
-                let copies: u64 = part
-                    .syms
-                    .iter()
-                    .filter(|(id, _)| inner.contains(id))
-                    .map(|(_, n)| *n)
-                    .sum();
+                let mut per_variable: HashMap<usize, u64> = HashMap::new();
+                for (id, n) in &part.syms {
+                    if let Some(&variable) = owner.get(id) {
+                        let copies = per_variable.entry(variable).or_default();
+                        *copies = (*copies).max(*n);
+                    }
+                }
+                let copies: u64 = per_variable.values().sum();
                 if part.poison || copies > 1 {
                     return Err(CheckError::Superlinear(name.clone()));
                 }
@@ -837,6 +1003,7 @@ impl<'s> Analyzer<'s> {
                     num: Lin::new(SAT),
                     elem: grown.clone(),
                     safe: false,
+                    origin: None,
                 };
                 (name.clone(), bound.max(&env.lookup(name)))
             })
@@ -859,6 +1026,13 @@ impl<'s> Analyzer<'s> {
     }
 
     fn expr(&mut self, expr: &'s Expr, env: &mut Env) -> Result<Av, CheckError> {
+        self.descend()?;
+        let out = self.expr_in(expr, env);
+        self.depth -= 1;
+        out
+    }
+
+    fn expr_in(&mut self, expr: &'s Expr, env: &mut Env) -> Result<Av, CheckError> {
         self.tick()?;
         let av = match expr {
             Expr::Lit(lit) => Av::lit(lit),
@@ -919,13 +1093,14 @@ impl<'s> Analyzer<'s> {
             } => {
                 let target = self.expr(target, env)?;
                 let count = target.items.fold();
+                let app_loop = self.enter_app_loop(&target)?;
+                let mut element = target.element();
+                if app_loop.is_some() {
+                    element.origin = app_loop;
+                }
                 let before = self.steps;
-                env.loops.push(Self::loop_scope(
-                    key.as_deref(),
-                    value,
-                    &target.element(),
-                    &count,
-                ));
+                env.loops
+                    .push(Self::loop_scope(key.as_deref(), value, &element, &count));
                 let result = (|| {
                     if let Some(condition) = condition {
                         self.expr(condition, env)?;
@@ -933,6 +1108,9 @@ impl<'s> Analyzer<'s> {
                     self.expr(expr, env)
                 })();
                 env.loops.pop();
+                if app_loop.is_some() {
+                    self.app_loops.pop();
+                }
                 let item = result?;
                 if !self.symbolic {
                     let per_item = self.steps - before + 2;
@@ -945,6 +1123,7 @@ impl<'s> Analyzer<'s> {
                     num: item.num,
                     elem: item.bytes,
                     safe: false,
+                    origin: None,
                 }
             }
             Expr::Component { name, attrs, body } => {
@@ -959,6 +1138,9 @@ impl<'s> Analyzer<'s> {
             Expr::Binary(op, left, right) => {
                 let left = self.expr(left, env)?;
                 let right = self.expr(right, env)?;
+                // Concatenating copies both sides, `in` and comparisons
+                // scan them (bug_0227).
+                self.charge(left.bytes.c.saturating_add(right.bytes.c) / 16)?;
                 match op {
                     Binary::StrConcat => {
                         let bytes = left.bytes.add(&right.bytes);
@@ -982,6 +1164,19 @@ impl<'s> Analyzer<'s> {
                 }
             }
         };
+        // What the expression built: a list, a map, a slice, a
+        // comprehension, a `range` — written once per evaluation
+        // (bug_0227).
+        if matches!(
+            expr,
+            Expr::Array(_)
+                | Expr::Map(_)
+                | Expr::Slice(..)
+                | Expr::Comprehension { .. }
+                | Expr::Call(..)
+        ) {
+            self.charge(av.bytes.c / 16)?;
+        }
         self.check(&av)?;
         Ok(av)
     }
@@ -1085,12 +1280,13 @@ impl<'s> Analyzer<'s> {
                 let end = args.get("end").map_or(&zero, |av| &av.num);
                 let start = args.get("start").map_or(&zero, |av| &av.num);
                 let span = end.add(start);
-                // Tera refuses more than RANGE_MAX items; an app-sized
-                // range counts per app element.
-                let items = Lin {
-                    c: span.c.min(RANGE_MAX),
-                    k: span.k.min(1),
-                    ..Lin::default()
+                // Tera refuses more than RANGE_MAX items. A number from the
+                // context isn't a collection the app sized: it may be
+                // anything up to that (bug_0226).
+                let items = if span.k > 0 || span.poison || !span.syms.is_empty() {
+                    Lin::new(RANGE_MAX)
+                } else {
+                    Lin::new(span.c.min(RANGE_MAX))
                 };
                 Ok(Av {
                     bytes: items.scale(NUMBER_BYTES + ITEM_BYTES),
@@ -1098,6 +1294,7 @@ impl<'s> Analyzer<'s> {
                     num: span,
                     elem: Lin::new(NUMBER_BYTES),
                     safe: false,
+                    origin: None,
                 })
             }
             "throw" => Ok(Av::scalar(0)),
@@ -1165,6 +1362,7 @@ impl<'s> Analyzer<'s> {
                     num: Lin::default(),
                     elem: x.bytes.clone(),
                     safe: false,
+                    origin: None,
                 }
             }
             "join" => {
@@ -1172,13 +1370,19 @@ impl<'s> Analyzer<'s> {
                 Av::string(x.bytes.scale(ESCAPE).add(&self.mul(&x.items, &sep)?), false)
             }
             "reverse" | "sort" | "unique" => Av { safe: false, ..x },
-            "first" | "last" | "nth" | "get" => x.element(),
+            "first" | "last" | "nth" => x.element(),
+            // A missing key gives the default (bug_0225).
+            "get" => match arg("default") {
+                Some(default) => x.element().max(&default),
+                None => x.element(),
+            },
             "values" | "keys" => Av {
                 bytes: x.bytes.clone(),
                 items: x.items.clone(),
                 num: x.num.clone(),
                 elem: x.bytes.clone(),
                 safe: false,
+                origin: None,
             },
             "pairs" | "group_by" => Av {
                 bytes: x.bytes.scale(2).add(&x.items.scale(3 * ITEM_BYTES)),
@@ -1186,12 +1390,21 @@ impl<'s> Analyzer<'s> {
                 num: x.num.clone(),
                 elem: x.bytes.scale(2).add(&Lin::new(3 * ITEM_BYTES)),
                 safe: false,
+                origin: None,
             },
             // bevy_markup's `json` (`template::new_tera`): `\uXXXX` escapes
             // and punctuation.
             "json" => Av::string(x.bytes.scale(ESCAPE).add(&x.items.scale(ITEM_BYTES)), false),
             _ => return Err(CheckError::Unknown(format!("filter `{name}`"))),
         };
+        let mut av = av;
+        // A filter of a loop element's data is still that element's
+        // (`group.cards | sort`); `default` and `get` merged theirs.
+        if !matches!(name, "default" | "get") {
+            av.origin = x.origin;
+        }
+        // Writing the result (bug_0227).
+        self.charge(av.bytes.c / 16)?;
         self.check(&av)?;
         Ok(av)
     }

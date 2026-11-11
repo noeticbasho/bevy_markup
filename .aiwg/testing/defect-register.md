@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Derived from | `docs/agents/bugs/INDEX.md`, `UPSTREAM.md`, `docs/agents/reviews/`, CI history |
-| Source state | `3590604` + the `layout_svg` vector, 2026-11-11 |
+| Source state | the review_0008 fixes (after `4af00b9`), 2026-11-12 |
 
 An index; the bug reports are authoritative. 237 reports, bug_0001–0237 (2026-10-04 to 2026-11-12).
 
@@ -11,9 +11,8 @@ An index; the bug reports are authoritative. 237 reports, bug_0001–0237 (2026-
 
 | Status | Count |
 |---|---|
-| Fixed, with regression test | 218 |
+| Fixed, with regression test | 233 |
 | Fixed, measured (no test) | 1 — bug_0211, an idle-frame cost |
-| Open (review_0008, filed before any fix) | 15 — bug_0223–0237 (L01–L14, L16; see below) |
 | Won't fix (known limit) | 1 — bug_0170, a one-frame row shift in the windowed build (low) |
 | Withdrawn (not a bug) | 1 — bug_0026 |
 | Open upstream, no local workaround | 1 — bug_0203, tall inline images and parley 0.11's line metrics (low; fixed in parley 0.12, which Bevy 0.20 doesn't use) |
@@ -24,11 +23,11 @@ An index; the bug reports are authoritative. 237 reports, bug_0001–0237 (2026-
 | Medium | 94 (+1 low–medium) |
 | Low | 68 |
 
-bug_0203 waits on a Bevy release (UPSTREAM U37). review_0007's findings were filed up front as open reports bug_0204–0221 (on request; the usual rule files a finding when its fix lands); all were fixed the same day (three after the threat-model decision, ADR 0044: every input is untrusted).
+bug_0203 waits on a Bevy release (UPSTREAM U37). review_0007's findings were filed up front as open reports bug_0204–0221 (on request; the usual rule files a finding when its fix lands); all were fixed the same day (three after the threat-model decision, ADR 0044: every input is untrusted). review_0008's were filed the same way (bug_0223–0237) and fixed the next day (ADR 0046); the fixes found two more upstream defects (U42 simplecss's quadratic parse, U43 usvg's per-span reshaping).
 
 ## Open Review Findings (review_0007, 2026-11-11, at `f76b320`)
 
-18 findings, `K01`–`K18`; 14 reproduced by probes. Fixed the same day (uncommitted): K01–K17. K18 is records drift. Filed as open reports: K01–K14 → bug_0204–0217, K15 → bug_0218 (+ bug_0219), K16 → bug_0220, K17 → bug_0221; K18 (records drift) isn't a defect and has no report.
+18 findings, `K01`–`K18`; 14 reproduced by probes. Fixed the same day (`d7ddbe2`): K01–K17. K18 is records drift. Filed as open reports: K01–K14 → bug_0204–0217, K15 → bug_0218 (+ bug_0219), K16 → bug_0220, K17 → bug_0221; K18 (records drift) isn't a defect and has no report.
 
 | Severity | Findings |
 |---|---|
@@ -40,7 +39,7 @@ Decided (ADR 0044): every input is untrusted, templates and CSS included; templa
 
 ## Open Review Findings (review_0008, 2026-11-12, at `54bad82`)
 
-16 findings, `L01`–`L16`; 14 reproduced by probes. None fixed. Filed as open reports (2026-11-12): L01–L14 → bug_0223–0236, L16 → bug_0237; L15 (records drift) isn't a defect and has no report.
+16 findings, `L01`–`L16`; 14 reproduced by probes. Fixed 2026-11-12: L01–L14, L16; L15's records drift corrected where it was this repo's records (the INDEX statuses, the README's claim, AGENTS.md's layout). Filed as open reports (2026-11-12): L01–L14 → bug_0223–0236, L16 → bug_0237; L15 (records drift) isn't a defect and has no report.
 
 | Severity | Findings |
 |---|---|
@@ -54,7 +53,7 @@ Property testing, stateful testing and fuzzing (bug_0001–0005), the Fluent and
 
 ## Upstream Defects (`UPSTREAM.md`)
 
-U1–U15: lightningcss exponential parsing and unbounded recursion (U14, U15; worked around by the nesting pre-scan), fluent-syntax panic and stack overflow (refused at load by `ftl_check`, ADR 0045; the fork's PR pending), pulldown-cmark panic (U13, fixed by updating), honggfuzz-rs, fuzzcheck (three, vendored patches), cargo-mutants, cargo-fuzz, Bevy picking (two), lightningcss, tl (switched to `astral-tl`). U38: Bevy's viewport resize unwrapping a missing target image (bug_0218; bound only once the image exists). U39: Tera's unbounded render (bug_0220; the load-time check, ADR 0044). U40: simplecss's exponential descendant matching (bug_0229, no workaround yet). U41: usvg's text layout quadratic in a chunk's length (bug_0232, no workaround yet). U16–U37: parley 0.11's line metrics for tall inline boxes (U37, bug_0203; fixed in parley 0.12, no workaround), Tera's operator recursion (U16), astral-tl's `<b/>` (U21), and the SVG stack: usvg's unbounded recursion and conversion work (U17, U25; the depth and work bounds, ADR 0040), roxmltree (U18, version floor), usvg's file-reading resolver (U19), resvg's turbulence overflow under debug assertions (U20; `svg::guarded`, excused by the `svg` fuzz target's panic hook) and box blur overflow (U32; refused past `MAX_SVG_BLUR`, bug_0198), tiny-skia-path's `to_int_rect` unwraps (U35; filter regions and offsets refused past `MAX_SVG_FILTER_REGION`, bug_0201), resvg's unbounded pattern tiles (U36; charged by the cost estimate, bug_0200), Bevy's picking ignoring inline boxes (U34, bug_0199) and needing a primary window (U33), tiny-skia's far-off-canvas panics in every build (U24, U27, U28; refused before drawing by `MAX_SVG_EXTENT`, bug_0194), usvg's infinite-`baseFrequency` and `feMorphology` radius unwraps and `feConvolveMatrix` `order` overflow (U26, U30, U29; refused before conversion, bug_0192, bug_0196, bug_0195), tiny-skia-path's overflowed bounding-box rect (U31; boxes measured by a first usvg pass, ADR 0042, bug_0197), svgtypes/kurbo arc subdivision (U22) and usvg's self-inheriting pattern (U23).
+U1–U15: lightningcss exponential parsing and unbounded recursion (U14, U15; worked around by the nesting pre-scan), fluent-syntax panic and stack overflow (refused at load by `ftl_check`, ADR 0045; the fork's PR pending), pulldown-cmark panic (U13, fixed by updating), honggfuzz-rs, fuzzcheck (three, vendored patches), cargo-mutants, cargo-fuzz, Bevy picking (two), lightningcss, tl (switched to `astral-tl`). U38: Bevy's viewport resize unwrapping a missing target image (bug_0218; bound only once the image exists). U39: Tera's unbounded render (bug_0220; the load-time check, ADR 0044). U40: simplecss's exponential descendant matching (bug_0229) and U42 its quadratic parse (bug_0231); U41: usvg's text layout quadratic in a chunk's characters, U43 its per-span reshaping (bug_0232) — all four charged into `MAX_SVG_WORK` before they run. U16–U37: parley 0.11's line metrics for tall inline boxes (U37, bug_0203; fixed in parley 0.12, no workaround), Tera's operator recursion (U16), astral-tl's `<b/>` (U21), and the SVG stack: usvg's unbounded recursion and conversion work (U17, U25; the depth and work bounds, ADR 0040), roxmltree (U18, version floor), usvg's file-reading resolver (U19), resvg's turbulence overflow under debug assertions (U20; `svg::guarded`, excused by the `svg` fuzz target's panic hook) and box blur overflow (U32; refused past `MAX_SVG_BLUR`, bug_0198), tiny-skia-path's `to_int_rect` unwraps (U35; filter regions and offsets refused past `MAX_SVG_FILTER_REGION`, bug_0201), resvg's unbounded pattern tiles (U36; charged by the cost estimate, bug_0200), Bevy's picking ignoring inline boxes (U34, bug_0199) and needing a primary window (U33), tiny-skia's far-off-canvas panics in every build (U24, U27, U28; refused before drawing by `MAX_SVG_EXTENT`, bug_0194), usvg's infinite-`baseFrequency` and `feMorphology` radius unwraps and `feConvolveMatrix` `order` overflow (U26, U30, U29; refused before conversion, bug_0192, bug_0196, bug_0195), tiny-skia-path's overflowed bounding-box rect (U31; boxes measured by a first usvg pass, ADR 0042, bug_0197), svgtypes/kurbo arc subdivision (U22) and usvg's self-inheriting pattern (U23).
 
 ## Nightly Failures (2026-10-14 to 2026-10-28, fixed on `main`)
 

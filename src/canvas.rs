@@ -205,6 +205,15 @@ pub(crate) fn mark_canvas(
     }
 }
 
+/// What `sync_canvases` reads of a picture.
+type PictureItems = (
+    &'static ComputedNode,
+    Option<&'static ViewportNode>,
+    Option<&'static ImageNode>,
+    &'static Node,
+    Option<&'static Pickable>,
+);
+
 /// A canvas's picture: the child node showing its source (bug_0215).
 #[derive(Component)]
 pub struct CanvasPicture;
@@ -231,11 +240,9 @@ pub(crate) fn sync_canvases(
         &ComputedNode,
         Option<&InheritedVisibility>,
         Option<&Children>,
+        Option<&Pickable>,
     )>,
-    pictures: Query<
-        (&ComputedNode, Option<&ViewportNode>, Option<&ImageNode>),
-        With<CanvasPicture>,
-    >,
+    pictures: Query<PictureItems, With<CanvasPicture>>,
     targets: Query<&RenderTarget>,
     images: Res<Assets<Image>>,
     parents: Query<&ChildOf>,
@@ -255,31 +262,40 @@ pub(crate) fn sync_canvases(
         picture: Option<Entity>,
         /// The camera its picture's viewport shows now.
         viewing: Option<Entity>,
+        /// What the picture copies from the element: its pointer behaviour
+        /// (bug_0233) and its padding box's corners (bug_0234).
+        looks: PictureLooks,
     }
     let found: Vec<Found> = canvases
         .iter()
-        .map(|(entity, element, _, computed, visibility, kids)| {
-            let name = element.data("canvas").map(str::to_owned);
-            let size = computed.size();
-            let picture = kids
-                .into_iter()
-                .flat_map(|kids| kids.iter())
-                .find(|kid| pictures.contains(*kid));
-            Found {
-                source: name.as_deref().and_then(|name| registry.get(name)).cloned(),
-                name,
-                size,
-                visible: visibility.is_none_or(|visibility| visibility.get())
-                    && size.x > 0.0
-                    && size.y > 0.0,
-                fits: size.x <= MAX_CANVAS_SIDE && size.y <= MAX_CANVAS_SIDE,
-                viewing: picture
-                    .and_then(|picture| pictures.get(picture).ok())
-                    .and_then(|(_, viewport, _)| viewport?.camera),
-                picture,
-                entity,
-            }
-        })
+        .map(
+            |(entity, element, _, computed, visibility, kids, pickable)| {
+                let name = element.data("canvas").map(str::to_owned);
+                let size = computed.size();
+                let picture = kids
+                    .into_iter()
+                    .flat_map(|kids| kids.iter())
+                    .find(|kid| pictures.contains(*kid));
+                Found {
+                    source: name.as_deref().and_then(|name| registry.get(name)).cloned(),
+                    name,
+                    size,
+                    visible: visibility.is_none_or(|visibility| visibility.get())
+                        && size.x > 0.0
+                        && size.y > 0.0,
+                    fits: size.x <= MAX_CANVAS_SIDE && size.y <= MAX_CANVAS_SIDE,
+                    viewing: picture
+                        .and_then(|picture| pictures.get(picture).ok())
+                        .and_then(|(_, viewport, ..)| viewport?.camera),
+                    picture,
+                    entity,
+                    looks: PictureLooks {
+                        pickable: pickable.copied(),
+                        radius: inner_radius(computed),
+                    },
+                }
+            },
+        )
         .collect();
 
     // One viewport per camera: the canvas that has it while it's visible
@@ -363,9 +379,10 @@ pub(crate) fn sync_canvases(
             &canvas.entity,
             canvas.picture,
             &showing,
+            &canvas.looks,
             &pictures,
         );
-        if let Ok((.., mut current, _, _, _)) = canvases.get_mut(canvas.entity) {
+        if let Ok((.., mut current, _, _, _, _)) = canvases.get_mut(canvas.entity) {
             current.set_if_neq(HtmlCanvas {
                 name: canvas.name,
                 showing,
@@ -380,6 +397,35 @@ pub(crate) fn sync_canvases(
     }
 }
 
+/// What a canvas's picture takes from the element, kept in step every
+/// frame (restyles change both).
+struct PictureLooks {
+    /// The element's `Pickable`: `pointer-events: none` puts
+    /// `Pickable::IGNORE` there, and a picture without one blocks the
+    /// pointer (bug_0233).
+    pickable: Option<Pickable>,
+    /// The element's padding-box corners: Bevy rounds a `ViewportNode` or
+    /// an `ImageNode` by its own node's radius (bug_0234).
+    radius: BorderRadius,
+}
+
+/// The padding box's corner radii, as CSS has them: each outer radius less
+/// the borders beside it, at least 0; logical px.
+fn inner_radius(computed: &ComputedNode) -> BorderRadius {
+    let radius = computed.border_radius;
+    let (min, max) = (computed.border.min_inset, computed.border.max_inset);
+    let corner = |r: Vec2, x: f32, y: f32| CornerRadius {
+        x: Val::Px((r.x - x).max(0.0) * computed.inverse_scale_factor),
+        y: Val::Px((r.y - y).max(0.0) * computed.inverse_scale_factor),
+    };
+    BorderRadius {
+        top_left: corner(radius.top_left, min.x, min.y),
+        top_right: corner(radius.top_right, max.x, min.y),
+        bottom_right: corner(radius.bottom_right, max.x, max.y),
+        bottom_left: corner(radius.bottom_left, min.x, max.y),
+    }
+}
+
 /// Puts what `showing` asks for on `canvas`'s picture, spawning it or
 /// despawning it as needed.
 fn bind(
@@ -387,10 +433,8 @@ fn bind(
     canvas: &Entity,
     picture: Option<Entity>,
     showing: &CanvasShowing,
-    pictures: &Query<
-        (&ComputedNode, Option<&ViewportNode>, Option<&ImageNode>),
-        With<CanvasPicture>,
-    >,
+    looks: &PictureLooks,
+    pictures: &Query<PictureItems, With<CanvasPicture>>,
 ) {
     let picture = match (showing, picture) {
         (CanvasShowing::Nothing, Some(picture)) => {
@@ -410,11 +454,15 @@ fn bind(
                         top: Val::Px(0.0),
                         width: Val::Percent(100.0),
                         height: Val::Percent(100.0),
+                        border_radius: looks.radius,
                         ..default()
                     },
                     ChildOf(*canvas),
                 ))
                 .id();
+            if let Some(pickable) = looks.pickable {
+                commands.entity(picture).insert(pickable);
+            }
             if let CanvasShowing::Image(image) = showing {
                 commands
                     .entity(picture)
@@ -423,10 +471,27 @@ fn bind(
             return;
         }
     };
-    let Ok((computed, viewport, image_node)) = pictures.get(picture) else {
+    let Ok((computed, viewport, image_node, node, pickable)) = pictures.get(picture) else {
         return;
     };
     let mut entity = commands.entity(picture);
+    if node.border_radius != looks.radius {
+        let radius = looks.radius;
+        entity.queue(move |mut entity: EntityWorldMut| {
+            if let Some(mut node) = entity.get_mut::<Node>() {
+                node.border_radius = radius;
+            }
+        });
+    }
+    match (looks.pickable, pickable) {
+        (Some(wanted), current) if current != Some(&wanted) => {
+            entity.try_insert(wanted);
+        }
+        (None, Some(_)) => {
+            entity.try_remove::<Pickable>();
+        }
+        _ => {}
+    }
     match showing {
         CanvasShowing::Viewport(camera) => {
             let size = computed.size();

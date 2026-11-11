@@ -53,8 +53,10 @@ the issue may already be fixed or reported.
 | U37 | parley 0.11 (via bevy_text 0.20) | An inline box's whole height counts as ascent and the line height is the tallest item's, so a box taller than the text's ascent gets negative leading ([bug_0203](bug_0203.md)) | an `<img>`/inline `<svg>` taller than the ascent overlaps the line above; the line is short by the text's descent | none | fixed upstream (parley 0.12.0); waiting for Bevy to depend on it |
 | U38 | Bevy (bevy_ui 0.20.1) | `update_viewport_render_target_size` ends in `images.get_mut(image_handle).unwrap()`: a `ViewportNode` camera whose `RenderTarget::Image` isn't in `Assets<Image>` panics ([bug_0218](bug_0218.md)) | a canvas camera over a not-yet-loaded or removed target image panics on the compute pool | `sync_canvases` binds a camera only while its target image is in `Assets<Image>` (bug_0218) | unreported |
 | U39 | Tera 2.4.0 | A render's work and memory have no limit (only `range` ≤ 10⁵ and component recursion ≤ 20): nested loops run for hours, `set_global` doubling in a loop or unrolled `set` doubling ask for terabytes and abort ([bug_0220](bug_0220.md)) | a template stalls or aborts the app | `tera_check`: a static check at load bounds steps, built values and copies of context data (ADR 0044); output capped by `template::MAX_RENDERED_BYTES` | unreported |
-| U40 | simplecss 0.2.2 (via usvg 0.49 / bevy_markup's `svg_bounds`) | `Selector::matches` tries every ancestor for a descendant combinator and recurses with no memo: a k-part selector whose leftmost part never matches costs about C(depth, k) per element ([bug_0229](bug_0229.md)) | a 555-byte SVG `<style>` parses for 36 s (`svg` feature) | none yet | unreported |
-| U41 | usvg 0.49 text layout (`svg-text`) | converting one `<text>` chunk is quadratic in its length; the step isn't located yet ([bug_0232](bug_0232.md)) | a 100 000-character text converts for 13.5 s inside `MAX_SVG_WORK` | none yet | unreported |
+| U40 | simplecss 0.2.2 (via usvg 0.49 and bevy_markup's `svg_bounds`) | `Selector::matches` tries every ancestor for a descendant combinator and recurses with no memo: a selector with k descendant combinators costs up to Σ_{j≤k} C(depth, j) calls per element when its leftmost compound never matches ([bug_0229](bug_0229.md)) | a 555-byte SVG `<style>` parses for 36 s (`svg` feature) | `svg_bounds::match_work` charges every rule by that count (and its class/attribute tests) before anything matches | unreported |
+| U41 | usvg 0.49 text layout (`text` feature) | `ByteIndex::code_point_at` counts characters from the chunk's start, and `resolve_relative_shifts` (and the rotate and text-on-path code) calls it per cluster: every text chunk lays out in time quadratic in its characters ([bug_0232](bug_0232.md)) | a 100 000-character `<text>` converts for 3.9 s (13.5 s with multi-byte characters) inside `MAX_SVG_WORK` (`svg-text`) | `svg_bounds` charges a `<text>` by its characters² | unreported |
+| U42 | simplecss 0.2.2 (via usvg 0.49 and bevy_markup's `svg_bounds`) | `StyleSheet::parse_more` builds an error, positioned by counting lines from the text's start (`Stream::gen_text_pos`), at every declaration's end, unitless number and `#` colour, then drops it: parsing is quadratic in the sheet's length ([bug_0231](bug_0231.md)) | 40 000 rules (760 KB) parse for 0.96 s per pass, three passes per SVG (`svg` feature) | `svg_bounds::style_scan_bytes` charges the offsets of those places before simplecss parses | unreported |
+| U43 | usvg 0.49 text layout (`text` feature) | `process_chunk` reshapes the whole chunk once per span and merges each span's glyphs into the first run with `glyphs.iter().position(…)` and `Vec::remove`/`insert`: spans × characters ([bug_0232](bug_0232.md)) | 4 000 one-character `<tspan>`s convert for 2.0 s (`svg-text`) | `svg_bounds` charges a `<text>` by its spans × characters | unreported |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -888,35 +890,97 @@ CI clippy command and workspace tests pass on both.
 
 ## U40 — simplecss: descendant selectors match in exponential time
 
-- **Project:** linebender/simplecss. Affected: 0.2.2 (used by usvg 0.49
-  and by `svg_bounds::Graph::new`).
-- **Problem:** `selector.rs:174` matches a descendant combinator by
-  trying each ancestor in turn and recursing into the rest of the
-  selector, with no memo. A selector of k parts over d nested elements
-  costs about C(d, k) when its leftmost part never matches.
-- **Reproduction:** one `<style>` rule `q g g g g g g g` and 60 nested
-  `<g>`s around a `<rect>` (555 bytes): `svg::parse` takes 35.7 s in a
-  release build (review_0008 L07, bug_0229).
-- **Local workaround:** none yet; bug_0229's fix is to bound the
-  selector before matching or to match with a memo.
-- **PR sketch:** memoize (selector part, element) results, or match
-  right to left with the standard non-backtracking descendant rule
-  (once the rest of the selector fails at the nearest matching ancestor
-  it fails at every further one for a pure descendant chain).
+- **Project:** linebender/simplecss. Affected: 0.2.2 (used by usvg 0.49's
+  `resolve_css` and by `svg_bounds::Graph::new`).
+- **Problem:** `Selector::matches_impl` (`selector.rs:174`) matches a
+  descendant combinator by trying each ancestor in turn and recursing
+  into the rest of the selector, with no memo. When the leftmost
+  compound never matches and the others always do, an element `d` deep
+  costs Σ_{j≤k} C(d, j) calls for k descendant combinators (the count is
+  exact: `svg_bounds::tests::descendant_calls_count_simplecss_backtracking`
+  replays it).
+- **Reproduction** (release, 2026-11-12): one `<style>` rule
+  `q g g g g g g` over 60 nested `<g>`s around a `<rect>` (553 bytes):
+  usvg's conversion takes 5.2 s; `q g g g g g g g` (555 bytes) 35.7 s
+  (review_0008 L07, bug_0229).
+- **Local workaround:** `svg_bounds::match_work` charges every rule by
+  that count over the document's depth histogram, times its class,
+  attribute and pseudo-class tests, into `MAX_SVG_WORK` before anything
+  matches (bug_0229, bug_0231).
+- **PR sketch:** for a selector of descendant combinators only, match
+  greedily (the nearest ancestor matching a compound is always the best
+  choice, so no backtracking is needed); with child combinators mixed
+  in, memoize (compound index, element) failures for the duration of
+  one `matches` call. Either makes a match O(depth × compounds).
 
-## U41 — usvg: text conversion is quadratic in a chunk's length
+## U41 — usvg: text layout is quadratic in a chunk's characters
 
 - **Project:** linebender/resvg, crate usvg. Affected: 0.49 (`text`
   feature).
-- **Problem:** one `<text>` of N characters converts in time growing
-  with N²: 20 000 → 173 ms, 100 000 → 3.93 s (`M`, Bevy's default
-  font); 548 ms → 13.5 s with a character the font lacks. 20 000
-  one-letter `<text>` elements take 104 ms, so it's per chunk.
-- **Reproduction:** review_0008 L10 (bug_0232).
-- **Local workaround:** none yet; bug_0232's fix is to charge a chunk by
-  its length squared, or cap it.
-- **PR sketch:** locate the quadratic step first (likely per-character
-  work over the whole chunk in shaping or fallback); not yet done.
+- **Problem:** `ByteIndex::code_point_at` (`text/layout.rs:1871`)
+  converts a byte offset to a character index by counting
+  `char_indices()` from the start of the chunk's text, and
+  `resolve_relative_shifts` (`layout.rs:563`, run for every chunk) calls
+  it once per cluster, as do the rotation (`layout.rs:610`) and
+  text-on-path (`layout.rs:716`) code. A chunk of n characters costs
+  O(n²); multi-byte characters decode slower (×3.4).
+- **Reproduction** (release; Bevy's default font; one `<text>` at 10 px;
+  conversion only): 20 000 `M` → 0.17 s, 40 000 → 0.65 s, 100 000 →
+  3.93 s; with a character the font lacks, 0.55 s and 13.5 s. 20 000
+  one-letter `<text>` elements take 0.10 s (review_0008 L10, bug_0232).
+  Located by reading (no profiler on this machine); the doubling
+  measurements fit n².
+- **Local workaround:** `svg_bounds::Graph::text_work` charges a `<text>`
+  by its characters² / 32 (a chunk is at most the whole element) into
+  `MAX_SVG_WORK`.
+- **PR sketch:** compute each cluster's code-point index once, with a
+  single pass over `char_indices()` building a byte → code point map
+  (or walk clusters in byte order with a running count).
+
+## U42 — simplecss: parsing a style sheet is quadratic in its length
+
+- **Project:** linebender/simplecss. Affected: 0.2.2.
+- **Problem:** errors carry a `TextPos` computed eagerly by
+  `Stream::gen_text_pos`, which counts the lines from the start of the
+  text (`stream.rs:281`). The parser raises (and drops) such errors on
+  ordinary input: `consume_declaration` ends every declaration with a
+  failing `consume_term` (`InvalidIdent` at the `;` or `}`), a number
+  without a unit tries `consume_ident` for its suffix, a `#` colour
+  starting with a digit too. Each costs O(offset), so a sheet costs
+  O(length × declarations).
+- **Reproduction** (release, `StyleSheet::parse_more`, N rules of
+  `rect { fill: red }`): 5 000 → 16.5 ms, 10 000 → 61.5 ms, 20 000 →
+  245 ms, 40 000 → 962 ms. usvg parses each `<style>` again, and
+  bevy_markup's box pass a third time (review_0008 L09's 3.25 s,
+  bug_0231).
+- **Local workaround:** `svg_bounds::style_scan_bytes` sums the offsets
+  of the bytes where those errors arise (`:`, `{`, `#`, the start of a
+  digit run) and charges them into `MAX_SVG_WORK` before simplecss
+  parses the text.
+- **PR sketch:** store the byte offset in the error and compute the
+  row/column only in `Display` (or when asked); or have
+  `consume_term`/`consume_ident` peek instead of erroring on the normal
+  end of a value.
+
+## U43 — usvg: each text span reshapes the whole chunk
+
+- **Project:** linebender/resvg, crate usvg. Affected: 0.49 (`text`
+  feature).
+- **Problem:** `process_chunk` (`text/layout.rs:897`) shapes the chunk's whole
+  text once per span (each `<tspan>` or text piece with its own font),
+  then overwrites the first run's glyphs with the span's by looking each
+  one up with `glyphs.iter().position(…)` and inserting or removing with
+  `Vec::insert`/`remove`. A chunk of n characters in s spans costs s
+  shapings of n characters plus up to n² for the merge.
+- **Reproduction** (release; Bevy's default font; one `<text>` of n
+  one-character `<tspan>`s alternating two font sizes): 1 000 → 0.12 s,
+  2 000 → 0.48 s, 4 000 → 1.93 s; the same characters in one span take
+  1.4–8.4 ms (bug_0232).
+- **Local workaround:** `svg_bounds::Graph::text_work` charges a
+  `<text>` by its spans × characters × 2 into `MAX_SVG_WORK`.
+- **PR sketch:** shape each span's own byte range where the bidi runs
+  allow it, or shape once per distinct font rather than per span; merge
+  through a byte-index map instead of a linear search.
 
 ## Not upstream bugs (recorded so they aren't re-filed)
 

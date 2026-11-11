@@ -52,6 +52,8 @@ pub(crate) enum CheckError {
     /// A `set_global` variable in a loop grows faster than linearly.
     Superlinear(String),
     Recursive(String),
+    /// A loop over context data inside another, not over its element.
+    NestedAppLoops,
     /// A template, component, filter or function the check doesn't know.
     Unknown(String),
     TooComplex,
@@ -88,6 +90,12 @@ impl fmt::Display for CheckError {
                 f,
                 "`{name}`, set with `set_global` in a loop, could grow faster than linearly \
                  with the loop (it depends on itself more than once, or through a filter)"
+            ),
+            Self::NestedAppLoops => write!(
+                f,
+                "a loop over context data runs inside another loop over context data: the \
+                 work would grow with their product (loop over the outer loop's own data \
+                 instead, as in `for card in group.cards`)"
             ),
             Self::Recursive(name) => {
                 write!(f, "`{name}` includes, extends or calls itself")

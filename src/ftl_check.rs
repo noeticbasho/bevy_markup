@@ -4,11 +4,11 @@
 //! FTL is untrusted (ADR 0044), and fluent-syntax 0.11.1 has two defects
 //! reachable from any resource (UPSTREAM U1, U2):
 //!
-//! - an invalid `\u`/`\U` escape cut off by a multi-byte character panics
-//!   (the error quotes one *byte* of that character). The check refuses a
-//!   `\u` or `\U` followed by fewer hex digits than it needs and then a
-//!   non-ASCII byte, anywhere in the file: the only way to reach that
-//!   slice, and a context-free scan can't miss it;
+//! - an invalid `\u`/`\U` escape in a string literal, cut off by a
+//!   multi-byte character, panics (the error quotes one *byte* of that
+//!   character). The port reads string literals where fluent-syntax does
+//!   and refuses that escape there; in text a `\u` is plain characters
+//!   (a file-wide scan refused `C:\użytkownik`, bug_0236);
 //! - expressions nest by recursion without a limit (placeables, select
 //!   variants, call arguments), and a few KB overflow an asset thread's
 //!   stack. The check runs a port of the parser's control flow
@@ -61,46 +61,23 @@ fn line_of(source: &str, offset: usize) -> usize {
 
 /// Checks an FTL resource before fluent-syntax parses it.
 pub(crate) fn check(source: &str) -> Result<(), FtlCheckError> {
-    if let Some(at) = bad_escape(source.as_bytes()) {
-        return Err(FtlCheckError::BadEscape(line_of(source, at)));
-    }
     let mut parser = Parser::new(source.as_bytes());
     match parser.parse() {
         Ok(()) => Ok(()),
-        Err(at) => Err(FtlCheckError::TooDeep(line_of(source, at))),
+        Err(Stop::TooDeep(at)) => Err(FtlCheckError::TooDeep(line_of(source, at))),
+        Err(Stop::BadEscape(at)) => Err(FtlCheckError::BadEscape(line_of(source, at))),
+        Err(Stop::Error) => unreachable!("syntax errors become Junk"),
     }
-}
-
-/// A `\u` (4 hex digits) or `\U` (6) whose digits stop at a non-ASCII byte:
-/// where fluent-syntax's `skip_unicode_escape_sequence` slices one byte
-/// into a character (UPSTREAM U1). Anywhere in the file: text never runs
-/// that code, so a hit there only refuses a file that's fine.
-fn bad_escape(bytes: &[u8]) -> Option<usize> {
-    let mut i = 0;
-    while i + 1 < bytes.len() {
-        if bytes[i] == b'\\' && matches!(bytes[i + 1], b'u' | b'U') {
-            let length = if bytes[i + 1] == b'u' { 4 } else { 6 };
-            let digits = &bytes[i + 2..];
-            let hex = digits
-                .iter()
-                .take(length)
-                .take_while(|b| b.is_ascii_hexdigit())
-                .count();
-            if hex < length && digits.get(hex).is_some_and(|b| !b.is_ascii()) {
-                return Some(i);
-            }
-        }
-        i += 1;
-    }
-    None
 }
 
 /// How a parse step stopped: a syntax error (the entry becomes Junk, as in
-/// fluent-syntax) or the nesting limit (the whole check stops).
+/// fluent-syntax), or a refusal that stops the whole check: the nesting
+/// limit, or an escape fluent-syntax would panic on (UPSTREAM U1).
 #[derive(Debug)]
-enum Stop {
+pub(crate) enum Stop {
     Error,
     TooDeep(usize),
+    BadEscape(usize),
 }
 
 type Step<T> = std::result::Result<T, Stop>;
@@ -178,20 +155,20 @@ impl<'a> Parser<'a> {
 
     // ---- runtime.rs, core.rs -------------------------------------------
 
-    /// `parse_runtime`; `Err` = the offset where the nesting limit was
-    /// passed.
-    pub(crate) fn parse(&mut self) -> std::result::Result<(), usize> {
+    /// `parse_runtime`; `Err` = a refusal ([`Stop::TooDeep`],
+    /// [`Stop::BadEscape`]) and its offset.
+    pub(crate) fn parse(&mut self) -> Step<()> {
         self.skip_blank_block();
         while self.ptr < self.length {
             let entry_start = self.ptr;
             match self.get_entry_runtime() {
                 Ok(()) => {}
-                Err(Stop::TooDeep(at)) => return Err(at),
                 Err(Stop::Error) => {
                     self.depth = 0;
                     self.skip_to_next_entry_start();
                     self.entries.push(Entry::Junk(entry_start, self.ptr));
                 }
+                Err(refusal) => return Err(refusal),
             }
             self.skip_blank_block();
         }
@@ -262,7 +239,7 @@ impl<'a> Parser<'a> {
                     self.ptr = line_start;
                     break;
                 }
-                Err(too_deep) => return Err(too_deep),
+                Err(refusal) => return Err(refusal),
             }
         }
         Ok(count)
@@ -623,6 +600,12 @@ impl<'a> Parser<'a> {
             }
         }
         if self.ptr - start != length {
+            // fluent-syntax's error quotes the escape up to one byte past
+            // where it stopped: inside a multi-byte character, a panic
+            // (UPSTREAM U1, bug_0005).
+            if self.current().is_some_and(|b| !b.is_ascii()) {
+                return Err(Stop::BadEscape(start));
+            }
             fail!();
         }
         Ok(())

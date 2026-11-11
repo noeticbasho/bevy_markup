@@ -62,5 +62,6 @@ as `[INFERENCE]`.
 | [0043](./0043-canvas-picture-child.md) | A canvas shows its source on a child node | Accepted |
 | [0044](./0044-every-input-is-untrusted.md) | Every input is untrusted; templates are bounded by a static check at load | Accepted |
 | [0045](./0045-ftl-checked-at-load.md) | Fluent resources are checked at load; the fluent-syntax fork goes | Accepted |
+| [0046](./0046-template-check-nesting-and-depth.md) | The template check: loops over context data nest only over their element; one depth budget | Accepted |
 
 Add new records to this index in the same commit that adds the file.

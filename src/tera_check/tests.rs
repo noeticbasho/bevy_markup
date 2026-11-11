@@ -46,10 +46,12 @@ fn hostile_templates_are_refused() {
                 .to_owned(),
             Superlinear("a".into()),
         ),
-        // A capture of 2 × 10⁷ bytes in 10⁷ steps.
+        // A capture of 2 × 10⁷ bytes in a few 10⁵ steps.
         (
-            "{% set c %}{% for i in range(end=10000) %}{% for j in range(end=1000) %}xx{% endfor %}{% endfor %}{% endset %}"
-                .to_owned(),
+            format!(
+                "{{% set c %}}{{% for i in range(end=10000) %}}{}{{% endfor %}}{{% endset %}}",
+                "x".repeat(2000)
+            ),
             ValueTooLarge,
         ),
         // Amplifying filters.
@@ -60,7 +62,7 @@ fn hostile_templates_are_refused() {
         ),
         ("{{ name | replace(from='', to=name) }}".to_owned(), AppSquared),
         (
-            "{{ [range(end=100000) for i in range(end=100000)] | length }}".to_owned(),
+            "{{ [range(end=1000) for i in range(end=1000)] | length }}".to_owned(),
             ValueTooLarge,
         ),
         // A context value copied past MAX_TEMPLATE_APP_COPIES.
@@ -169,6 +171,174 @@ fn the_check_bounds_its_own_work() {
         check("t.html", &[("t.html".to_owned(), wide)]).unwrap_err(),
         CheckError::TooComplex
     );
+}
+
+/// Runs the check on a 2 MB thread, the stack of Bevy's asset and task
+/// threads.
+fn check_on_small_stack(entry: &str, sources: Vec<(String, String)>) -> Result<(), CheckError> {
+    let entry = entry.to_owned();
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(move || check(&entry, &sources).map(|_| ()))
+        .unwrap()
+        .join()
+        .expect("no stack overflow")
+}
+
+/// `files` templates, each `levels` nested loops around an include of the
+/// next; the last holds `inner` there, after `top` at its top level.
+fn nested_chain(files: usize, levels: usize, inner: &str) -> Vec<(String, String)> {
+    chain_with_top(files, levels, "", inner)
+}
+
+fn chain_with_top(files: usize, levels: usize, top: &str, inner: &str) -> Vec<(String, String)> {
+    (0..files)
+        .map(|i| {
+            let next = if i + 1 < files {
+                format!("{{% include '{}.html' %}}", i + 1)
+            } else {
+                inner.to_owned()
+            };
+            let top = if i + 1 == files { top } else { "" };
+            let body = format!(
+                "{top}{}{next}{}",
+                "{% for a in range(end=1) %}".repeat(levels),
+                "{% endfor %}".repeat(levels)
+            );
+            (format!("{i}.html"), body)
+        })
+        .collect()
+}
+
+/// bug_0223: the analysis recursed per statement level across includes,
+/// and 24 files of 30 nested loops overflowed a 2 MB asset thread (4 of
+/// 39 in a debug build). One depth budget covers statements, expressions,
+/// includes and components: the review's chain is refused, and the
+/// deepest the budget accepts — through every recursive path the analysis
+/// has — fits 2 MB in this (debug) build.
+#[test]
+fn the_deepest_accepted_template_fits_a_two_megabyte_stack() {
+    for (files, levels) in [(24, 30), (4, 39), (8, 20)] {
+        assert_eq!(
+            check_on_small_stack("0.html", nested_chain(files, levels, "x")),
+            Err(CheckError::TooComplex),
+            "{files} × {levels}"
+        );
+    }
+    // Just inside the budget: loops, conditionals, captures, components
+    // and an expression at the bottom.
+    let component = "{% component c() %}{{ body }}{% endcomponent %}";
+    let deep_expr = format!("{{{{ {}1{} }}}}", "(1 + ".repeat(6), ")".repeat(6));
+    let shapes = [
+        nested_chain(4, analysis::MAX_DEPTH / 4 - 5, &deep_expr),
+        nested_chain(
+            4,
+            analysis::MAX_DEPTH / 4 - 5,
+            &format!("{{% if a %}}{{% set c %}}{deep_expr}{{% endset %}}{{% endif %}}"),
+        ),
+        chain_with_top(
+            4,
+            analysis::MAX_DEPTH / 4 - 5,
+            component,
+            &format!("{{% <c> %}}{{% <c> %}}{deep_expr}{{% </c> %}}{{% </c> %}}"),
+        ),
+    ];
+    for sources in shapes {
+        let mut tera = new_tera();
+        tera.add_raw_templates(sources.clone())
+            .expect("Tera compiles it");
+        assert_eq!(check_on_small_stack("0.html", sources), Ok(()));
+    }
+    // They sit at the edge: three more levels per file are refused.
+    assert_eq!(
+        check_on_small_stack(
+            "0.html",
+            nested_chain(4, analysis::MAX_DEPTH / 4 - 2, &deep_expr)
+        ),
+        Err(CheckError::TooComplex)
+    );
+    // A counter carried through nested loops takes the growth path too:
+    // refused for its work or accepted, never an overflow.
+    let carried = nested_chain(4, 30, "{% set_global n = n + 1 %}");
+    assert!(matches!(
+        check_on_small_stack("0.html", carried),
+        Ok(()) | Err(CheckError::TooComplex)
+    ));
+}
+
+/// bug_0224–0228, the review_0008 probes: each refused for its own
+/// reason, and the ordinary forms the first check refused accepted.
+#[test]
+fn review_0008_probes() {
+    use CheckError::*;
+    for (source, expected) in [
+        // bug_0224: doubling inside a component call's body.
+        (
+            "{% component wrap() %}{{ body }}{% endcomponent %}{% set_global s = 'aaaaaaaa' %}{% for i in range(end=20) %}{% <wrap> %}{% set_global s = s ~ s %}{% </wrap> %}{% endfor %}{{ s | length }}"
+                .to_owned(),
+            Superlinear("s".into()),
+        ),
+        // bug_0225: `get`'s default is the result for a missing key: a
+        // 5 MB capture through it, written four times.
+        (
+            format!(
+                "{{% set s %}}{{% for i in range(end=1000) %}}{}{{% endfor %}}{{% endset %}}{{% set y = {{'a': 1}} | get(key='b', default=s) %}}{{% set z = y ~ y ~ y ~ y %}}",
+                "x".repeat(5000)
+            ),
+            ValueTooLarge,
+        ),
+        // bug_0226: nested loops over context data, and `range` over a
+        // context number.
+        (
+            "{% for a in items %}{% for b in items %}{% for c in items %}{% endfor %}{% endfor %}{% endfor %}"
+                .to_owned(),
+            NestedAppLoops,
+        ),
+        (
+            "{% for a in items %}{% for c in a.cards %}{% for d in a.cards %}{% endfor %}{% endfor %}{% endfor %}"
+                .to_owned(),
+            NestedAppLoops,
+        ),
+        (
+            "{% for a in items %}{{ [b for b in items] | length }}{% endfor %}".to_owned(),
+            NestedAppLoops,
+        ),
+        (
+            "{% for a in range(end=hp) %}{% for b in range(end=hp) %}{% endfor %}{% endfor %}"
+                .to_owned(),
+            TooManySteps,
+        ),
+        // bug_0227: building and scanning values cost their size.
+        (
+            "{% for i in range(end=100000) %}{% set x = range(end=100000) %}{% endfor %}".to_owned(),
+            TooManySteps,
+        ),
+        (
+            "{% set big = range(end=100000) %}{% for i in range(end=100000) %}{% if 100001 in big %}x{% endif %}{% endfor %}"
+                .to_owned(),
+            TooManySteps,
+        ),
+        (
+            "{% set_global s = '' %}{% for i in range(end=100000) %}{% set_global s = s ~ 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' %}{% endfor %}"
+                .to_owned(),
+            TooManySteps,
+        ),
+    ] {
+        assert_eq!(refused(&source), expected, "{source}");
+    }
+    // bug_0228 and bug_0226: counters and accumulators in nested loops,
+    // loops over a loop element's own data (filtered too).
+    for source in [
+        "{% set_global n = 0 %}{% for g in groups %}{% for c in g.cards %}{% set_global n = n + 1 %}{% endfor %}{% endfor %}{{ n }}",
+        "{% set_global names = '' %}{% for g in groups %}{% for c in g.cards %}{% set_global names = names ~ c.name %}{% endfor %}{% endfor %}{{ names }}",
+        "{% for g in groups %}{% for c in g.cards | sort(attribute='name') %}{% for t in c.tags %}{{ t }}{% endfor %}{% endfor %}{% endfor %}",
+        "{% for g in groups %}{{ g.name }}{% endfor %}{% for c in cards %}{{ c }}{% endfor %}",
+        "{% for i in range(end=3) %}{% for c in cards %}{{ c }}{% endfor %}{% endfor %}",
+    ] {
+        if let Err(err) = check_one(source) {
+            panic!("refused {source:?}: {err}");
+        }
+    }
 }
 
 /// Fail closed: a template the check can't read is refused, not passed.

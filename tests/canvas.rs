@@ -394,6 +394,112 @@ fn a_framed_canvas_keeps_its_frame_and_its_picture() {
     assert_eq!(rect.size(), Vec2::new(60.0, 30.0));
 }
 
+/// bug_0233: a `pointer-events: none` canvas lets clicks through to what
+/// lies under it while it shows a source — its picture child ignores the
+/// pointer like the element (an unpickable node blocks nothing; a node
+/// without `Pickable` blocks).
+#[test]
+fn a_pointer_events_none_canvas_lets_clicks_through() {
+    let mut ui = TestUi::with_pointer(
+        "canvas_pointer_events",
+        &[
+            (
+                "page.html",
+                "<button id='under' data-on-click='hit'>under</button>\
+                 <canvas class='over' data-canvas='photo' width='200' height='100'></canvas>",
+            ),
+            (
+                "style.css",
+                "button { width: 200px; height: 100px }\
+                 .over { position: absolute; left: 0; top: 0; pointer-events: var(--events) }",
+            ),
+        ],
+        VIEWPORT,
+    )
+    .stylesheet("style.css")
+    .spawn(
+        "page.html",
+        TemplateContext::default().with("--events", "none"),
+        column(),
+    );
+    ui.settle();
+    let photo = ui
+        .world_mut()
+        .resource_mut::<Assets<Image>>()
+        .add(Image::new_target_texture(
+            16,
+            16,
+            TextureFormat::Bgra8UnormSrgb,
+            None,
+        ));
+    register(&mut ui, "photo", CanvasSource::Image(photo.clone()));
+    ui.update(3);
+    let canvas = canvases(&mut ui)[0];
+    assert_eq!(showing(&mut ui, canvas), CanvasShowing::Image(photo));
+    let rect = node_rect(ui.app_mut().world(), canvas).unwrap();
+    ui.take_signals();
+    ui.click_at(rect.center());
+    let names: Vec<String> = ui
+        .update_collecting_signals(3)
+        .into_iter()
+        .map(|signal| signal.name.into_owned())
+        .collect();
+    assert_eq!(names, ["hit"], "the click reaches the button");
+}
+
+/// bug_0234: the picture takes the canvas's padding-box corners (its
+/// `border-radius` less the border), so Bevy rounds the image or viewport
+/// like the element; a restyle carries a new radius over.
+#[test]
+fn the_picture_follows_the_canvas_corners() {
+    let mut ui = page_with(
+        "canvas_radius",
+        "<canvas class='{{ class }}' data-canvas='photo' width='120' height='120'></canvas>",
+        ".round { border-radius: 50px; border-width: 4px }\
+         .soft { border-radius: 10px 20px; border-width: 4px 2px }",
+        TemplateContext::default().with("class", "round"),
+    );
+    let photo = ui
+        .world_mut()
+        .resource_mut::<Assets<Image>>()
+        .add(Image::new_target_texture(
+            16,
+            16,
+            TextureFormat::Bgra8UnormSrgb,
+            None,
+        ));
+    register(&mut ui, "photo", CanvasSource::Image(photo));
+    ui.update(3);
+    let canvas = canvases(&mut ui)[0];
+    let corners = |ui: &mut TestUi| {
+        let picture = picture(ui, canvas).expect("a picture");
+        let radius = ui.world_mut().get::<Node>(picture).unwrap().border_radius;
+        [
+            radius.top_left,
+            radius.top_right,
+            radius.bottom_right,
+            radius.bottom_left,
+        ]
+        .map(|corner| (corner.x, corner.y))
+    };
+    let px = Val::Px;
+    assert_eq!(corners(&mut ui), [(px(46.0), px(46.0)); 4]);
+    set(&mut ui, "class", "soft");
+    ui.settle();
+    ui.update(3);
+    // `10px 20px`: top-left and bottom-right 10, the others 20; borders
+    // 4 px top and bottom, 2 px left and right.
+    assert_eq!(
+        corners(&mut ui),
+        [
+            (px(8.0), px(6.0)),
+            (px(18.0), px(16.0)),
+            (px(8.0), px(6.0)),
+            (px(18.0), px(16.0)),
+        ]
+    );
+}
+
 /// `HtmlCanvases::shown` reports whether a canvas with the name is laid out
 /// at a non-zero size: the app's switch for its camera.
 #[test]

@@ -59,7 +59,7 @@ fn incomplete_escapes_before_non_ascii_are_refused() {
     for bad in [
         "u = {\"\\U\u{fffd}\"}\n",
         "u = { \"\\u12é\" }\n",
-        "x = \\Ué\n",
+        "cmd = Wpisz { \"\\użyj\" }\n",
     ] {
         assert!(
             matches!(check(bad), Err(FtlCheckError::BadEscape(_))),
@@ -70,6 +70,11 @@ fn incomplete_escapes_before_non_ascii_are_refused() {
         "path = C:\\Users\\me\n",
         "u = { \"\\u00e9\\U01F600\" }\n",
         "x = \\u12 é\n",
+        // bug_0236: in text a `\u` is plain characters.
+        "x = \\Ué\n",
+        "path = Folder C:\\użytkownik\n",
+        "cmd = Wpisz \\użyj w konsoli\n",
+        "x = \\u12é\n    .attr = C:\\użytkownik\n",
     ] {
         assert_eq!(check(fine), Ok(()), "{fine:?}");
     }
@@ -156,6 +161,32 @@ fn the_limit_fits_a_two_megabyte_stack() {
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(2000))]
+
+    /// The escape refusal is exactly fluent-syntax's panic: refused if and
+    /// only if `parse_runtime` panics on the resource (bug_0005), in
+    /// string literals and text alike (bug_0236).
+    #[test]
+    fn bad_escapes_are_refused_exactly_when_fluent_syntax_panics(
+        pieces in prop::collection::vec(
+            prop::sample::select(vec![
+                "x = ", "\n", "{ ", " }", "{", "}", "\"", "\\u", "\\U", "\\", "1", "12",
+                "1234", "abcdef", "é", "ż", "\u{fffd}", "text ", "-t = ", ".a = ", "  ",
+                "{ \"\\u", "{ \"\\U12", "\" }", "$x ->\n *[a] ", "F(", ")",
+                // Whole literals around the boundary.
+                "{ \"\\u1é\" }", "{ \"\\Uż\" }", "{ \"\\u123é\" }", "{ \"\\u1234é\" }",
+                "{ \"\\U12345ż\" }", "{ F(\"\\uż\") }", "{ $x ->\n *[a] { \"\\u1ż\" }\n}",
+            ]),
+            0..16,
+        )
+    ) {
+        let source = format!("x = {}", pieces.concat());
+        let panics = std::panic::catch_unwind(|| {
+            let _ = fluent_syntax::parser::parse_runtime(source.as_str());
+        })
+        .is_err();
+        let refused = matches!(check(&source), Err(FtlCheckError::BadEscape(_)));
+        prop_assert_eq!(refused, panics, "{:?}", source);
+    }
 
     /// The port reads every resource as fluent-syntax does: the same
     /// messages, terms and junk spans, so error recovery restarts where

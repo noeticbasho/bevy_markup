@@ -90,7 +90,8 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
 ### Security
 - **Fluent files are checked when they load** (ADR 0045): placeables and
   function calls nested deeper than `ftl_check::MAX_FTL_NESTING` (64), or
-  an incomplete `\u`/`\U` escape right before a non-ASCII character, fail
+  an incomplete `\u`/`\U` escape right before a non-ASCII character in a
+  string literal (`{ "\u12é" }`; in text, `C:\użytkownik` is fine), fail
   the bundle's load with the line, instead of a stack overflow or a panic
   in the Fluent parser. **Possibly breaking:** such a file used to load
   (the deep message dropped) under the patched parser.
@@ -100,7 +101,11 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   `MAX_TEMPLATE_VALUE_BYTES` or `MAX_TEMPLATE_APP_COPIES` fails to load
   with an error naming the limit (nested loops printing nothing ran for
   minutes; doubling a string in a loop aborted the app). Loops over your
-  `TemplateContext` data count once per element. **Possibly breaking:** a
+  `TemplateContext` data count once per element, and a loop over context
+  data inside another may only run over the outer loop's element (`for
+  card in group.cards`, ADR 0046): `for a in items` around `for b in
+  items` is refused. A `range` bounded by a context number counts as its
+  largest (100 000 items). **Possibly breaking:** a
   `set_global` value that grows through a filter in a loop, a filter
   combining two context values, or a filter or function the check doesn't
   know is refused, and so is a template the check can't read. Rendered
@@ -115,7 +120,38 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   an `<img>` or CSS image keeps its 1× drawing and an inline `<svg>` waits
   for room (a hundred large `<img>` tags held gigabytes).
 
+- SVG `<style>` sheets count toward the conversion limit by what they cost
+  before anything runs: descendant selectors over deep nesting (555 bytes
+  parsed for 36 s), selectors with many class tests, and long sheets
+  (usvg's CSS parser is quadratic in a sheet's length). SVG `<text>`
+  counts its characters squared and its spans × characters (usvg's text
+  layout; a 100 000-character text converted for seconds). The drawing
+  estimate counts round and square caps per dash and per subpath, and the
+  rows every edge spans (round-capped dashes drew for 33 s at half the
+  budget). Such files now fail to load. **Possibly breaking** for very
+  long SVG texts or style sheets.
+- One stylesheet may hold `MAX_COMBINATOR_ARGUMENTS` (64) combinators
+  inside `:is()`/`:where()`/`:not()` in all; the rules past it are
+  skipped (each costs the document's depth squared per element).
+
 ### Fixed
+- A template set nesting loops through a chain of includes no longer
+  crashes the app with a stack overflow while it loads; past
+  `MAX_DEPTH` levels (96, across includes) it fails to load.
+- Two ways around the template check's value limit are closed: a
+  `set_global` inside a component call's body (`{% <wrap> %}…{% </wrap> %}`)
+  in a loop, and `get`'s `default` argument (both could abort the app).
+- Building values in templates (`range()`, `~`, `in`, list literals)
+  counts toward `MAX_TEMPLATE_STEPS` by their size: accepted templates
+  rendered for minutes. A `set_global` counter or accumulator in two
+  nested loops is accepted again.
+- A `pointer-events: none` `<canvas>` lets clicks through to what's under
+  it once it shows a source, and its picture follows the canvas's
+  `border-radius` (both broke when the picture moved to a child node).
+- A Fluent file with `\u` before a non-ASCII letter in plain text
+  (`C:\użytkownik`) loads again.
+- An inline `<svg>` that didn't fit the raster memory budget on its
+  background task is drawn once memory frees up (it stayed blank).
 - A windowed UI (`HtmlWindowed`) scrolls exactly as far as the full
   document. Its stand-ins for culled rows counted the last row's bottom
   margin and empty trailing boxes as content, and missed text

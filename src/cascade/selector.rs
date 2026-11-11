@@ -53,7 +53,18 @@ pub(super) struct Selector {
     later_sibling: Option<usize>,
     /// Identifies the selector in sibling-list caches.
     id: u64,
+    /// `:is()`/`:where()`/`:not()` arguments holding a combinator: each
+    /// costs depth² per element tested ([`MAX_COMBINATOR_ARGUMENTS`]).
+    combinator_arguments: u32,
 }
+
+/// The `:is()`/`:where()`/`:not()` arguments holding a combinator a
+/// stylesheet may use, in all its rules. parcel walks such an argument to
+/// the root at every ancestor the enclosing selector tries, so each costs
+/// depth² per element (≈1.5 ms per build over 95 nested elements);
+/// past the cap a rule is skipped (bug_0235: 400 rules took 0.6 s per
+/// build where plain ones took 33 ms).
+pub(crate) const MAX_COMBINATOR_ARGUMENTS: u32 = 64;
 
 /// Selector ids for [`Selector::id`].
 static NEXT_SELECTOR_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -71,6 +82,7 @@ impl Selector {
         // The `X ~ subject` shape: where `X` starts, whether a combinator
         // follows it, whether it reads context through `:is()` & co.
         let mut later_sibling = None;
+        let mut combinator_arguments = 0;
         let mut beyond_x = false;
         let mut x_reads_context = false;
         for (index, component) in parsed.iter_raw_match_order().enumerate() {
@@ -111,6 +123,7 @@ impl Selector {
             reads.context_position |= part.context_structural;
             x_reads_context |= !subject && part.context_structural;
             pseudo |= part.pseudo;
+            combinator_arguments += part.combinator_arguments;
         }
         let later_sibling = later_sibling.filter(|_| !beyond_x && !x_reads_context);
         if sibling_seen_away {
@@ -124,7 +137,13 @@ impl Selector {
             reads,
             later_sibling,
             id: NEXT_SELECTOR_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            combinator_arguments,
         })
+    }
+
+    /// See [`MAX_COMBINATOR_ARGUMENTS`].
+    pub(super) fn combinator_arguments(&self) -> u32 {
+        self.combinator_arguments
     }
 
     /// Parses `text` with lightningcss (tests).
@@ -253,6 +272,8 @@ struct PartReads {
     /// A position of an ancestor: a part after a combinator inside a
     /// `:is()`/`:where()`/`:not()` argument.
     context_structural: bool,
+    /// Arguments holding a combinator ([`MAX_COMBINATOR_ARGUMENTS`]).
+    combinator_arguments: u32,
 }
 
 impl PartReads {
@@ -262,6 +283,7 @@ impl PartReads {
             structural: self.structural | other.structural,
             pseudo: self.pseudo | other.pseudo,
             context_structural: self.context_structural | other.context_structural,
+            combinator_arguments: self.combinator_arguments + other.combinator_arguments,
         }
     }
 }
@@ -278,7 +300,7 @@ fn compound_part(component: &Component<'static>, negated: bool, depth: u32) -> O
         attributes,
         structural,
         pseudo,
-        context_structural: false,
+        ..PartReads::default()
     };
     Some(match component {
         Component::LocalName(_)
@@ -339,6 +361,9 @@ fn nested(list: &[Parsed], negated: bool, depth: u32) -> Option<PartReads> {
                 Component::Combinator(CssCombinator::Descendant | CssCombinator::Child)
                     if depth == 1 =>
                 {
+                    if subject {
+                        reads.combinator_arguments += 1;
+                    }
                     subject = false;
                 }
                 Component::Combinator(_) => return None,

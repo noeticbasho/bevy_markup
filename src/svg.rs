@@ -336,7 +336,8 @@ impl fmt::Display for SvgError {
                 f,
                 "expands too far to convert (estimated work {work}, limit {max}): \
                  reduce its <use> copies, its markers × path vertices, the shapes \
-                 inheriting a pattern or gradient, or its arcs' radii"
+                 inheriting a pattern or gradient, its arcs' radii, or its <style> \
+                 sheet (rules × elements, descendant selectors over deep nesting)"
             ),
             Self::ReferenceCycle => {
                 write!(
@@ -859,8 +860,16 @@ struct InlineInner {
     ready: Vec<(AssetId<Image>, Image)>,
     drawing: Vec<(
         String,
-        bevy::tasks::Task<Result<(Image, std::sync::Arc<usvg::Tree>), String>>,
+        bevy::tasks::Task<Result<(Image, std::sync::Arc<usvg::Tree>), InlineFailure>>,
     )>,
+}
+
+/// Why an inline drawing task drew nothing.
+enum InlineFailure {
+    /// Its bytes didn't fit [`MAX_SVG_RASTER_BYTES`]: retried, like the
+    /// build's own refusal, once an entry frees memory (bug_0237).
+    OverBudget,
+    Failed(String),
 }
 
 struct InlineEntry {
@@ -1079,7 +1088,7 @@ impl InlineSvgs {
                 let task = bevy::tasks::AsyncComputeTaskPool::get().spawn(async move {
                     draw(&task_tree, width, height, Limits::DEFAULT)
                         .map(|(image, _)| (image, task_tree))
-                        .map_err(|err| err.to_string())
+                        .map_err(|err| InlineFailure::Failed(err.to_string()))
                 });
                 inner.drawing.push((key.clone(), task));
             }
@@ -1089,22 +1098,21 @@ impl InlineSvgs {
             let task_fonts = self.fonts.clone();
             let used = self.bytes.clone();
             let task = bevy::tasks::AsyncComputeTaskPool::get().spawn(async move {
-                let tree =
-                    parse_with(task_text.as_bytes(), &task_fonts).map_err(|err| err.to_string())?;
-                let (width, height, _) =
-                    raster_size(&tree, 1.0, MAX_SVG_SIDE).map_err(|err| err.to_string())?;
+                let failed = |err: SvgError| InlineFailure::Failed(err.to_string());
+                let tree = parse_with(task_text.as_bytes(), &task_fonts).map_err(failed)?;
+                let (width, height, _) = raster_size(&tree, 1.0, MAX_SVG_SIDE).map_err(failed)?;
                 // Reserved here (the size wasn't known before the parse);
                 // `finish_inline_svgs` records it on the entry.
                 let bytes = raster_bytes(UVec2::new(width, height));
                 if !reserve(&used, bytes) {
-                    return Err("the drawn SVGs hold MAX_SVG_RASTER_BYTES".to_string());
+                    return Err(InlineFailure::OverBudget);
                 }
                 let tree = std::sync::Arc::new(tree);
                 draw(&tree, width, height, Limits::DEFAULT)
                     .map(|(image, _)| (image, tree))
                     .map_err(|err| {
                         release(&used, bytes);
-                        err.to_string()
+                        failed(err)
                     })
             });
             inner.drawing.push((key.clone(), task));
@@ -1180,10 +1188,22 @@ pub(crate) fn finish_inline_svgs(
                 // size wasn't known when the build collected it).
                 let _ = images.get_mut(id);
             }
-            Err(err) => {
+            Err(InlineFailure::Failed(err)) => {
                 debug!("inline svg not drawn: {err}");
                 // A costly document's bytes were reserved during the build.
                 release(&inline.bytes, std::mem::take(&mut entry.bytes));
+            }
+            Err(InlineFailure::OverBudget) => {
+                debug!("inline svg not drawn: the drawn SVGs hold MAX_SVG_RASTER_BYTES");
+                // Forgotten, and remembered as over the budget: the next
+                // build after memory frees up draws it (bug_0237: the
+                // imageless entry stayed and was shown blank for good).
+                inner.entries.remove(&text);
+                let hash = {
+                    use std::hash::BuildHasher;
+                    inner.hasher.hash_one(&text)
+                };
+                inner.over_budget.insert(hash);
             }
         }
     }
@@ -1624,6 +1644,10 @@ const SEGMENT_COST: u64 = 24;
 /// dashes and strokes each as a path of its own (~65 ns a dash in
 /// review_0007's K02 probe; charged at about twice that).
 const DASH_COST: u64 = 32;
+/// Pixel rows a stroke's cap adds per contour beyond its square: a round
+/// cap is a few curves, each spanning the width (bug_0230: 10⁶ round-capped
+/// dashes 40 px wide drew for 33 s on an estimate under half the budget).
+const STROKE_CAP_EDGES: f64 = 4.0;
 /// tiny-skia's `MAX_DASH_COUNT`: a path that would cut into more dashes
 /// isn't dashed (nor drawn) at all.
 const MAX_DASH_COUNT: f64 = 1_000_000.0;
@@ -1903,6 +1927,14 @@ fn dash_count(path: &usvg::Path, stroke: &usvg::Stroke) -> Option<u64> {
 /// The walk stopped: the estimate is over the limit.
 struct Over;
 
+/// A path's control polygon in device pixels ([`CostWalk::measure`]).
+#[derive(Default)]
+struct PathShape {
+    rows: f64,
+    length: f64,
+    subpaths: u64,
+}
+
 struct CostWalk {
     total: u64,
     max: u64,
@@ -1925,6 +1957,57 @@ impl CostWalk {
     fn add_area(&mut self, area: f64, weight: f64) -> Result<(), Over> {
         // Saturating: `as` maps NaN to 0 and anything past u64::MAX to it.
         self.add((area * weight).ceil() as u64)
+    }
+
+    /// `path`'s control polygon in device pixels: the rows its edges span
+    /// (each edge clamped to a layer's height: the rasterizer clips), its
+    /// length, and its subpaths. A Bézier curve travels no farther than
+    /// its control polygon, so both are upper bounds.
+    fn measure(&self, path: &usvg::Path) -> PathShape {
+        use tiny_skia::PathSegment;
+        let transform = path.abs_transform();
+        let device = |point: tiny_skia::Point| {
+            let mut point = point;
+            transform.map_point(&mut point);
+            (
+                f64::from(point.x) * self.scale_x,
+                f64::from(point.y) * self.scale_y,
+            )
+        };
+        let mut shape = PathShape::default();
+        let (mut start, mut at) = ((0.0, 0.0), (0.0, 0.0));
+        let max_rows = self.max_height.max(1.0);
+        for segment in path.data().segments() {
+            let points: &[tiny_skia::Point] = match &segment {
+                PathSegment::MoveTo(point) => {
+                    (start, at) = (device(*point), device(*point));
+                    shape.subpaths += 1;
+                    continue;
+                }
+                PathSegment::LineTo(point) => &[*point],
+                PathSegment::QuadTo(a, point) => &[*a, *point],
+                PathSegment::CubicTo(a, b, point) => &[*a, *b, *point],
+                PathSegment::Close => {
+                    let (dx, dy): (f64, f64) = (start.0 - at.0, start.1 - at.1);
+                    shape.rows += dy.abs().min(max_rows) + 1.0;
+                    shape.length += dx.hypot(dy);
+                    at = start;
+                    continue;
+                }
+            };
+            for &point in points {
+                let next = device(point);
+                let (dx, dy): (f64, f64) = (next.0 - at.0, next.1 - at.1);
+                shape.rows += dy.abs().min(max_rows) + 1.0;
+                shape.length += dx.hypot(dy);
+                at = next;
+            }
+        }
+        if !shape.rows.is_finite() || !shape.length.is_finite() {
+            shape.rows = f64::MAX;
+            shape.length = f64::MAX;
+        }
+        shape
     }
 
     /// The pixel area of a layer over `rect` (user space), clamped as resvg
@@ -1991,8 +2074,33 @@ impl CostWalk {
         self.add(NODE_COST)?;
         let segments = path.data().len() as u64;
         self.add(segments.saturating_mul(SEGMENT_COST))?;
-        if let Some(dashes) = path.stroke().and_then(|stroke| dash_count(path, stroke)) {
-            self.add(dashes.saturating_mul(DASH_COST))?;
+        let dashes = path
+            .stroke()
+            .and_then(|stroke| dash_count(path, stroke))
+            .unwrap_or(0);
+        self.add(dashes.saturating_mul(DASH_COST))?;
+        // What tiny-skia rasterizes beyond the bounding box (bug_0230):
+        // every edge walks the rows it spans, and every contour of a
+        // stroke — each subpath, each dash — is stroked with its own caps.
+        let shape = self.measure(path);
+        if path.fill().is_some() {
+            self.add_area(shape.rows, 1.0)?;
+        }
+        if let Some(stroke) = path.stroke() {
+            let (sx, sy) = path.abs_transform().get_scale();
+            let width = (f64::from(stroke.width().get())
+                * f64::from(sx.max(sy))
+                * self.scale_x.max(self.scale_y))
+            .clamp(1.0, self.max_width.max(self.max_height).max(1.0));
+            let contours = (shape.subpaths + dashes) as f64;
+            // The band along the path, a cap's square per contour end and
+            // its outline's edges (a round cap's few curves span `width`
+            // rows each), then the outline's own edges.
+            self.add_area(
+                width * (shape.length + contours * (width + STROKE_CAP_EDGES)),
+                1.0,
+            )?;
+            self.add_area(shape.rows, 2.0)?;
         }
         let bbox = path.abs_stroke_bounding_box();
         let area = self.area(bbox.width(), bbox.height());
@@ -2271,6 +2379,183 @@ mod tests {
         assert!(inline.inner.lock().unwrap().over_budget.is_empty());
         let images = world.resource::<Assets<Image>>();
         assert!(inline.image(text(4), images).is_some(), "retried, fits");
+    }
+
+    /// bug_0230 (review_0008 L08): what tiny-skia rasterizes beyond a
+    /// path's bounding box is in the estimate — every contour of a stroke
+    /// (each dash, each subpath) with its caps, and the rows every edge
+    /// walks. The review's documents, a tenth the size (still over the
+    /// budget; they drew for 10–139 s at full size), are refused, and
+    /// ordinary drawings stay far below it.
+    #[test]
+    fn overlapping_strokes_and_tall_edges_are_charged() {
+        let estimate = |svg: &str| {
+            let tree = parse(svg.as_bytes()).unwrap();
+            let (w, h, _) = raster_size(&tree, 1.0, MAX_SVG_SIDE).unwrap();
+            estimate_cost(&tree, w, h, u64::MAX / 2) as f64 / MAX_SVG_COST as f64
+        };
+        let doc = |side: u32, body: &str| {
+            format!(
+                "<svg xmlns='http://www.w3.org/2000/svg' width='{side}' height='{side}'>{body}</svg>"
+            )
+        };
+        let dashed = |cap: &str| {
+            doc(
+                512,
+                &(0..4)
+                    .map(|i| {
+                        format!(
+                            "<path d='M0 {y} L50 {y}' stroke='black' stroke-width='40' \
+                             stroke-linecap='{cap}' stroke-dasharray='0.0002 0.0003'/>",
+                            y = 50 + i * 100
+                        )
+                    })
+                    .collect::<String>(),
+            )
+        };
+        let dots: String = (0..100_000)
+            .map(|i| format!("M{} {} l0 0", i % 500, (i / 500) % 500))
+            .collect();
+        let zigzag: String = (0..100_000)
+            .map(|i| format!("L{} {}", i as f64 / 25.0, if i % 2 == 0 { 4096 } else { 0 }))
+            .collect();
+        for (name, svg) in [
+            ("round-capped dashes", dashed("round")),
+            ("square-capped dashes", dashed("square")),
+            (
+                "round-capped dots",
+                doc(
+                    512,
+                    &format!(
+                        "<path d='{dots}' stroke='black' stroke-width='40' stroke-linecap='round'/>"
+                    ),
+                ),
+            ),
+            (
+                "tall edges",
+                doc(4096, &format!("<path d='M0 0 {zigzag}'/>")),
+            ),
+        ] {
+            assert!(estimate(&svg) > 1.0, "{name}: {}", estimate(&svg));
+        }
+        let icon = "<path d='M12 2 L15 9 L22 9 L16 14 L18 21 L12 17 L6 21 L8 14 L2 9 L9 9 Z' \
+                    fill='gold' stroke='black' stroke-width='1'/>";
+        let curves: String = (0..2000)
+            .map(|i| {
+                format!(
+                    "<path d='M{x} {y} q 20 -30 40 0 t 40 0 t 40 0' fill='none' stroke='red' \
+                     stroke-width='3' stroke-dasharray='6 4' stroke-linecap='round'/>",
+                    x = (i * 37) % 900,
+                    y = (i * 53) % 1000
+                )
+            })
+            .collect();
+        let chart: String = (0..20000)
+            .map(|i| {
+                format!(
+                    "L{} {}",
+                    i as f64 / 20.0,
+                    500.0 + 300.0 * (i as f64 / 30.0).sin()
+                )
+            })
+            .collect();
+        for (name, svg) in [
+            (
+                "an icon at 1024 px",
+                format!(
+                    "<svg xmlns='http://www.w3.org/2000/svg' width='1024' height='1024' \
+                     viewBox='0 0 24 24'>{icon}</svg>"
+                ),
+            ),
+            ("2000 dashed curves", doc(1024, &curves)),
+            (
+                "a 20 000-point chart",
+                doc(
+                    1024,
+                    &format!("<path d='M0 1000 {chart} L1000 1000 Z' fill='blue' stroke='black'/>"),
+                ),
+            ),
+        ] {
+            assert!(estimate(&svg) < 0.25, "{name}: {}", estimate(&svg));
+        }
+    }
+
+    /// bug_0237: a text over [`INLINE_SYNC_BYTES`] reserves its bytes on
+    /// its task. Refused there for the budget, it's forgotten and
+    /// remembered as over the budget, as the build's own refusal is — the
+    /// imageless entry used to stay and show blank for good — and once an
+    /// entry frees its bytes, the next lookup draws it.
+    #[test]
+    fn a_task_refused_for_the_budget_is_retried() {
+        bevy::tasks::AsyncComputeTaskPool::get_or_init(bevy::tasks::TaskPool::default);
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_asset::<SvgDocument>()
+            .init_resource::<InlineSvgs>()
+            .add_systems(Update, finish_inline_svgs);
+        let text = |i: u32| {
+            prepare_inline(
+                &format!("<svg width='4096' height='4096' data-i='{i}'/>"),
+                None,
+            )
+            .unwrap()
+        };
+        let large = prepare_inline(
+            &format!(
+                "<svg width='64' height='64' data-pad='{}'/>",
+                "x".repeat(INLINE_SYNC_BYTES)
+            ),
+            None,
+        )
+        .unwrap();
+        let world = app.world_mut();
+        let inline = world.resource::<InlineSvgs>();
+        let images = world.resource::<Assets<Image>>();
+        for i in 0..4 {
+            assert!(inline.image(text(i), images).is_some(), "{i} fits");
+        }
+        // Accepted for now: its size is known only once its task parsed it.
+        assert!(inline.image(large.clone(), images).is_some());
+        for _ in 0..5000 {
+            let finished = inline
+                .inner
+                .lock()
+                .unwrap()
+                .drawing
+                .iter()
+                .all(|(_, task)| task.is_finished());
+            if finished {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        app.update();
+        let world = app.world_mut();
+        let inline = world.resource::<InlineSvgs>();
+        {
+            let inner = inline.inner.lock().unwrap();
+            assert!(!inner.entries.contains_key(&large), "forgotten");
+            assert_eq!(inner.over_budget.len(), 1, "remembered as over the budget");
+        }
+        let images = world.resource::<Assets<Image>>();
+        assert!(
+            inline.image(large.clone(), images).is_none(),
+            "not retried yet"
+        );
+        // The four go unshown: their bytes free, and the large text draws.
+        for _ in 0..5000 {
+            app.update();
+            let inline = app.world().resource::<InlineSvgs>();
+            if inline.bytes.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                break;
+            }
+        }
+        let world = app.world_mut();
+        let inline = world.resource::<InlineSvgs>();
+        let images = world.resource::<Assets<Image>>();
+        assert!(inline.image(large, images).is_some(), "retried");
+        assert!(inline.inner.lock().unwrap().over_budget.is_empty());
     }
 
     /// A refused inline document is remembered: the next build doesn't

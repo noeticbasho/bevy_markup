@@ -215,29 +215,34 @@ the exact CSS subset.
 
 ### Untrusted content
 
-Every input — templates (HTML and Markdown), stylesheets, Fluent files,
-SVG and images — is treated as untrusted, whether it ships with the game
-or comes from a mod. Each is bounded, and what passes a bound fails to
-load (or is skipped) with an error naming the limit, instead of stalling
-or crashing the app:
+Every input — templates (HTML and Markdown), stylesheets, Fluent files
+and SVG — is treated as untrusted, whether it ships with the game or
+comes from a mod. Each has bounds on the work and memory it can cost, and
+what passes a bound fails to load (or is skipped) with an error naming
+the limit. The bounds are estimates calibrated against the libraries
+underneath, and the reviews keep finding inputs they miss
+(`docs/agents/reviews/`): treat them as defense in depth, not a sandbox.
 
 - **Templates** are checked once when they load (`bevy_markup::tera_check`):
   their own loops, built values and copies of context data must stay within
   `MAX_TEMPLATE_STEPS`, `MAX_TEMPLATE_VALUE_BYTES` and
   `MAX_TEMPLATE_APP_COPIES`, and a template the check can't analyze is
-  refused. Loops over your `TemplateContext` data count once per element:
-  the data you send is yours to size. Rendered output is capped at
-  `template::MAX_RENDERED_BYTES`.
+  refused. A loop over your `TemplateContext` data counts once per element
+  (the data you send is yours to size), and a loop over context data inside
+  another may only run over the outer loop's element (`for card in
+  group.cards`). Rendered output is capped at `template::MAX_RENDERED_BYTES`.
 - **Fluent files** are checked once when they load
   (`bevy_markup::ftl_check`): placeables and function calls nested deeper
-  than `MAX_FTL_NESTING`, and a broken `\u` escape that would crash the
-  Fluent parser, fail the bundle's load. No `[patch]` is needed in your
-  app.
+  than `MAX_FTL_NESTING`, and a broken `\u` escape in a string literal that
+  would crash the Fluent parser, fail the bundle's load. No `[patch]` is
+  needed in your app.
 - **CSS**: nesting, `var()` substitution, grid tracks and selector forms
   whose matching cost explodes are bounded or skipped.
-- **SVG**: no external resources, size, depth, conversion-work and
-  render-cost limits, and a memory budget for all drawn rasters
-  (`svg::MAX_SVG_RASTER_BYTES`).
+- **SVG**: no external resources, size, depth, conversion-work (style
+  sheets and text included) and render-cost limits, and a memory budget for
+  all drawn rasters (`svg::MAX_SVG_RASTER_BYTES`).
+- **Raster images** (PNG and the others) go through Bevy's own image
+  loader: bevy_markup adds no bound of its own there.
 
 ## Examples
 

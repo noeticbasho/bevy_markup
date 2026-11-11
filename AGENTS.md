@@ -96,10 +96,16 @@ src/
                    0044); `render_source` renders through `BoundedOutput`, refused past
                    `MAX_RENDERED_BYTES` 16 MiB (bug_0220), HtmlDocument (+ outline),
                    decode_text / decode_attribute (htmlize, ADR 0036)
-  ftl_check.rs     (ADR 0045) the load-time FTL safety check: `bad_escape` (UPSTREAM U1) and
-                   a port of fluent-syntax 0.11.1's `parse_runtime` counting nesting
-                   (`MAX_FTL_NESTING` 64, UPSTREAM U2); `ftl_check/tests.rs` (the port vs
-                   fluent-syntax's entries, the limit on a 2 MB thread)
+  md.rs            Markdown → HTML (ADR 0014, 0020): `to_html` / `to_html_template` (pulldown-cmark,
+                   Tera syntax kept verbatim), `code_ranges`, `dedent_blocks` (ADR 0024)
+  fuzz.rs          (`fuzzing` feature, `#[doc(hidden)]`) the fuzz harness: the internal glue
+                   called directly per input (html, css, ftl, svg targets)
+  ftl_check.rs     (ADR 0045) the load-time FTL safety check: a port of fluent-syntax 0.11.1's
+                   `parse_runtime` counting nesting (`MAX_FTL_NESTING` 64, UPSTREAM U2) and
+                   refusing, in its string-literal path, an escape cut off by a non-ASCII byte
+                   (`Stop::BadEscape`, UPSTREAM U1; text isn't scanned, bug_0236);
+                   `ftl_check/tests.rs` (the port vs fluent-syntax's entries, the escape
+                   refusal vs fluent-syntax's panic, the limit on a 2 MB thread)
   tera_check/      (ADR 0044, bug_0220) the load-time template safety check: every input is
                    untrusted, and Tera 2.4 bounds no render's work or memory (UPSTREAM U39),
                    its parser private. `lexer.rs` (Tera's lexer ported with `nom`: text,
@@ -108,11 +114,17 @@ src/
                    Tera compiled, an unreadable input is an error), `analysis.rs` (an abstract
                    render over `Av` bounds — written size, item count, one item's size,
                    numeric magnitude — each a `Lin` `c + k·A`, `A` one app value; a loop over
-                   app data counts one iteration, a template-made one multiplies; `set_global`
-                   in a loop runs once with symbols and must come out as constant + one
-                   carried symbol (linear growth); includes/`extends`+`super()`/components
-                   inline, recursion refused; `MAX_NESTING` 64 and `MAX_ANALYSIS_WORK` 2²²
-                   bound the check itself). Limits: `MAX_TEMPLATE_STEPS` 2²⁵,
+                   app data counts one iteration, a template-made one multiplies; a loop over
+                   app data inside another runs only over the innermost app loop's element
+                   (`Av::origin`; else `NestedAppLoops`, ADR 0046); a context number in
+                   `range` counts `RANGE_MAX`; building or scanning a value costs its bytes
+                   ÷ 16 (bug_0227); `set_global` in a loop runs once with symbols and must
+                   come out as constant + one copy per carried variable (linear growth;
+                   `carried` reaches component bodies, bug_0224); includes/`extends`+
+                   `super()`/components inline, recursion refused; `MAX_NESTING` 64,
+                   `MAX_DEPTH` 96 (every level the analysis recurses through, ~14 KB each in
+                   debug, bug_0223) and `MAX_ANALYSIS_WORK` 2²² bound the check itself).
+                   Limits: `MAX_TEMPLATE_STEPS` 2²⁵,
                    `MAX_TEMPLATE_VALUE_BYTES` 16 MiB, `MAX_TEMPLATE_APP_COPIES` 4 096.
                    `tests.rs`: bombs refused by their limit, ordinary templates accepted,
                    properties vs Tera (the parsers agree; renders stay within the bound)
@@ -147,7 +159,9 @@ src/
                    `update_viewport_render_target_size`: owners (visible and within the
                    size gate), the target image's presence (U38), `shown`; `bind` puts
                    `ViewportNode`/`ImageNode` on a `CanvasPicture` child — spawned on
-                   demand, the viewport only once it's laid out, despawned on `Nothing`);
+                   demand, the viewport only once it's laid out, despawned on `Nothing`;
+                   it copies the element's `Pickable` (bug_0233) and padding-box corners,
+                   `inner_radius` (bug_0234), every frame);
                    the build's `Tree` treats the picture like an app-nested `HtmlUi` (kept
                    by `update_children`, bug_0215), so bindings survive updates
   anchor.rs        HtmlAnchor/AnchorPlacement/AnchoredSide: place_anchored (PostUpdate, in
@@ -197,9 +211,14 @@ src/
                    segments + 2 — per vertex, bug_0189; paint server 0 — converted once, a
                    shape's own work gains 2 × the server's content); own work = 16 per element,
                    1 per stop, 4 per path segment, (arc cubics)²/64 per path arc (svgtypes'
-                   quadratic drain), 16 per text byte; plus `<style>` rules × elements ÷ 4
-                   (usvg, the model and the box pass each match every pair; refused before
-                   the model's pass when that alone is over the budget, bug_0207). Segments
+                   quadratic drain), 16 per text byte, a `<text>`'s characters² ÷ 32 + spans ×
+                   characters × 2 (usvg's layout, U41, U43, bug_0232); plus the `<style>`
+                   sheets, charged before simplecss runs: its parse by `style_scan_bytes`
+                   (the offsets where it raises errors, U42) and its matching by
+                   `match_work` — per rule, simplecss's worst-case calls Σ_{j≤k} C(depth, j)
+                   for k descendant combinators (`descendant_calls`, U40) over the depth
+                   histogram × (1 + 2 per class/id/attribute/pseudo test), ÷ 4 (usvg, the
+                   model and the box pass each match; bug_0207, bug_0229, bug_0231). Segments
                    are counted, never generated:
                    `path_segments` walks svgtypes' raw `PathParser` tracking the point like the
                    simplifier, each arc's cubics by kurbo's arithmetic (bug_0190, U22); shape
@@ -223,7 +242,10 @@ src/
                    allocation), `estimate_cost` (resvg's layer/filter/mask/clip model, early exit
                    at `MAX_SVG_COST`; calibrated in docs/agents/performance/adr-0038-probe.md §7;
                    text walks its flattened glyph paths, bug_0204/0206; a dashed stroke is
-                   charged `DASH_COST` per dash, `dash_count` ≤ tiny-skia's 10⁶, bug_0205),
+                   charged `DASH_COST` per dash, `dash_count` ≤ tiny-skia's 10⁶, bug_0205;
+                   `CostWalk::measure` takes each path's control polygon in device px — the
+                   rows its edges walk (fill once, stroke outline twice) and every stroke
+                   contour (subpath or dash) with its caps, bug_0230),
                    `check_extent` (before drawing: each path's control bounds, strokes padded,
                    through every transform resvg applies — groups, clips, masks, `feImage`,
                    pattern tiles, text outlines — must stay within `MAX_SVG_EXTENT` 2¹⁹ px of
@@ -490,8 +512,12 @@ tests/
                    grow shares, space-between, wrap without overlap)
   windowing_model.rs  proptest: random documents × text changes / row flips / scrolls, a windowed
                    build vs an unwindowed one stepped in lockstep, checked every frame (placement,
-                   coverage, unique WindowKeys; tightness once settled) + minimized regressions
-                   (bug_0160–0177)
+                   coverage, unique WindowKeys; tightness and the scroll range once settled) +
+                   minimized regressions (bug_0160–0177, bug_0222)
+  selector_model.rs  selector matching vs a reference model (review_0005 I13): random small
+                   documents × one random rule from the supported grammar
+  source_lint.rs   lints over the library's own source (every `.rs` under `src/`, bug_0221):
+                   no debug prints, no file writes
   content_lint.rs  lint tests over the examples' content in examples/assets/: locale parity,
                    templates render (+ every data-l10n-id resolves), no hard-coded text, CSS url()s, pseudo-locale
   golden.rs        golden images (#[ignore]d): tests/golden/<scene>/ rendered offscreen by real Bevy,
@@ -712,8 +738,10 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
   `FluentResource::try_new` (the bundle loader, the fuzz harness, the
   Markdown fuzz path):
   - bug_0005: an invalid `\u`/`\U` escape cut off by a multi-byte
-    character panicked (the error quoted one *byte* of it): `bad_escape`
-    scans the whole file, context-free.
+    character panicked (the error quoted one *byte* of it): the port's
+    `skip_unicode_escape_sequence`, reached only from string literals as
+    fluent-syntax's is, refuses exactly that (a file-wide scan refused
+    `C:\użytkownik` in text, bug_0236).
   - bug_0015: nesting recursed without a limit (placeables, select
     variants, call arguments): a port of `parse_runtime`'s control flow
     (same pointer moves and errors, so Junk recovery restarts where
@@ -1813,7 +1841,9 @@ Known limits (each skipped/ignored value is logged at `debug`):
   combinators inside — at the first level only, a combinator in an argument
   nested in another skips the rule (`nested`'s depth: parcel re-matches an
   argument per ancestor, so each level multiplied by the depth; bug_0213,
-  ADR 0044) — but no `:not()` within a `:not()` (ADR 0029's
+  ADR 0044), and a sheet holds at most `MAX_COMBINATOR_ARGUMENTS` (64) such
+  arguments in all (each costs depth² per element; the rules past it skip,
+  bug_0235) — but no `:not()` within a `:not()` (ADR 0029's
   reactivity answers a pseudo-class by `!in_negation()`, exact only at one
   level). The allowlist also keeps out what parcel's matcher panics on
   (`:nth-child(… of S)`, `:has()`, `&` nesting, `:nth-col()`).

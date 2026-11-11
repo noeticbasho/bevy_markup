@@ -659,7 +659,9 @@ mod svg_tests {
         let svg = |body: &str| {
             format!("<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'>{body}</svg>")
         };
-        let arcs = "A1e9 1e9 0 1 1 1e9 0 A1e9 1e9 0 1 1 0 0 ".repeat(20);
+        // One pair: enough to pass the extent, under the cost estimate (which
+        // counts the rows each edge walks, bug_0230).
+        let arcs = "A1e9 1e9 0 1 1 1e9 0 A1e9 1e9 0 1 1 0 0 ";
         let u24 = svg(&format!("<path d='M0 0 {arcs}'/>"));
         let err = super::svg(u24.as_bytes()).expect_err("U24");
         assert!(err.contains("too far outside the image"), "U24: {err}");

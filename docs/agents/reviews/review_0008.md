@@ -458,3 +458,12 @@ L02 bug_0224, L03 bug_0225, L04 bug_0226, L05 bug_0227, L06 bug_0228,
 L07 bug_0229 (UPSTREAM U40), L08 bug_0230, L09 bug_0231, L10 bug_0232
 (UPSTREAM U41), L11 bug_0233, L12 bug_0234, L13 bug_0235, L14
 bug_0236, L16 bug_0237. L15 is records drift, not a defect.
+
+Fixed on 2026-11-12, in the commit after `4af00b9`: every filed
+report (ADR 0046 for the template check's loop nesting and depth budget).
+Probing the SVG fixes found two more upstream defects the review's
+numbers had folded in: simplecss parses a sheet in quadratic time (U42,
+most of L09's 3.25 s) and usvg reshapes a whole text chunk per span
+(U43). L15's drift in this repo's records is corrected (INDEX statuses,
+the README's claim, AGENTS.md's layout); WORKSPACE.md's and
+`Cargo.toml`'s different repository names are left for the owner.
