@@ -38,3 +38,4 @@
 ## [2026-11-11 13:03] update | Fixed 15 of review_0007's 18 bugs (uncommitted); bug_0209/0213/0220 await the threat-model decision; ADR 0043
 ## [2026-11-11 14:46] update | Fixed review_0007 bugs 0204-0221 (uncommitted); ADR 0043 canvas picture child, ADR 0044 inputs untrusted + tera_check
 ## [2026-11-11 16:58] update | FTL checked at load (ADR 0045): ftl_check ports fluent-syntax 0.11.1 parse_runtime; fluent-syntax fork [patch] removed
+## [2026-11-11 19:17] update | Fixed bug_0222 (uncommitted): windowing spacers add their run's scroll reach (taffy scrollable overflow); windowing_model checks content heights

@@ -116,6 +116,11 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   for room (a hundred large `<img>` tags held gigabytes).
 
 ### Fixed
+- A windowed UI (`HtmlWindowed`) scrolls exactly as far as the full
+  document. Its stand-ins for culled rows counted the last row's bottom
+  margin and empty trailing boxes as content, and missed text
+  overflowing a fixed-height row, so at the end of the scroll every row
+  sat a few px off.
 - An `<img>` sized in `%` (`width: 50%`) now has that size on HiDPI
   displays and with `UiScale` other than 1; it was scaled by the factor
   (a `50%` image was full width at scale 2).

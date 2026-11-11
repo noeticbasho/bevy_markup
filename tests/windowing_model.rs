@@ -10,6 +10,8 @@
 //! - **coverage:** every element the viewport shows is built (except the
 //!   first frame after a text change: bug_0170, a known limit);
 //! - **keys:** no two entities share a `WindowKey`;
+//! - **range**, once settled: the roots' content heights agree (within
+//!   1 px; a spacer adds what its run adds to the scroll range, bug_0222);
 //! - **tightness**, once settled: no element is built wholly outside the
 //!   band (the viewport grown by the margin) — the cull is exact once the
 //!   heights are measured, so over-building is a bug too (review_0006
@@ -22,7 +24,7 @@
 //! text (`{{ v }}`, which can wrap), flip the conditional rows and
 //! scroll. Found by review_0006's methods: compare by position, never by
 //! counts (bug_0151 kept the counts right). The named tests below are the
-//! property's finds, minimized (bug_0160–bug_0171).
+//! property's finds, minimized (bug_0160–bug_0171, bug_0222).
 
 mod common;
 use common::*;
@@ -120,6 +122,14 @@ fn rects(ui: &mut TestUi) -> BTreeMap<String, (f32, f32)> {
         .collect()
 }
 
+/// The root's content height, logical px: what its scroll range is
+/// measured from.
+fn content_height(ui: &mut TestUi) -> f32 {
+    let root = ui.root();
+    let node = ui.world_mut().get::<ComputedNode>(root).expect("laid out");
+    node.content_size.y * node.inverse_scale_factor
+}
+
 fn spawn(name: &str, page: &str, css: &str, windowed: Option<HtmlWindowed>) -> TestUi {
     let files = [("page.html", page), ("style.css", css)];
     let mut ui = TestUi::with_layout(name, &files, UVec2::new(300, 200))
@@ -202,13 +212,7 @@ impl Pair {
 
     /// How far the full build scrolls.
     fn range(&mut self) -> f32 {
-        let root = self.full.root();
-        let node = self
-            .full
-            .world_mut()
-            .get::<ComputedNode>(root)
-            .expect("laid out");
-        (node.content_size.y * node.inverse_scale_factor - 200.0).max(0.0)
+        (content_height(&mut self.full) - 200.0).max(0.0)
     }
 
     fn set<T: serde::Serialize + ?Sized>(&mut self, key: &'static str, value: &T, note: String) {
@@ -329,7 +333,22 @@ impl Pair {
                     panic!("{other} and {entity} share {:?}\n{}", key.0, context());
                 }
             }
-            if frame < 5 || !self.tight {
+            if frame < 5 {
+                continue;
+            }
+            // The scroll range: a spacer adds what its run adds (border
+            // boxes and visible overflow, no margins, no empty boxes;
+            // bug_0222).
+            let (full, windowed) = (
+                content_height(&mut self.full),
+                content_height(&mut self.windowed),
+            );
+            assert!(
+                (full - windowed).abs() <= 1.0,
+                "content height {windowed:.1}, full build {full:.1}\n{}",
+                context()
+            );
+            if !self.tight {
                 continue;
             }
             let band = (
@@ -788,5 +807,49 @@ fn a_root_that_is_not_a_column_windows_nothing() {
         pair.tight = false;
         pair.scroll(300.0);
         pair.scroll(900.0);
+    }
+}
+
+/// bug_0222, minimized from seeds 17702137485556457484,
+/// 7307673853095145470 and 7307673853095171432: a culled run stood in as
+/// one spacer as tall as its margin boxes, but a scroll container's range
+/// is taffy's scrollable overflow — each child's border box or the visible
+/// overflow beyond it, never its margins, nothing from an empty box. The
+/// trailing row's `margin-bottom` (or the gap before a trailing empty
+/// section) became content, and text overflowing a fixed-height row was
+/// cut out: the windowed range was a few px off, and at the end of the
+/// scroll every row sat that much higher or lower than in the full build.
+/// (`Pair::scroll` compares the ranges in each settled frame.)
+#[test]
+fn a_culled_run_adds_what_its_rows_add_to_the_scroll_range() {
+    let rows_with =
+        |class: &str| rows(1..=40, |i| format!("row {i}")).replace("class=\"p\"", class);
+    let css = format!("html {{ flex-direction: column; gap: 2px }}\n{CSS}");
+    for (name, page) in [
+        // The last row's bottom margin.
+        ("margin", rows_with("class=\"p m\"")),
+        // A section left empty after the last row (the gap before it).
+        (
+            "empty",
+            format!(
+                "{}<section class=\"sec\"></section>",
+                rows_with("class=\"p\"")
+            ),
+        ),
+        // The last row's text overflows its fixed height (and margin).
+        (
+            "overflow",
+            format!(
+                "{}<p id=\"over\" class=\"p m tiny\">{}</p>",
+                rows_with("class=\"p\""),
+                "overflowing ".repeat(8)
+            ),
+        ),
+    ] {
+        let css = format!("{css}\n.tiny {{ height: 5px }}");
+        let mut pair = Pair::new(&format!("reach-{name}"), &page, &css, 0.0);
+        // At the top the tail is culled: the ranges must agree.
+        pair.scroll(0.0);
+        pair.scroll(100.0);
     }
 }

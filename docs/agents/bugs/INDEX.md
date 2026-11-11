@@ -256,7 +256,7 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0219](bug_0219.md) | Canvas bookkeeping: warning sets never shrink; `<CANVAS>` in text skips its warning | `src/canvas.rs`, `src/build.rs` | low | fixed (uncommitted) | review_0007 (K15) |
 | [bug_0220](bug_0220.md) | A template's render had no bound on work or memory (nested loops, `set_global` doubling) | `src/html.rs`, `src/template.rs` | high | fixed (uncommitted) | review_0007 (K16) |
 | [bug_0221](bug_0221.md) | `source_lint` skips `src/` subdirectories; SVG text is unfuzzed | `tests/source_lint.rs`, fuzz harness | low | fixed (uncommitted) | review_0007 (K17) |
-| [bug_0222](bug_0222.md) | A windowed build places a row one section gap (3 px) above the full build | `src/build.rs` (windowed build) | low | open | `windowing_model` property, random seed |
+| [bug_0222](bug_0222.md) | A windowed UI's scroll range differs from the full build's by a culled run's margins, empty boxes and overflow | `src/build.rs` (windowing spacers) | low | fixed | `windowing_model` property, random seed |
 
 ## Discovery session metadata: bug_0001–0005
 

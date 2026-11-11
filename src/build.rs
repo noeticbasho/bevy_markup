@@ -329,6 +329,14 @@ enum Item {
         /// border box). Deliberately no model key: the coalesced run's
         /// height is a derived sum, never a member's.
         height: f32,
+        /// How far below the run's top its members reach into a scroll
+        /// range (`None`: not at all) — what the spacer node must reach
+        /// too: taffy's scrollable overflow takes each child's border box
+        /// or its visible overflow, never its margins, and nothing from an
+        /// empty box. A spacer as tall as the run scrolled a trailing
+        /// margin into the range, and one standing in for overflowing text
+        /// cut it out (bug_0222).
+        reach: Option<f32>,
         /// The containing column's row gap: coalescing k culled siblings
         /// into one spacer must keep the k − 1 gaps between them (one
         /// node gets one gap in the column, not k — bug_0151: the band
@@ -2356,15 +2364,38 @@ pub(crate) fn measure_window_heights(
         // The margins resolve in the same logical units the scroll
         // uses; only the measured size is physical (scaling the margins
         // too shrank them on a HiDPI display — review_0006 J03).
+        // The unrounded size: the layout rounds each node, and a spacer
+        // summing rounded parts drifted a pixel per few rows below
+        // fractional (`%`) margins (bug_0176).
+        let size = computed.unrounded_size * computed.inverse_scale_factor;
+        // What the subtree adds to a scroll range, as taffy's
+        // `compute_scrollable_overflow_contribution` has it: the border
+        // box, or the visible overflow beyond it; nothing if that's empty
+        // (bug_0222).
+        let propagates = node.overflow.y == OverflowAxis::Visible
+            && !matches!(node.overflow.x, OverflowAxis::Scroll | OverflowAxis::Hidden);
+        let extent = if propagates {
+            size.y
+                .max(computed.content_size.y * computed.inverse_scale_factor)
+        } else {
+            size.y
+        };
         let entry = (
             margin_top,
-            // The unrounded size: the layout rounds each node, and a
-            // spacer summing rounded parts drifted a pixel per few rows
-            // below fractional (`%`) margins (bug_0176).
-            margin_top + computed.unrounded_size.y * computed.inverse_scale_factor + margin_bottom,
+            margin_top + size.y + margin_bottom,
+            (size.x > 0.0 && extent > 0.0).then_some(margin_top + extent),
         );
         let previous = model.heights.insert(key.0, entry);
-        if previous.is_none_or(|(_, outer)| (outer - entry.1).abs() > 0.5) {
+        // A new reach alone (text overflowing a fixed-height row) changes
+        // the spacers' scroll range too.
+        let moved = |a: f32, b: f32| (a - b).abs() > 0.5;
+        if previous.is_none_or(|(_, outer, reach)| {
+            moved(outer, entry.1)
+                || match (reach, entry.2) {
+                    (Some(a), Some(b)) => moved(a, b),
+                    (a, b) => a.is_some() != b.is_some(),
+                }
+        }) {
             model.changed = true;
         }
     }
@@ -2951,14 +2982,18 @@ fn item_shell<'a>(
     item: &'a Item,
     default_gap: Val,
 ) -> (NodeSpec, Option<&'a [Item]>) {
-    if let Item::Spacer { height, .. } = item {
+    if let Item::Spacer { height, reach, .. } = item {
         // ADR 0031: an invisible fixed height in place of a culled
         // subtree. Not pickable, no element, no text; the height is the
         // model's (a fresh measurement re-records it as is — corrections
-        // are sticky).
+        // are sticky). Its box ends where the run's reach does and the
+        // margin makes up the rest (negative under overflow), so it takes
+        // the run's space and adds the run's scroll range (bug_0222).
+        let reach = reach.unwrap_or(0.0);
         let node = Node {
             flex_shrink: 0.0,
-            height: Val::Px(*height),
+            height: Val::Px(reach),
+            margin: UiRect::bottom(Val::Px(height - reach)),
             ..default()
         };
         return (
@@ -4595,8 +4630,10 @@ struct Ctx<'a, 'p, 'buf> {
 #[doc(hidden)]
 #[derive(Component, Default)]
 pub struct WindowModel {
-    /// `(margin_top, outer_height)` per DOM handle.
-    heights: HashMap<tl::NodeHandle, (f32, f32)>,
+    /// `(margin_top, outer_height, reach)` per DOM handle; `reach` = how
+    /// far below the margin-box top the subtree extends a scroll range,
+    /// `None` if it doesn't (see `Item::Spacer`).
+    heights: HashMap<tl::NodeHandle, (f32, f32, Option<f32>)>,
     /// The subtree holds a positioned (fixed/absolute) element: never
     /// culled (it would vanish with the subtree).
     positioned: HashSet<tl::NodeHandle>,
@@ -4631,12 +4668,12 @@ impl WindowModel {
         (
             self.width,
             self.heights.len(),
-            self.heights.values().map(|(_, outer)| outer).sum(),
+            self.heights.values().map(|(_, outer, _)| outer).sum(),
         )
     }
 
     fn remap(&mut self, pairing: &HashMap<tl::NodeHandle, tl::NodeHandle>) {
-        let remap = |map: &mut HashMap<tl::NodeHandle, (f32, f32)>| {
+        let remap = |map: &mut HashMap<tl::NodeHandle, (f32, f32, Option<f32>)>| {
             let old = std::mem::take(map);
             *map = old
                 .into_iter()
@@ -4735,7 +4772,7 @@ impl WindowCtx<'_> {
         if !valid {
             return None;
         }
-        let &(_, outer) = self.model.heights.get(&key)?;
+        let &(_, outer, reach) = self.model.heights.get(&key)?;
         if self.model.positioned.contains(&key) {
             return None;
         }
@@ -4753,7 +4790,11 @@ impl WindowCtx<'_> {
         } else {
             self.narrow(bottom - self.band.0 - EDGE, self.band.1 - top - EDGE);
         }
-        culled.then_some(Item::Spacer { height: outer, gap })
+        culled.then_some(Item::Spacer {
+            height: outer,
+            reach,
+            gap,
+        })
     }
 
     fn narrow(&self, down: f32, up: f32) {
@@ -4777,7 +4818,7 @@ impl WindowCtx<'_> {
             .borrow()
             .get(frame)
             .is_some_and(|frame| frame.valid.get());
-        if let (true, Some(&(_, outer))) = (valid, self.model.heights.get(&key)) {
+        if let (true, Some(&(_, outer, _))) = (valid, self.model.heights.get(&key)) {
             self.narrow(y - self.band.0 - 1e-3, self.band.1 - (y + outer) - 1e-3);
         }
     }
@@ -4795,7 +4836,7 @@ impl WindowCtx<'_> {
             return true;
         }
         match self.model.heights.get(&key) {
-            Some(&(_, outer)) => y >= self.band.0 && y + outer <= self.band.1,
+            Some(&(_, outer, _)) => y >= self.band.0 && y + outer <= self.band.1,
             None => true,
         }
     }
@@ -4811,7 +4852,7 @@ impl WindowCtx<'_> {
             .iter()
             .filter(|child| !self.model.positioned.contains(*child))
             .filter_map(|child| self.model.heights.get(child))
-            .fold((0.0, 0usize), |(sum, count), &(_, outer)| {
+            .fold((0.0, 0usize), |(sum, count), &(_, outer, _)| {
                 (sum + outer, count + 1)
             });
         (count > 0).then(|| sum / count as f32)
@@ -6482,7 +6523,7 @@ fn collect_node(
                             };
                             boxed.layout.apply_to(&mut probe);
                             let opaque = children_are_opaque(&probe);
-                            let Some(&(margin_top, _)) = win.model.heights.get(&handle) else {
+                            let Some(&(margin_top, _, _)) = win.model.heights.get(&handle) else {
                                 return None;
                             };
                             let gap = boxed.row_gap.unwrap_or(win.default_gap);
@@ -6711,12 +6752,23 @@ fn spec_has_spacer(spec: &NodeSpec) -> bool {
 fn coalesce_spacers(items: Vec<Item>) -> Vec<Item> {
     let mut coalesced: Vec<Item> = Vec::with_capacity(items.len());
     for item in items {
-        if let (Item::Spacer { height, gap }, Some(Item::Spacer { height: total, .. })) =
-            (&item, coalesced.last_mut())
+        if let (
+            Item::Spacer { height, reach, gap },
+            Some(Item::Spacer {
+                height: total,
+                reach: run_reach,
+                ..
+            }),
+        ) = (&item, coalesced.last_mut())
         {
             // The column spaced the two members by one gap; the merged
-            // node must keep it (bug_0151).
-            *total += *gap + *height;
+            // node must keep it (bug_0151). The run reaches as far as its
+            // furthest member (bug_0222).
+            let top = *total + *gap;
+            if let Some(reach) = reach.map(|reach| top + reach) {
+                *run_reach = Some(run_reach.map_or(reach, |run| run.max(reach)));
+            }
+            *total = top + *height;
             continue;
         }
         coalesced.push(item);
@@ -6787,7 +6839,7 @@ fn column_height(
     gap: f32,
     depth: usize,
 ) -> Option<f32> {
-    if let Some(&(_, outer)) = win.model.heights.get(&handle) {
+    if let Some(&(_, outer, _)) = win.model.heights.get(&handle) {
         return Some(outer + gap);
     }
     if is_itemless(ctx, handle) {
@@ -7500,7 +7552,7 @@ mod tests {
         assert_eq!(model.width, 300.0, "the root's content width, logical");
         assert_eq!(
             model.heights.get(&tl::NodeHandle::new(0)),
-            Some(&(0.0, 20.0)),
+            Some(&(0.0, 20.0, Some(20.0))),
             "the child's outer height, logical (40 physical at a 2x display)"
         );
         let _ = child;

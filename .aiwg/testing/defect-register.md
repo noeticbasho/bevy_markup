@@ -11,9 +11,9 @@ An index; the bug reports are authoritative. 222 reports, bug_0001–0222 (2026-
 
 | Status | Count |
 |---|---|
-| Fixed, with regression test | 217 (bug_0204–0221's fixes uncommitted) |
+| Fixed, with regression test | 218 |
 | Fixed, measured (no test) | 1 — bug_0211, an idle-frame cost |
-| Open | 1 — bug_0222, a windowed row 3 px off in one frame (low; pre-existing, found by a random seed) |
+| Open | 0 |
 | Won't fix (known limit) | 1 — bug_0170, a one-frame row shift in the windowed build (low) |
 | Withdrawn (not a bug) | 1 — bug_0026 |
 | Open upstream, no local workaround | 1 — bug_0203, tall inline images and parley 0.11's line metrics (low; fixed in parley 0.12, which Bevy 0.20 doesn't use) |

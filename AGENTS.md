@@ -1123,7 +1123,16 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
   run's height includes the gaps between its members (`Item::Spacer`
   carries its column's gap): one node gets one gap in a column, so
   summing heights alone dropped k − 1 gaps and the band rose above the
-  viewport (bug_0151). Test windowing by position against an unwindowed
+  viewport (bug_0151). A spacer must also add what its run adds to the
+  root's scroll range: taffy's scrollable overflow counts each child's
+  border box or visible overflow, never margins, nothing from an empty
+  box. The model records each subtree's `reach` (margin-box top → the
+  furthest point it adds), a run takes its furthest member's, and the
+  spacer node is `reach` tall with the rest of the run as its bottom
+  margin (negative under overflow). As tall as its margin boxes, a
+  trailing spacer scrolled the last margin into the range and cut out
+  overflowing text (bug_0222). `Pair::scroll` compares the content
+  heights. Test windowing by position against an unwindowed
   build of the same document at the same offset (`review_0006`'s
   `band_errors`), never by element counts. The reuse
   check runs before the cull and requires the cached spec's spacerness
