@@ -51,6 +51,7 @@ the issue may already be fixed or reported.
 | U35 | tiny-skia-path 0.12 (via resvg 0.49) | `NonZeroRect::to_int_rect` and `IntSize::to_int_rect(x, y)` unwrap `IntRect::from_xywh`, `None` once `x + width` passes `i32::MAX`; resvg converts filter regions, subregions and offsets with them ([bug_0201](bug_0201.md)) | panic in any build: a failed draw (`svg` feature) | regions, subregions and offsets past `MAX_SVG_FILTER_REGION` refused before drawing (`svg::check_extent`) | unreported |
 | U36 | resvg 0.49 (tiny-skia 0.12) | `render_pattern_pixmap` allocates a pattern's tile at its drawn size with no limit; `Pixmap::new` allocates with `vec![0; len]`, which aborts on failure ([bug_0200](bug_0200.md)) | process abort (`svg` feature) | the render-cost estimate charges each tile (`svg::estimate_cost`) | unreported |
 | U37 | parley 0.11 (via bevy_text 0.20) | An inline box's whole height counts as ascent and the line height is the tallest item's, so a box taller than the text's ascent gets negative leading ([bug_0203](bug_0203.md)) | an `<img>`/inline `<svg>` taller than the ascent overlaps the line above; the line is short by the text's descent | none | fixed upstream (parley 0.12.0); waiting for Bevy to depend on it |
+| U38 | Bevy (bevy_ui 0.20.1) | `update_viewport_render_target_size` ends in `images.get_mut(image_handle).unwrap()`: a `ViewportNode` camera whose `RenderTarget::Image` isn't in `Assets<Image>` panics ([bug_0218](bug_0218.md)) | a canvas camera over a not-yet-loaded or removed target image panics on the compute pool | none yet (planned: `sync_canvases` checks `Assets<Image>::contains` before binding) | unreported |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -837,6 +838,23 @@ CI clippy command and workspace tests pass on both.
   `cargo test --test html_ui -- --ignored a_tall_inline_image`, un-ignore
   it, add a tall image to `layout_svg` (and re-record it), and mark this
   entry removed.
+
+## U38 — bevy_ui: a viewport camera's missing target image panics
+
+- **Project:** bevyengine/bevy, crate bevy_ui. Affected: 0.20.1.
+- **Problem:** `widget/viewport.rs` `update_viewport_render_target_size`
+  resizes the camera's target with `images.get_mut(image_handle)
+  .unwrap()` (line 188). A camera whose `RenderTarget::Image` handle has
+  no image in `Assets<Image>` (reserved, still loading, or removed)
+  panics.
+- **Reproduction:** a `ViewportNode` (here a `<canvas>` with
+  `CanvasSource::Camera`) over a camera targeting a reserved handle:
+  `called Option::unwrap() on a None value` on the first frame
+  (review_0007 K15, bug_0218).
+- **Local workaround:** none yet; bug_0218's fix is to bind the
+  `ViewportNode` only once the image exists.
+- **PR sketch:** skip (or warn once) when `images.get_mut` returns
+  `None`, as the render-target extraction does for missing images.
 
 ## Not upstream bugs (recorded so they aren't re-filed)
 

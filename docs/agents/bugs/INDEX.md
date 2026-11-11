@@ -15,7 +15,8 @@ defects `I01`–`I16`), [review_0006](../reviews/review_0006.md) (the
 windowed build, ADR 0031: `J01`–`J09`) and
 [review_0007](../reviews/review_0007.md) (the crate at `f76b320`: SVG,
 `<canvas>`, the selector engine: `K01`–`K18`, open). A finding gets its
-own `bug_NNNN.md` here when its fix lands.
+own `bug_NNNN.md` here when its fix lands; review_0007's were filed
+up front, open, as bug_0204–0221 (on request, 2026-11-11).
 
 The crate was called `p23` until 2026-10-05 and is now `bevy_markup`; the
 reports keep the name, paths and commands as they were at the time
@@ -235,6 +236,24 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0201](bug_0201.md) | A huge filter subregion or offset panicked tiny-skia-path | `src/svg.rs` (`check_extent`); upstream tiny-skia-path (U35) | high | fixed: refused past `MAX_SVG_FILTER_REGION` | `hostile_magnitudes_never_panic` proptest |
 | [bug_0202](bug_0202.md) | `<canvas>` attributes and inline content didn't follow HTML | `src/canvas.rs`, `src/build.rs` | low | fixed | expanding the canvas tests |
 | [bug_0203](bug_0203.md) | An inline image taller than the text's ascent overlaps the line above | upstream parley 0.11 via bevy_text 0.20 (U37) | low | upstream-unfixed (fixed in parley 0.12.0; Bevy 0.20 pins 0.11) | `layout_svg` layout oracle vector |
+| [bug_0204](bug_0204.md) | A pattern painted on SVG text aborts the process (`svg-text`) | `src/svg.rs` (`CostWalk`); upstream resvg (U36) | high | open | review_0007 (K01) |
+| [bug_0205](bug_0205.md) | Dashed strokes cost about 1 000 times their estimate | `src/svg.rs` (`estimate_cost`) | medium | open | review_0007 (K02) |
+| [bug_0206](bug_0206.md) | Glyph outlines aren't in the SVG cost estimate (`svg-text`) | `src/svg.rs` (`CostWalk`) | medium | open | review_0007 (K03) |
+| [bug_0207](bug_0207.md) | SVG `<style>` rules × elements is quadratic and outside every budget | `src/svg_bounds.rs`, `src/svg_boxes.rs` | medium | open | review_0007 (K04) |
+| [bug_0208](bug_0208.md) | A refused inline `<svg>` is parsed again on every build, on the main thread | `src/svg.rs` (`InlineSvgs`) | medium | open | review_0007 (K05) |
+| [bug_0209](bug_0209.md) | Nothing bounds the sum of SVG rasters | `src/svg.rs` (`SvgRasters`, `InlineSvgs`) | medium | open | review_0007 (K06) |
+| [bug_0210](bug_0210.md) | The word `color` in any attribute value turns `currentColor` off on an inline `<svg>` | `src/svg.rs` (`prepare_inline`) | low | open | review_0007 (K07) |
+| [bug_0211](bug_0211.md) | Idle frames cost O(spans × distinct inline SVG documents) | `src/svg.rs` (`rasterize_svg_images`) | low | open | review_0007 (K08) |
+| [bug_0212](bug_0212.md) | An SVG draw in flight outlives its document's reload | `src/svg.rs` (`rasterize_svg_images`) | low | open | review_0007 (K09) |
+| [bug_0213](bug_0213.md) | Nested `:is()` with descendant combinators costs depth^levels | `src/cascade/selector.rs` | high | open | review_0007 (K10) |
+| [bug_0214](bug_0214.md) | `%` image sizes are wrong at any scale factor but 1 | `src/build.rs` (`size_images`) | medium | open | review_0007 (K11) |
+| [bug_0215](bug_0215.md) | A `<canvas>` with a CSS frame or background loses its picture, or its frame | `src/canvas.rs`, `src/build.rs` | medium | open | review_0007 (K12) |
+| [bug_0216](bug_0216.md) | Hiding a camera's only `<canvas>` resizes its image to 1 × 1 | `src/canvas.rs` | medium | open | review_0007 (K13) |
+| [bug_0217](bug_0217.md) | An oversized `<canvas>` keeps the camera from one that fits | `src/canvas.rs` | low | open | review_0007 (K14) |
+| [bug_0218](bug_0218.md) | A canvas camera whose target image isn't in `Assets<Image>` panics in Bevy | `src/canvas.rs`; upstream bevy_ui (U38) | low | open (upstream U38) | review_0007 (K15) |
+| [bug_0219](bug_0219.md) | Canvas bookkeeping: warning sets never shrink; `<CANVAS>` in text skips its warning | `src/canvas.rs`, `src/build.rs` | low | open | review_0007 (K15) |
+| [bug_0220](bug_0220.md) | Template output has no bound: 92 bytes of Tera render n² characters | `src/html.rs`, `src/template.rs` | low | open (pending the threat-model decision) | review_0007 (K16) |
+| [bug_0221](bug_0221.md) | `source_lint` skips `src/` subdirectories; SVG text is unfuzzed | `tests/source_lint.rs`, fuzz harness | low | open | review_0007 (K17) |
 
 ## Discovery session metadata: bug_0001–0005
 
@@ -481,6 +500,21 @@ settle (rebuild observed) and the resulting dump to match a reference model.
   `fix/later-sibling-scaling`.
 - **Machine/toolchain:** Arch Linux (kernel 7.2.11), AMD Ryzen 7 9800X3D,
   rustc 1.98.1, `nightly-2026-09-09` for cargo-fuzz 0.13.2.
+
+## Discovery session metadata: bug_0204–0221 (2026-11-11)
+
+- **Method:** [review_0007](../reviews/review_0007.md), a whole-crate
+  review of `f76b320` (SVG, `<canvas>`, the selector engine): the new
+  modules read against their ADRs and the upstream code they model, and
+  14 behaviour probes (temporary tests, since removed), timed in release.
+  Filed open, before any fix, one report per finding: K01–K14 →
+  bug_0204–0217, K15 → bug_0218 (the panic) and bug_0219 (its two
+  smaller canvas notes), K16 → bug_0220, K17 → bug_0221. K18 (records
+  drift) is not a defect and stays in the review.
+- **Discovery agent:** Claude Code session, `claude-fable-5-2`.
+- **Commit at discovery:** `f76b320`.
+- **Machine/toolchain:** Arch Linux (kernel 7.2.14), AMD Ryzen 7 9800X3D,
+  rustc 1.98.1.
 
 ## Discovery session metadata: bug_0203 (2026-11-11)
 

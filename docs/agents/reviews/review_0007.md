@@ -475,3 +475,12 @@ model. Worth an ADR before the next refusal.
 4. K05, then K02, K04, K06: stalls and memory.
 5. K16's ADR and the SVG note: both decide how much of 2 and 4 is owed.
 6. The rest.
+
+## Filed
+
+Filed as open bug reports on 2026-11-11, before any fix: K01 bug_0204,
+K02 bug_0205, K03 bug_0206, K04 bug_0207, K05 bug_0208, K06 bug_0209,
+K07 bug_0210, K08 bug_0211, K09 bug_0212, K10 bug_0213, K11 bug_0214,
+K12 bug_0215, K13 bug_0216, K14 bug_0217, K15 bug_0218 (+ bug_0219 for
+its two smaller notes; UPSTREAM U38), K16 bug_0220, K17 bug_0221. K18
+is records drift, not a defect.
