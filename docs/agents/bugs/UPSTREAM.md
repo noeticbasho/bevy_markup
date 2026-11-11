@@ -53,6 +53,8 @@ the issue may already be fixed or reported.
 | U37 | parley 0.11 (via bevy_text 0.20) | An inline box's whole height counts as ascent and the line height is the tallest item's, so a box taller than the text's ascent gets negative leading ([bug_0203](bug_0203.md)) | an `<img>`/inline `<svg>` taller than the ascent overlaps the line above; the line is short by the text's descent | none | fixed upstream (parley 0.12.0); waiting for Bevy to depend on it |
 | U38 | Bevy (bevy_ui 0.20.1) | `update_viewport_render_target_size` ends in `images.get_mut(image_handle).unwrap()`: a `ViewportNode` camera whose `RenderTarget::Image` isn't in `Assets<Image>` panics ([bug_0218](bug_0218.md)) | a canvas camera over a not-yet-loaded or removed target image panics on the compute pool | `sync_canvases` binds a camera only while its target image is in `Assets<Image>` (bug_0218) | unreported |
 | U39 | Tera 2.4.0 | A render's work and memory have no limit (only `range` ≤ 10⁵ and component recursion ≤ 20): nested loops run for hours, `set_global` doubling in a loop or unrolled `set` doubling ask for terabytes and abort ([bug_0220](bug_0220.md)) | a template stalls or aborts the app | `tera_check`: a static check at load bounds steps, built values and copies of context data (ADR 0044); output capped by `template::MAX_RENDERED_BYTES` | unreported |
+| U40 | simplecss 0.2.2 (via usvg 0.49 / bevy_markup's `svg_bounds`) | `Selector::matches` tries every ancestor for a descendant combinator and recurses with no memo: a k-part selector whose leftmost part never matches costs about C(depth, k) per element ([bug_0229](bug_0229.md)) | a 555-byte SVG `<style>` parses for 36 s (`svg` feature) | none yet | unreported |
+| U41 | usvg 0.49 text layout (`svg-text`) | converting one `<text>` chunk is quadratic in its length; the step isn't located yet ([bug_0232](bug_0232.md)) | a 100 000-character text converts for 13.5 s inside `MAX_SVG_WORK` | none yet | unreported |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -883,6 +885,38 @@ CI clippy command and workspace tests pass on both.
   written, largest value), checked in the interpreter loop with batched
   counters; and expose the parser (`parsing::parser`) so checks like ours
   don't have to port it.
+
+## U40 — simplecss: descendant selectors match in exponential time
+
+- **Project:** linebender/simplecss. Affected: 0.2.2 (used by usvg 0.49
+  and by `svg_bounds::Graph::new`).
+- **Problem:** `selector.rs:174` matches a descendant combinator by
+  trying each ancestor in turn and recursing into the rest of the
+  selector, with no memo. A selector of k parts over d nested elements
+  costs about C(d, k) when its leftmost part never matches.
+- **Reproduction:** one `<style>` rule `q g g g g g g g` and 60 nested
+  `<g>`s around a `<rect>` (555 bytes): `svg::parse` takes 35.7 s in a
+  release build (review_0008 L07, bug_0229).
+- **Local workaround:** none yet; bug_0229's fix is to bound the
+  selector before matching or to match with a memo.
+- **PR sketch:** memoize (selector part, element) results, or match
+  right to left with the standard non-backtracking descendant rule
+  (once the rest of the selector fails at the nearest matching ancestor
+  it fails at every further one for a pure descendant chain).
+
+## U41 — usvg: text conversion is quadratic in a chunk's length
+
+- **Project:** linebender/resvg, crate usvg. Affected: 0.49 (`text`
+  feature).
+- **Problem:** one `<text>` of N characters converts in time growing
+  with N²: 20 000 → 173 ms, 100 000 → 3.93 s (`M`, Bevy's default
+  font); 548 ms → 13.5 s with a character the font lacks. 20 000
+  one-letter `<text>` elements take 104 ms, so it's per chunk.
+- **Reproduction:** review_0008 L10 (bug_0232).
+- **Local workaround:** none yet; bug_0232's fix is to charge a chunk by
+  its length squared, or cap it.
+- **PR sketch:** locate the quadratic step first (likely per-character
+  work over the whole chunk in shaping or fallback); not yet done.
 
 ## Not upstream bugs (recorded so they aren't re-filed)
 

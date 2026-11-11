@@ -21,7 +21,8 @@ A finding gets its
 own `bug_NNNN.md` here when its fix lands; review_0007's were filed
 up front, open, as bug_0204–0221 (on request, 2026-11-11), and all
 fixed the same day (bug_0209, bug_0213 and bug_0220 after the
-threat-model decision, ADR 0044).
+threat-model decision, ADR 0044). review_0008's were filed the same way,
+open, as bug_0223–0237 (on request, 2026-11-12).
 
 The crate was called `p23` until 2026-10-05 and is now `bevy_markup`; the
 reports keep the name, paths and commands as they were at the time
@@ -260,6 +261,21 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0220](bug_0220.md) | A template's render had no bound on work or memory (nested loops, `set_global` doubling) | `src/html.rs`, `src/template.rs` | high | fixed (uncommitted) | review_0007 (K16) |
 | [bug_0221](bug_0221.md) | `source_lint` skips `src/` subdirectories; SVG text is unfuzzed | `tests/source_lint.rs`, fuzz harness | low | fixed (uncommitted) | review_0007 (K17) |
 | [bug_0222](bug_0222.md) | A windowed UI's scroll range differs from the full build's by a culled run's margins, empty boxes and overflow | `src/build.rs` (windowing spacers) | low | fixed | `windowing_model` property, random seed |
+| [bug_0223](bug_0223.md) | The template check overflows the asset thread's stack and aborts the app | `src/tera_check/analysis.rs` | high | open | review_0008 (L01) |
+| [bug_0224](bug_0224.md) | `set_global` inside a component call's body escapes the template check's growth bound | `src/tera_check/analysis.rs` | high | open | review_0008 (L02) |
+| [bug_0225](bug_0225.md) | `get`'s `default` argument isn't in the template check's value bound | `src/tera_check/analysis.rs` | high | open | review_0008 (L03) |
+| [bug_0226](bug_0226.md) | Loops over context data count once at any nesting depth: accepted templates render for minutes | `src/tera_check/analysis.rs` | high | open | review_0008 (L04) |
+| [bug_0227](bug_0227.md) | The template check charges one step for building or scanning a value of any size | `src/tera_check/analysis.rs` | medium | open | review_0008 (L05) |
+| [bug_0228](bug_0228.md) | A `set_global` counter in two nested loops is refused by the template check | `src/tera_check/analysis.rs` | medium | open | review_0008 (L06) |
+| [bug_0229](bug_0229.md) | A descendant selector in an SVG `<style>` takes exponential time to match | `src/svg_bounds.rs`; upstream simplecss (U40) | high | open (upstream U40) | review_0008 (L07) |
+| [bug_0230](bug_0230.md) | The SVG drawing estimate doesn't see overlapping area | `src/svg.rs` (`CostWalk`) | medium | open | review_0008 (L08) |
+| [bug_0231](bug_0231.md) | The SVG `<style>` charge assumes cheap selectors, and refuses only after the matching ran | `src/svg_bounds.rs` | medium | open | review_0008 (L09) |
+| [bug_0232](bug_0232.md) | SVG text conversion is quadratic in a text chunk's length (`svg-text`) | `src/svg_bounds.rs`; upstream usvg (U41) | medium | open (upstream U41) | review_0008 (L10) |
+| [bug_0233](bug_0233.md) | A `pointer-events: none` `<canvas>` swallows clicks once it shows a source | `src/canvas.rs` | medium | open | review_0008 (L11) |
+| [bug_0234](bug_0234.md) | A `<canvas>` picture ignores the canvas's `border-radius` | `src/canvas.rs` | low | open | review_0008 (L12) |
+| [bug_0235](bug_0235.md) | One level of `:is()` with a combinator is still cubic in DOM depth | `src/cascade/selector.rs` | low | open | review_0008 (L13) |
+| [bug_0236](bug_0236.md) | The FTL escape scan refuses bundles whose text holds `\u` before a non-ASCII letter | `src/ftl_check.rs` | low | open | review_0008 (L14) |
+| [bug_0237](bug_0237.md) | An inline `<svg>` refused for the raster memory budget on its task is never retried | `src/svg.rs` (`InlineSvgs`) | low | open | review_0008 (L16) |
 
 ## Discovery session metadata: bug_0001–0005
 
@@ -506,6 +522,22 @@ settle (rebuild observed) and the resulting dump to match a reference model.
   `fix/later-sibling-scaling`.
 - **Machine/toolchain:** Arch Linux (kernel 7.2.11), AMD Ryzen 7 9800X3D,
   rustc 1.98.1, `nightly-2026-09-09` for cargo-fuzz 0.13.2.
+
+## Discovery session metadata: bug_0223–0237 (2026-11-12)
+
+- **Method:** [review_0008](../reviews/review_0008.md), a review of the
+  four commits after review_0007 (`174eda6`..`54bad82`): review_0007's
+  fixes, `src/tera_check/` (ADR 0044), `src/ftl_check.rs` (ADR 0045),
+  the `CanvasPicture` child (ADR 0043) and bug_0222's spacers; the diff
+  read whole, `tera_check`'s analysis against Tera 2.4's source, and 22
+  behaviour probes (temporary tests, since removed), timed in release.
+  Filed open, before any fix, one report per finding: L01–L14 →
+  bug_0223–0236, L16 → bug_0237. L15 (records drift) is not a defect and
+  stays in the review.
+- **Discovery agent:** Claude Code session, `claude-fable-5-2`.
+- **Commit at discovery:** `54bad82`.
+- **Machine/toolchain:** Arch Linux (kernel 7.2.14), AMD Ryzen 7 9800X3D,
+  rustc 1.98.1.
 
 ## Discovery session metadata: bug_0204–0221 (2026-11-11)
 

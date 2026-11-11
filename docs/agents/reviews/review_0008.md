@@ -450,3 +450,11 @@ A note for whoever fixes these: review_0007's fixes each closed the
 input its finding named, and L08, L09 and L13 are the next input along.
 For a bound, the regression test worth having is a search for the worst
 accepted input, not the reported one.
+
+## Filed
+
+Filed as open bug reports on 2026-11-12, before any fix: L01 bug_0223,
+L02 bug_0224, L03 bug_0225, L04 bug_0226, L05 bug_0227, L06 bug_0228,
+L07 bug_0229 (UPSTREAM U40), L08 bug_0230, L09 bug_0231, L10 bug_0232
+(UPSTREAM U41), L11 bug_0233, L12 bug_0234, L13 bug_0235, L14
+bug_0236, L16 bug_0237. L15 is records drift, not a defect.
