@@ -38,6 +38,16 @@ bug_0203 waits on a Bevy release (UPSTREAM U37). review_0007's findings were fil
 
 Decided (ADR 0044): every input is untrusted, templates and CSS included; templates are bounded by a static check at load (`src/tera_check/`).
 
+## Open Review Findings (review_0008, 2026-11-12, at `54bad82`)
+
+16 findings, `L01`–`L16`; 14 reproduced by probes. None fixed, none filed as bug reports yet.
+
+| Severity | Findings |
+|---|---|
+| High | L01 (the template check overflows the asset thread's stack: abort; a regression), L02 (`set_global` in a component body passes the check: bug_0220's abort), L03 (`get`'s `default` isn't bounded: the same abort), L04 (loops over context data count once at any depth), L07 (a descendant selector in SVG `<style>`: 555 B, a 36 s parse) |
+| Medium | L05 (building a value costs one step), L06 (a counter in two nested loops is refused; a regression), L08 (the SVG drawing estimate misses overlap: round-capped dashes 33 s at 48% of the budget), L09 (`<style>` charge assumes cheap selectors), L10 (SVG text conversion quadratic, `svg-text`), L11 (a `pointer-events: none` canvas swallows clicks; a regression) |
+| Low | L12 (the canvas picture ignores `border-radius`; a regression), L13–L16 |
+
 ## How They Were Found
 
 Property testing, stateful testing and fuzzing (bug_0001–0005), the Fluent and layout oracles (0006–0013), mutation-testing triage, corpus coverage replays, example smoke runs, prototype_19 integration (0021), user reports (0023, 0028–0030), and whole-crate review sessions: review_0001–0006 found most of bug_0031 onward, each finding filed when its fix landed; CI itself (bug_0181, a scaling test); nightly fuzzing and its triage (bug_0182–0184, bug_0188–0202); the ADR 0038 SVG work's tests, testbench and example (bug_0185–0187), and its layout oracle vector (bug_0203); review_0007 (bug_0204–0221, filed open). Per-session metadata in `INDEX.md`.
@@ -88,3 +98,4 @@ The ADR 0036 change (htmlize) intentionally changed decoding where the spec deco
 - @docs/agents/performance/adr-0034-trial.md
 - @docs/agents/reviews/review_0006.md
 - @docs/agents/reviews/review_0007.md
+- @docs/agents/reviews/review_0008.md
