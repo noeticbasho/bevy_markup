@@ -22,7 +22,19 @@ An index; the bug reports are authoritative. 203 reports, bug_0001–0203 (2026-
 | Medium | 80 (+1 low–medium) |
 | Low | 56 |
 
-No open bugs of bevy_markup's own; bug_0203 waits on a Bevy release (UPSTREAM U37).
+No open bug *reports* of bevy_markup's own; bug_0203 waits on a Bevy release (UPSTREAM U37). review_0007's findings are open and not yet filed as reports (a finding gets its `bug_NNNN.md` when its fix lands).
+
+## Open Review Findings (review_0007, 2026-11-11, at `f76b320`)
+
+18 findings, `K01`–`K18`, none fixed. 14 reproduced by probes.
+
+| Severity | Findings |
+|---|---|
+| High | K01 (a pattern on SVG text aborts the process, `svg-text`), K10 (nested `:is()` with descendant combinators: 104 B of CSS, a 121 s build) |
+| Medium | K02 (dashed strokes ~1000× their cost estimate), K03 (glyph outlines uncosted), K04 (`<style>` rules × elements quadratic), K05 (a refused inline `<svg>` re-parsed per build), K06 (no bound on the rasters' sum), K11 (`%` image sizes wrong at scale factors other than 1), K12 (a framed canvas loses its picture or frame), K13 (a hidden canvas resizes its camera's image to 1 × 1) |
+| Low | K07–K09, K14–K18 |
+
+Open decision: K16 asks for an ADR stating which inputs are untrusted; K10, K06 and K16 depend on it.
 
 ## How They Were Found
 
@@ -72,3 +84,4 @@ The ADR 0036 change (htmlize) intentionally changed decoding where the spec deco
 - @docs/agents/adr/0040-svg-conversion-work-bound.md
 - @docs/agents/performance/adr-0034-trial.md
 - @docs/agents/reviews/review_0006.md
+- @docs/agents/reviews/review_0007.md

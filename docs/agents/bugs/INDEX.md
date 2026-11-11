@@ -11,8 +11,10 @@ Whole-crate review sessions are filed in
 defects `G01`–`G44`) and [review_0004](../reviews/review_0004.md) (the
 G fix session's audit + new defects `H01`–`H10`),
 [review_0005](../reviews/review_0005.md) (the ADR 0027–0029 work: new
-defects `I01`–`I16`) and [review_0006](../reviews/review_0006.md) (the
-windowed build, ADR 0031: `J01`–`J09`). A finding gets its
+defects `I01`–`I16`), [review_0006](../reviews/review_0006.md) (the
+windowed build, ADR 0031: `J01`–`J09`) and
+[review_0007](../reviews/review_0007.md) (the crate at `f76b320`: SVG,
+`<canvas>`, the selector engine: `K01`–`K18`, open). A finding gets its
 own `bug_NNNN.md` here when its fix lands.
 
 The crate was called `p23` until 2026-10-05 and is now `bevy_markup`; the
