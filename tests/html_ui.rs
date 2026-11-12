@@ -4245,6 +4245,66 @@ html-ui
     );
 }
 
+/// bug_0238: an `hsl()` hue that overflows to infinity panics inside
+/// lightningcss's colour conversion in debug builds (UPSTREAM U45). In a
+/// `style` attribute and in a context `var()` value the declaration is
+/// dropped (the text keeps the inherited colour); a sheet holding one
+/// fails its load, and the UI builds unstyled, as for any broken sheet.
+#[test]
+fn an_infinite_hue_never_panics_the_build() {
+    let files = [
+        (
+            "page.html",
+            r#"<p style="color: hsl(1e39 50% 50%)">inline</p><p style="color: hsl(var(--h) 50% 50%)">var</p>"#,
+        ),
+        ("style.css", "html { color: #00ff00 }"),
+        (
+            "broken.css",
+            "html { color: #00ff00 } p { color: hwb(1e39 2% 8%) }",
+        ),
+    ];
+    let mut ui = TestUi::new("infinite-hue", &files)
+        .stylesheet("style.css")
+        .spawn(
+            "page.html",
+            TemplateContext::new().with("--h", &"1e39"),
+            Node::default(),
+        );
+    ui.settle();
+    // Release builds don't assert: the colours parse (to whatever a NaN
+    // hue gives), so only the debug build's outcome is pinned.
+    if cfg!(debug_assertions) {
+        ui.assert_dump(
+            r#"
+html-ui
+  p
+    "inline" default 16px #00ff00
+  p
+    "var" default 16px #00ff00
+"#,
+        );
+    }
+    let mut ui = TestUi::new("infinite-hue-sheet", &files)
+        .stylesheet("broken.css")
+        .spawn(
+            "page.html",
+            TemplateContext::new().with("--h", &"1e39"),
+            Node::default(),
+        );
+    ui.settle();
+    if cfg!(debug_assertions) {
+        ui.assert_dump(
+            r#"
+html-ui
+  p
+    "inline" default 16px #ffffff
+  p
+    "var" default 16px #ffffff
+"#,
+        );
+    }
+}
+
 /// F14's tracking gaps (review_0003 G30): a run-level inline style (an
 /// `<span>` inside a block), a translation's markup, and a non-ASCII
 /// variable name all restyle on a context change — the text scan missed

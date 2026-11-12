@@ -135,6 +135,11 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   skipped (each costs the document's depth squared per element).
 
 ### Fixed
+- CSS: an `hsl()` or `hwb()` colour whose hue overflows to infinity
+  (`hsl(1e39 50% 50%)`, `calc(infinity)`) panicked in debug builds — in a
+  stylesheet, a `style` attribute or a context `var()` value. The
+  declaration (or the sheet) is now dropped like unparseable CSS
+  (bug_0238).
 - A template set nesting loops through a chain of includes no longer
   crashes the app with a stack overflow while it loads; past
   `MAX_DEPTH` levels (96, across includes) it fails to load.

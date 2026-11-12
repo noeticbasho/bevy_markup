@@ -42,3 +42,4 @@
 ## [2026-11-11 21:59] update | review_0008: review at 54bad82 of review_0007's fixes; L01-L16 open, none fixed
 ## [2026-11-11 22:39] update | Filed review_0008's findings as open reports bug_0223-0237 (L01-L14, L16); UPSTREAM U40 simplecss, U41 usvg text
 ## [2026-11-11 23:17] update | Fixed review_0008 bugs 0223-0237 (uncommitted); ADR 0046; UPSTREAM U40-U43 (simplecss match/parse, usvg text)
+## [2026-11-12 17:54] update | bug_0238: guard lightningcss parses against the infinite-hue debug panic (honggfuzz css, first full nightly); UPSTREAM U45

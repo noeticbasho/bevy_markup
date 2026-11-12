@@ -1376,6 +1376,28 @@ impl InlineStyle {
     }
 }
 
+/// Runs a lightningcss parse, turning a panic into an error (bug_0238).
+/// lightningcss 1.0.0-alpha.72 hands cssparser-color's `hsl_to_rgb` a NaN
+/// hue when an `hsl()`/`hwb()` hue is infinite (`hsl(1e39 50% 50%)`,
+/// `calc(infinity)`, arithmetic that overflows), and that function
+/// `debug_assert!`s its range (UPSTREAM U45): a panic in every debug
+/// build, from any CSS text. No scan of the text can refuse every route
+/// to an infinite hue without evaluating `calc()`, so the parse is
+/// guarded, as usvg and resvg are (`svg::guarded`). The callers — the
+/// sheet loader, a `style` attribute, a substituted `var()` value — treat
+/// the error like unparseable CSS. (With `panic = "abort"` nothing can
+/// catch it, but release builds don't assert.)
+pub(crate) fn guarded_parse<T>(parse: impl FnOnce() -> T) -> Result<T, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(parse)).map_err(|payload| {
+        let message = payload
+            .downcast_ref::<&str>()
+            .map(|message| message.to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "(no message)".to_string());
+        format!("the CSS parser panicked: {message}")
+    })
+}
+
 /// `tag`'s `style` attribute, if it has declarations.
 #[hotpath::measure]
 pub(crate) fn inline_style(tag: &tl::HTMLTag) -> Option<InlineStyle> {
@@ -1385,12 +1407,15 @@ pub(crate) fn inline_style(tag: &tl::HTMLTag) -> Option<InlineStyle> {
         debug!("html css: style attribute nests too deeply: {text:?}");
         return None;
     }
-    match StyleAttribute::parse(&text, ParserOptions::default()) {
-        Ok(attribute) => {
-            let block = attribute.declarations.into_owned();
-            (!block.declarations.is_empty() || !block.important_declarations.is_empty())
-                .then_some(InlineStyle(block))
-        }
+    let parsed = guarded_parse(|| {
+        StyleAttribute::parse(&text, ParserOptions::default())
+            .map(|attribute| attribute.declarations.into_owned())
+            .map_err(|error| error.to_string())
+    })
+    .and_then(|parsed| parsed);
+    match parsed {
+        Ok(block) => (!block.declarations.is_empty() || !block.important_declarations.is_empty())
+            .then_some(InlineStyle(block)),
         Err(error) => {
             debug!("html css: invalid style attribute ({error}): {text:?}");
             None
@@ -2085,9 +2110,14 @@ fn apply_resolved(
         debug!("html css: substituted value nests too deeply: {text:?}");
         return;
     }
-    match Property::parse_string(reparse.unwrap(), &text, ParserOptions::default()) {
-        Ok(property) => apply(style, &property.into_owned()),
-        Err(_) => {
+    let parsed = guarded_parse(|| {
+        Property::parse_string(reparse.unwrap(), &text, ParserOptions::default())
+            .map(|property| property.into_owned())
+            .ok()
+    });
+    match parsed {
+        Ok(Some(property)) => apply(style, &property),
+        Ok(None) | Err(_) => {
             debug!("html css: `var()` substitution produced an invalid value: {text:?}");
         }
     }
@@ -5172,6 +5202,62 @@ mod tests {
             &[],
             &ElementState::default(),
         )
+    }
+
+    /// bug_0238 (honggfuzz, CI): an `hsl()`/`hwb()` hue that overflows to
+    /// infinity makes lightningcss hand cssparser-color a NaN hue, which
+    /// it `debug_assert!`s (UPSTREAM U45) — a panic in debug builds from a
+    /// sheet, a `style` attribute or a substituted `var()` value. Each
+    /// parse is guarded: the CSS is dropped like unparseable CSS. Release
+    /// builds don't assert, and parse it.
+    #[test]
+    fn an_infinite_hue_is_an_error_not_a_panic() {
+        let asserts = cfg!(debug_assertions);
+        for color in [
+            "hsl(1e39 50% 50%)",
+            "hsl(1e39, 50%, 50%)",
+            "hwb(1e39 2% 8%)",
+            "hsl(calc(infinity) 50% 50%)",
+        ] {
+            // The sheet loader's parse.
+            let css = format!("p {{ color: {color} }}");
+            let sheet = guarded_parse(|| {
+                StyleSheet::parse(&css, ParserOptions::default())
+                    .map(|_| ())
+                    .map_err(|err| err.to_string())
+            });
+            assert_eq!(sheet.is_err(), asserts, "{color}: {sheet:?}");
+            if let Err(message) = sheet {
+                assert!(
+                    message.starts_with("the CSS parser panicked: "),
+                    "{message}"
+                );
+            }
+            // A `style` attribute.
+            let html = format!(r#"<p style="color: {color}">x</p>"#);
+            let dom = tl::parse(&html, tl::ParserOptions::default()).unwrap();
+            let tag = dom
+                .children()
+                .iter()
+                .find_map(|handle| handle.get(dom.parser()).and_then(|node| node.as_tag()))
+                .expect("the <p>");
+            assert_eq!(inline_style(tag).is_none(), asserts, "{color}");
+        }
+        // A substituted `var()` value (a context variable's text; a sheet's
+        // own `--h: 1e39` is re-serialized finite): the declaration is
+        // dropped.
+        let style = declared_with_context("color: hsl(var(--h) 50% 50%)", &[("--h", "1e39")]);
+        assert_eq!(style.color.is_none(), asserts, "{:?}", style.color);
+        // Finite hues, however large, and NaN were never a problem.
+        for color in [
+            "hsl(1e30 50% 50%)",
+            "hwb(-1e30 2% 8%)",
+            "hsl(calc(NaN) 50% 50%)",
+        ] {
+            let css = format!("p {{ color: {color} }}");
+            let sheet = guarded_parse(|| StyleSheet::parse(&css, ParserOptions::default()).is_ok());
+            assert_eq!(sheet, Ok(true), "{color}");
+        }
     }
 
     /// A `var()` graph can be exponential: a self-reference with two

@@ -308,7 +308,11 @@ impl AssetLoader for StylesheetLoader {
         if crate::cascade::nesting_over_limit(&source) {
             return Err("stylesheet nests too deeply".into());
         }
-        let sheet = StyleSheet::parse(&source, options).map_err(|err| err.to_string())?;
+        // Guarded: lightningcss panics on some values in debug builds
+        // (bug_0238); the sheet fails its load with the message.
+        let sheet = crate::cascade::guarded_parse(|| {
+            StyleSheet::parse(&source, options).map_err(|err| err.to_string())
+        })??;
         // Border-image URLs: a dependency of the sheet (an unresolvable
         // one fails the load, as before). Custom-property URLs: a
         // `--icon: url(...)` can be anything (a data URI, a scheme) —

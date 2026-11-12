@@ -901,7 +901,13 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
   after a hand-written scan disagreed with the tokenizer in bug_0183 and
   bug_0184; `pre_scan_tokenizes_with_lightningcss_cssparser` fails the
   build if bevy_markup's cssparser pin and lightningcss's ever differ;
-  bug_0092, bug_0106, bug_0179; UPSTREAM.md U14, U15);
+  bug_0092, bug_0106, bug_0179; UPSTREAM.md U14, U15); the three
+  lightningcss parses of untrusted text (the sheet loader, `style`
+  attributes, substituted `var()` values) run under
+  `cascade::guarded_parse` (`catch_unwind`): lightningcss panics in debug
+  builds on an infinite `hsl()`/`hwb()` hue (bug_0238, U45), and no scan
+  can refuse every `calc()` route to one — a panic drops the CSS like a
+  parse error;
   `transition` (the shorthand) animates a restyled color's change
   (`color`/`background-color`/`border-color`), driven by an
   `advance_transitions` system after `Build`.

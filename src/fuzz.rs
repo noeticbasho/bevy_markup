@@ -97,7 +97,12 @@ pub fn cascade(css: &str) -> Result<String, String> {
     if nesting_over_limit(css) {
         return Err("stylesheet nests too deeply".into());
     }
-    let parsed = StyleSheet::parse(css, ParserOptions::default()).map_err(|err| err.to_string())?;
+    // Guarded as the loader's parse is (bug_0238): the known debug-only
+    // panic unwinds into it instead of aborting the fuzz target.
+    excuse_known_upstream_debug_panics();
+    let parsed = crate::cascade::guarded_parse(|| {
+        StyleSheet::parse(css, ParserOptions::default()).map_err(|err| err.to_string())
+    })??;
     let sheet = parsed.into_owned();
     // The load-time scans: untrusted CSS, must not panic or hang. The
     // url → handle map mirrors the loader's (skipped URLs get no entry).
@@ -513,31 +518,39 @@ pub fn svg(source: &[u8]) -> Result<String, String> {
     ))
 }
 
-/// Whether a panic is one of the known debug-build-only panics in resvg,
-/// which the `svg` fuzz target lets unwind into `svg::guarded` instead of
-/// aborting. Release builds don't panic there, and in debug builds
-/// `guarded` already turns the panic into an error. `file` is the panic
+/// Whether a panic is one of the known debug-build-only upstream panics,
+/// which the fuzz targets let unwind into the library's guard
+/// (`svg::guarded`, `cascade::guarded_parse`) instead of aborting.
+/// Release builds don't panic there, and in debug builds the guard
+/// already turns the panic into an error. `file` is the panic
 /// location's path; the crate directory name pins the version, so a bump
 /// makes the fuzzer report it again until rechecked.
 ///
 /// - UPSTREAM U20 (resvg #1185): resvg's turbulence overflows `i32`
 ///   lattice indices after many octaves or on a huge `baseFrequency`
 ///   (release wraps, then masks into range).
+/// - UPSTREAM U45 (bug_0238): cssparser-color's `hsl_to_rgb`
+///   `debug_assert!`s the hue lightningcss hands it, NaN for an infinite
+///   `hsl()`/`hwb()` hue.
 ///
 /// tiny-skia's far-off-canvas panics (U24, U27, U28) are not excused: they
 /// panic in release builds too, and `svg::check_extent` refuses their
 /// inputs before drawing, so one reaching tiny-skia is a miss to report.
 pub fn is_known_upstream_debug_panic(file: &str, message: &str) -> bool {
     let file = file.replace('\\', "/");
-    file.contains("/resvg-0.49.0/")
+    let turbulence = file.contains("/resvg-0.49.0/")
         && file.ends_with("/src/filter/turbulence.rs")
         && message.starts_with("attempt to ")
-        && message.ends_with(" with overflow")
+        && message.ends_with(" with overflow");
+    let hue = file.contains("/cssparser-color-0.5.0/")
+        && file.ends_with("/lib.rs")
+        && message == "assertion failed: (0.0..=1.0).contains(&hue)";
+    turbulence || hue
 }
 
 /// Makes the driver's panic hook skip the known upstream debug-only panics
-/// ([`is_known_upstream_debug_panic`]), so they unwind into `svg::guarded`
-/// instead of aborting the fuzz target. Call it from inside the target's
+/// ([`is_known_upstream_debug_panic`]), so they unwind into the library's
+/// guard instead of aborting the fuzz target. Call it from inside the target's
 /// closure: the drivers install their aborting hook before the first
 /// input, and this wraps whichever hook is current, once.
 pub fn excuse_known_upstream_debug_panics() {
@@ -722,6 +735,21 @@ mod svg_tests {
                 "U20: {panic}"
             );
         }
+        // U45 (bug_0238): an infinite hue. The harness's guard turns the
+        // panic into an error; the hook excuses exactly that assertion.
+        let hue = super::cascade("p { color: hsl(1e39 50% 50%) }");
+        if cfg!(debug_assertions) {
+            let err = hue.expect_err("U45");
+            let panic = err.trim_start_matches("the CSS parser panicked: ");
+            assert!(
+                super::is_known_upstream_debug_panic("/r/cssparser-color-0.5.0/lib.rs", panic),
+                "U45: {err}"
+            );
+        }
+        assert!(!super::is_known_upstream_debug_panic(
+            "/r/cssparser-color-0.6.0/lib.rs",
+            "assertion failed: (0.0..=1.0).contains(&hue)"
+        ));
         // Anything else still aborts the fuzz target.
         assert!(!super::is_known_upstream_debug_panic(
             "/r/tiny-skia-0.12.0/src/scan/path.rs",

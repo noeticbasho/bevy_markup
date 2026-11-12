@@ -58,6 +58,7 @@ the issue may already be fixed or reported.
 | U42 | simplecss 0.2.2 (via usvg 0.49 and bevy_markup's `svg_bounds`) | `StyleSheet::parse_more` builds an error, positioned by counting lines from the text's start (`Stream::gen_text_pos`), at every declaration's end, unitless number and `#` colour, then drops it: parsing is quadratic in the sheet's length ([bug_0231](bug_0231.md)) | 40 000 rules (760 KB) parse for 0.96 s per pass, three passes per SVG (`svg` feature) | `svg_bounds::style_scan_bytes` charges the offsets of those places before simplecss parses | unreported |
 | U43 | usvg 0.49 text layout (`text` feature) | `process_chunk` reshapes the whole chunk once per span and merges each span's glyphs into the first run with `glyphs.iter().position(…)` and `Vec::remove`/`insert`: spans × characters ([bug_0232](bug_0232.md)) | 4 000 one-character `<tspan>`s convert for 2.0 s (`svg-text`) | `svg_bounds` charges a `<text>` by its spans × characters | unreported |
 | U44 | fuzzcheck | The fuzzer unwraps `String::from_utf8` of every serialized input it keeps (for an assertion message) | a `ByteSerializer` target panics on its first non-UTF-8 input | vendored patch | unreported |
+| U45 | lightningcss 1.0.0-alpha.72 / cssparser-color 0.5.0 | An infinite `hsl()`/`hwb()` hue normalizes to NaN, and `hsl_to_rgb` `debug_assert!`s its hue range | panic at parse time in debug builds, from any CSS text ([bug_0238](bug_0238.md)) | `cascade::guarded_parse` (catch_unwind around the three lightningcss parses); the fuzz targets let it unwind (`fuzz::is_known_upstream_debug_panic`, pinned to cssparser-color 0.5.0) | unreported |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -1009,3 +1010,26 @@ CI clippy command and workspace tests pass on both.
   `String::from_utf8_lossy(..)` (2026-11-12, with the `svg` target).
 - **PR sketch:** the same one-line change, or format the bytes lazily
   inside the assertion's message.
+
+## U45 — lightningcss / cssparser-color: an infinite hue fails a debug assertion
+
+- **Project:** [parcel-bundler/lightningcss](https://github.com/parcel-bundler/lightningcss)
+  1.0.0-alpha.72 (`src/values/color.rs`) calling
+  [servo/rust-cssparser](https://github.com/servo/rust-cssparser)'s
+  `cssparser-color` 0.5.0 (`hsl_to_rgb`).
+- **Problem:** `hsl(1e39 50% 50%)` — any `hsl()`/`hwb()` hue that is
+  infinite as `f32`, also `calc(infinity)` — panics in debug builds:
+  `assertion failed: (0.0..=1.0).contains(&hue)`. lightningcss
+  normalizes with `(h - 360.0 * (h / 360.0).floor()) / 360.0`, NaN for an
+  infinite `h`; `hsl_to_rgb` `debug_assert!`s the range. Release builds
+  compute with the NaN.
+- **Reproduction:** `StyleSheet::parse("p { color: hsl(1e39 50% 50%) }",
+  ParserOptions::default())` in a debug build ([bug_0238](bug_0238.md)).
+- **Local workaround:** `cascade::guarded_parse` (`src/cascade.rs`), used
+  by the sheet loader, `inline_style` and the `var()` re-parse.
+- **PR sketch:** in lightningcss, treat a non-finite hue as 0 (or
+  `rem_euclid` and clamp) before `hsl_to_rgb`; CSS says an infinite
+  angle in a colour clamps like any other out-of-range value.
+- **On a bump:** `fuzz::…::known_upstream_debug_panics_still_panic_as_excused`
+  fails when the panic is gone or moved; drop the excuse (and consider
+  dropping the guard) then.

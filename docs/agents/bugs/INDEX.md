@@ -277,6 +277,19 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0235](bug_0235.md) | One level of `:is()` with a combinator is still cubic in DOM depth | `src/cascade/selector.rs` | low | fixed | review_0008 (L13) |
 | [bug_0236](bug_0236.md) | The FTL escape scan refuses bundles whose text holds `\u` before a non-ASCII letter | `src/ftl_check.rs` | low | fixed | review_0008 (L14) |
 | [bug_0237](bug_0237.md) | An inline `<svg>` refused for the raster memory budget on its task is never retried | `src/svg.rs` (`InlineSvgs`) | low | fixed | review_0008 (L16) |
+| [bug_0238](bug_0238.md) | An `hsl()`/`hwb()` hue that overflows to infinity panics the CSS parse in debug builds | `src/style.rs`, `src/cascade.rs` (lightningcss / cssparser-color, U45) | high | fixed | honggfuzz `css`, first nightly CI run |
+
+## Discovery session metadata: bug_0238 (2026-11-12)
+
+- **Method:** the nightly workflow's first run with every fuzz driver
+  (run 43255765432, started by hand): honggfuzz's `css` job saved a
+  crash after 15 minutes; replayed and minimized locally through
+  `fuzz::cascade`.
+- **Discovery agent:** Claude Code session, `claude-fable-5-2`.
+- **Commit at discovery:** `ffc9a12`.
+- **Machine/toolchain:** GitHub `ubuntu-latest` runner,
+  `nightly-2026-09-09`, honggfuzz 0.5.62; triage on Arch Linux (kernel
+  7.2.14), rustc 1.98.1.
 
 ## Discovery session metadata: bug_0001–0005
 

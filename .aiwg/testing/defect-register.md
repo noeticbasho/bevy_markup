@@ -3,15 +3,15 @@
 | Field | Value |
 |---|---|
 | Derived from | `docs/agents/bugs/INDEX.md`, `UPSTREAM.md`, `docs/agents/reviews/`, CI history |
-| Source state | the review_0008 fixes (after `4af00b9`), 2026-11-12 |
+| Source state | bug_0238 (after `ffc9a12`), 2026-11-12 |
 
-An index; the bug reports are authoritative. 237 reports, bug_0001–0237 (2026-10-04 to 2026-11-12).
+An index; the bug reports are authoritative. 238 reports, bug_0001–0238 (2026-10-04 to 2026-11-12).
 
 ## By Status and Severity
 
 | Status | Count |
 |---|---|
-| Fixed, with regression test | 233 |
+| Fixed, with regression test | 234 |
 | Fixed, measured (no test) | 1 — bug_0211, an idle-frame cost |
 | Won't fix (known limit) | 1 — bug_0170, a one-frame row shift in the windowed build (low) |
 | Withdrawn (not a bug) | 1 — bug_0026 |
@@ -19,7 +19,7 @@ An index; the bug reports are authoritative. 237 reports, bug_0001–0237 (2026-
 
 | Severity | Count |
 |---|---|
-| High (reachable from user data, panics included) | 73 |
+| High (reachable from user data, panics included) | 74 |
 | Medium | 94 (+1 low–medium) |
 | Low | 68 |
 
@@ -49,7 +49,7 @@ Decided (ADR 0044): every input is untrusted, templates and CSS included; templa
 
 ## How They Were Found
 
-Property testing, stateful testing and fuzzing (bug_0001–0005), the Fluent and layout oracles (0006–0013), mutation-testing triage, corpus coverage replays, example smoke runs, prototype_19 integration (0021), user reports (0023, 0028–0030), and whole-crate review sessions: review_0001–0006 found most of bug_0031 onward, each finding filed when its fix landed; CI itself (bug_0181, a scaling test); nightly fuzzing and its triage (bug_0182–0184, bug_0188–0202); the ADR 0038 SVG work's tests, testbench and example (bug_0185–0187), and its layout oracle vector (bug_0203); review_0007 (bug_0204–0221, filed open); review_0008 (bug_0223–0237, filed open). Per-session metadata in `INDEX.md`.
+Property testing, stateful testing and fuzzing (bug_0001–0005), the Fluent and layout oracles (0006–0013), mutation-testing triage, corpus coverage replays, example smoke runs, prototype_19 integration (0021), user reports (0023, 0028–0030), and whole-crate review sessions: review_0001–0006 found most of bug_0031 onward, each finding filed when its fix landed; CI itself (bug_0181, a scaling test); nightly fuzzing and its triage (bug_0182–0184, bug_0188–0202); the ADR 0038 SVG work's tests, testbench and example (bug_0185–0187), and its layout oracle vector (bug_0203); review_0007 (bug_0204–0221, filed open); review_0008 (bug_0223–0237, filed open); the first nightly run of every fuzz driver (bug_0238, honggfuzz). Per-session metadata in `INDEX.md`.
 
 ## Upstream Defects (`UPSTREAM.md`)
 
