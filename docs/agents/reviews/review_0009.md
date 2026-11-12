@@ -273,8 +273,7 @@ during this review.
 
 ## Fix disposition — 2026-11-12
 
-All five findings are fixed in the review_0009 fix commit following
-`7298cc8`, at the user's request. M01–M05 are filed respectively as
+All five findings are fixed in `364d734`, at the user's request. M01–M05 are filed respectively as
 [bug_0239](../bugs/bug_0239.md), [bug_0240](../bugs/bug_0240.md),
 [bug_0241](../bugs/bug_0241.md), [bug_0242](../bugs/bug_0242.md), and
 [bug_0243](../bugs/bug_0243.md). ADR 0047 records the quadratic-work
@@ -282,3 +281,40 @@ refusals. Eight regression tests cover the checks, real asset loaders
 and focus/activation; all failed with their fixes removed and pass with
 the fixes. This disposition supersedes the original open status above;
 the original discovery observations are retained.
+
+
+## Post-commit validation of `364d734`
+
+The complete `.github/workflows/ci.yml` command matrix passed with
+`CARGO_INCREMENTAL=0`, `CARGO_PROFILE_DEV_DEBUG=0`, `RUSTFLAGS=-D warnings`
+and `RUSTDOCFLAGS=-D warnings`. This includes the minimal library feature
+checks, all-target build, default/text-input/SVG/SVG-text tests, gated
+examples, hot-reload example tests, fuzz-harness unit tests, documentation,
+and regenerated Fluent oracle references with a clean reference diff.
+All 16 command results are green. Three commands initially failed to link
+because the disk filled; all passed on retry after removing only
+`target/debug/incremental` (rebuildable compiler cache).
+
+After CI, `scripts/fuzz-honggfuzz.sh <target> 900` ran for each target in
+parallel with `HFUZZ_RUN_ARGS='-n 2 -t 10'` and the CI-pinned
+`BEVY_MARKUP_NIGHTLY=nightly-2026-09-09`. The sandbox's ptrace restriction
+prevented the first launch; the actual campaigns ran outside it. Each
+wrapper completed successfully after its full 900-second run budget.
+
+| Target | Iterations | Reported crashes | Reported timeouts |
+|---|---:|---:|---:|
+| HTML | 13,006,259 | 0 | 0 |
+| CSS | 15,173,566 | 0 | 0 |
+| FTL | 33,106,593 | 0 | 0 |
+| SVG | 34,112,535 | 0 | 0 |
+| Total | 95,398,953 | 0 | 0 |
+
+No new crash files were saved. Fuzzing is additional evidence, not proof
+that the resource models cover every input.
+
+Local logs and machine-readable results are retained in the ignored
+`target/review9-validation/`: `ci-results.json`, `ci-initial-results.json`,
+`ci-*.log`, `hfuzz-results.json`, and `hfuzz-{html,css,ftl,svg}.log`.
+The initial CI logs retain the disk errors; `ci-*-retry.log` records the
+successful retries. No production code changed during post-commit
+validation.

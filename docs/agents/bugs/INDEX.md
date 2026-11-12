@@ -294,7 +294,8 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
   eight regression tests and verified that all failed with fixes removed.
 - **Discovery agent:** GPT-6, via Codex.
 - **Commit at discovery:** `9811ccc5bf16ea4e1ca57bd3052fe21d4fc79975`.
-- **Fix:** the review_0009 fix commit following `7298cc8`.
+- **Fix:** `364d734`; full CI green and four 900-second honggfuzz
+  campaigns completed with zero crashes/timeouts (95,398,953 iterations).
 - **Machine/toolchain:** Linux 7.2.14-arch1-1, AMD Ryzen 7 9800X3D,
   rustc 1.99.1 (58cf8f9c3 2026-10-13); Tera 2.4.0,
   fluent-syntax 0.11.1, nom 8.0.0, Bevy 0.20.0.
