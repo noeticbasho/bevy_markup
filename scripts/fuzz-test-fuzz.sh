@@ -1,7 +1,7 @@
 #!/bin/sh
 # test-fuzz (AFLplus via cargo-afl). Corpus seeds come from ordinary
 # `cargo test` runs of the test-fuzz crate.
-# Usage: scripts/fuzz-test-fuzz.sh <html|css|ftl> [seconds]
+# Usage: scripts/fuzz-test-fuzz.sh <html|css|ftl|svg> [seconds]
 #
 # The AFL variables skip the core-pattern and CPU-governor checks, which
 # require sudo on this machine.
@@ -9,8 +9,8 @@ set -eu
 cd "$(dirname "$0")/.."
 
 case "${1:-}" in
-    html|css|ftl) target=$1 ;;
-    *) echo "usage: $0 <html|css|ftl> [seconds=60]" >&2; exit 2 ;;
+    html|css|ftl|svg) target=$1 ;;
+    *) echo "usage: $0 <html|css|ftl|svg> [seconds=60]" >&2; exit 2 ;;
 esac
 duration=${2:-60}
 # CI pins a dated nightly (BEVY_MARKUP_NIGHTLY, see nightly.yml); locally, the

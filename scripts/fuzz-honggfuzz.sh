@@ -1,6 +1,6 @@
 #!/bin/sh
 # honggfuzz-rs (hardware-counter feedback) over bevy_markup::fuzz harnesses.
-# Usage: scripts/fuzz-honggfuzz.sh <html|css|ftl> [seconds]
+# Usage: scripts/fuzz-honggfuzz.sh <html|css|ftl|svg> [seconds]
 #
 # HFUZZ_BUILD_ARGS points cargo at the honggfuzz manifest and overrides the
 # repo's clang+mold linker (which cannot link the hfuzz runtime). The outer
@@ -9,8 +9,8 @@ set -eu
 cd "$(dirname "$0")/.."
 
 case "${1:-}" in
-    html|css|ftl) target=$1 ;;
-    *) echo "usage: $0 <html|css|ftl> [seconds=60]" >&2; exit 2 ;;
+    html|css|ftl|svg) target=$1 ;;
+    *) echo "usage: $0 <html|css|ftl|svg> [seconds=60]" >&2; exit 2 ;;
 esac
 duration=${2:-60}
 # CI pins a dated nightly (BEVY_MARKUP_NIGHTLY, see nightly.yml); locally, the
@@ -22,6 +22,14 @@ export HFUZZ_BUILD_ARGS='--manifest-path honggfuzz/Cargo.toml --config target.x8
 # timeout then bounds only the run. `timeout` exits 124 when the budget
 # elapses — that is a normal, successful end for a fuzz campaign.
 cargo "+$toolchain" hfuzz build --bin "$target"
+# The committed cargo-fuzz seeds (the same byte format) join the working
+# corpus; files already there are kept.
+mkdir -p "hfuzz_workspace/$target/input"
+cp -n "fuzz/seeds/$target"/* "hfuzz_workspace/$target/input/" 2>/dev/null || true
+# honggfuzz kills an input after 1 s by default: too tight for a loaded
+# machine or a CI runner (and under the svg target's own 5 s assertion).
+# = cargo-fuzz's -timeout.
+export HFUZZ_RUN_ARGS="${HFUZZ_RUN_ARGS:--t 10}"
 # honggfuzz keeps fuzzing after a crash and writes each one as a `*.fuzz`
 # file in the target's workspace, so the exit status says nothing about
 # crashes: count the files before and after (earlier runs' crashes are

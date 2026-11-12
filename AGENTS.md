@@ -535,7 +535,7 @@ tests/
                    tests, Fluent oracle references current
   nightly.yml      golden images (Ubuntu lavapipe), browser oracle vs current Chrome, 15 min
                    cargo-fuzz per target, 15 min per target of honggfuzz, fuzzcheck and
-                   test-fuzz (`fuzz-drivers`, 9 jobs), criterion + divan
+                   test-fuzz (`fuzz-drivers`, 12 jobs), criterion + divan
                    benchmarks (`pipeline`/`pipeline-divan`, and `svg`/`svg-divan` with
                    `--features fuzzing`: the SVG stages through `fuzz::svg_*` glue plus
                    inline/`<img>` frame workloads, `benches/shared/svg.rs`; reports as
@@ -559,22 +559,26 @@ scripts/
                      (CI's cache producer and its nightly jobs; optional locally)
   fuzz-<driver>.sh   run one fuzzer over one target:
                      `scripts/fuzz-{libfuzzer,honggfuzz,fuzzcheck,test-fuzz}.sh
-                     <html|css|ftl> [seconds=60]` (details in each script's
+                     <html|css|ftl|svg> [seconds=60]` (details in each script's
                      header; they encapsulate the per-driver workarounds
                      described under Testing TODO 5)
 fuzz/
   fuzz_targets/      cargo-fuzz targets (`html`, `css`, `ftl`, `svg`) over `bevy_markup::fuzz`
-                     (`svg` is cargo-fuzz only and asserts each input finishes in 5 s; its
-                     panic hook lets the debug-only upstream panic U20 unwind into
-                     `svg::guarded` — `fuzz::is_known_upstream_debug_panic`, pinned to
-                     resvg 0.49.0 — every other panic aborts, tiny-skia's included)
-  seeds/<target>/    committed minimized seed corpora (read-only extra input to every fuzz run)
+                     (every driver's `svg` target is `fuzz::svg_target`: it asserts each
+                     input finishes in 5 s, and `fuzz::excuse_known_upstream_debug_panics`
+                     lets the debug-only upstream panic U20 unwind into `svg::guarded` —
+                     `fuzz::is_known_upstream_debug_panic`, pinned to resvg 0.49.0 —
+                     every other panic aborts, tiny-skia's included)
+  seeds/<target>/    committed minimized seed corpora (read-only extra input to every
+                     cargo-fuzz run; copied into honggfuzz's working corpus, and `svg`'s
+                     into fuzzcheck's and — through the `seed_svg` test — test-fuzz's)
   corpus/, artifacts/, coverage/  gitignored (corpus/ = working corpus; CI carries it over nightly)
 honggfuzz/
-  targets/           the same three harnesses driven by honggfuzz (`cargo +nightly hfuzz run <t>`)
+  targets/           the same four harnesses driven by honggfuzz (`cargo +nightly hfuzz run <t>`)
   vendor/honggfuzz/  vendored honggfuzz crate (patched bfd.c for current binutils)
 fuzzcheck/
-  tests/             the same three harnesses as fuzzcheck `#[test]`s
+  tests/             the same four harnesses as fuzzcheck `#[test]`s (`svg` keeps its
+                     corpus as raw bytes, `ByteSerializer`, so the seeds can join it)
                      (`cargo +nightly fuzzcheck --test <name> fuzz_<name> --stop-after-duration 60`)
   vendor/            vendored fuzzcheck 0.13 git-master (edition 2024; patched
                      `__llvm_prf_data` parser for the u64 record layout of
@@ -582,7 +586,7 @@ fuzzcheck/
   .cargo/config.toml linker override: the repo's clang+mold cannot link the
                      LLVM coverage section symbols (`__start___llvm_prf_*`)
 test-fuzz/
-  src/lib.rs         the same three harnesses as AFLplus targets via
+  src/lib.rs         the same four harnesses as AFLplus targets via
                      `#[test_fuzz]` (`cargo +nightly test-fuzz tests::fuzz_html`
                      from this directory; corpus seeds come from plain
                      `cargo test` runs)
@@ -1536,7 +1540,7 @@ known gaps:
   `A B`/`A > B` paths and the match cache — a second round re-runs it), and
   the `ftl` target drives the `markdown: true` cache (`markdown_cache` +
   `substitute`).
-  Easiest entry point: `scripts/fuzz-<driver>.sh <html|css|ftl> [seconds]`.
+  Easiest entry point: `scripts/fuzz-<driver>.sh <html|css|ftl|svg> [seconds]`.
   - `cargo fuzz` (`fuzz/`, libFuzzer/ASan, nightly):
     `cargo +nightly fuzz run <target> -- -max_total_time=60`.
   - `honggfuzz-rs` (`honggfuzz/`, hardware-counter feedback; also nightly):

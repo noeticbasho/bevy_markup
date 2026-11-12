@@ -57,6 +57,7 @@ the issue may already be fixed or reported.
 | U41 | usvg 0.49 text layout (`text` feature) | `ByteIndex::code_point_at` counts characters from the chunk's start, and `resolve_relative_shifts` (and the rotate and text-on-path code) calls it per cluster: every text chunk lays out in time quadratic in its characters ([bug_0232](bug_0232.md)) | a 100 000-character `<text>` converts for 3.9 s (13.5 s with multi-byte characters) inside `MAX_SVG_WORK` (`svg-text`) | `svg_bounds` charges a `<text>` by its characters² | unreported |
 | U42 | simplecss 0.2.2 (via usvg 0.49 and bevy_markup's `svg_bounds`) | `StyleSheet::parse_more` builds an error, positioned by counting lines from the text's start (`Stream::gen_text_pos`), at every declaration's end, unitless number and `#` colour, then drops it: parsing is quadratic in the sheet's length ([bug_0231](bug_0231.md)) | 40 000 rules (760 KB) parse for 0.96 s per pass, three passes per SVG (`svg` feature) | `svg_bounds::style_scan_bytes` charges the offsets of those places before simplecss parses | unreported |
 | U43 | usvg 0.49 text layout (`text` feature) | `process_chunk` reshapes the whole chunk once per span and merges each span's glyphs into the first run with `glyphs.iter().position(…)` and `Vec::remove`/`insert`: spans × characters ([bug_0232](bug_0232.md)) | 4 000 one-character `<tspan>`s convert for 2.0 s (`svg-text`) | `svg_bounds` charges a `<text>` by its spans × characters | unreported |
+| U44 | fuzzcheck | The fuzzer unwraps `String::from_utf8` of every serialized input it keeps (for an assertion message) | a `ByteSerializer` target panics on its first non-UTF-8 input | vendored patch | unreported |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -994,3 +995,17 @@ CI clippy command and workspace tests pass on both.
   use whole line heights.
 - **`rui314/setup-mold` has no effect on Rust builds:** rustc ≥ 1.90 links
   through its bundled `rust-lld` and bypasses `/usr/bin/ld`.
+
+## U44 — fuzzcheck: the fuzzer unwraps every kept input as UTF-8
+
+- **Project:** as U4.
+- **Problem:** `fuzzer.rs`, after adding an input to a pool, builds the
+  message of its complexity-consistency assertion eagerly:
+  `String::from_utf8(serializer.to_data(&input.value)).unwrap()`. With
+  `ByteSerializer` (raw `Vec<u8>` corpus files) the first kept input that
+  isn't UTF-8 panics the fuzzer itself (`FromUtf8Error`), within
+  milliseconds on the `svg` target.
+- **Local fix:** `fuzzcheck/vendor/fuzzcheck/src/fuzzer.rs`:
+  `String::from_utf8_lossy(..)` (2026-11-12, with the `svg` target).
+- **PR sketch:** the same one-line change, or format the bytes lazily
+  inside the assertion's message.

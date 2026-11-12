@@ -20,7 +20,7 @@ reasons behind each piece; this file is the how-to.
 | Golden images (software Vulkan) | `scripts/golden.sh` (`--update` rewrites references) | ~5 s warm |
 | Regenerate CSS/layout oracle data | `scripts/browser_oracle.py [tests/vectors/<name>]` | ~1 s/vector |
 | Regenerate Fluent oracle data | `scripts/fluent_oracle.sh [tests/vectors/<name>]` | <1 s |
-| Fuzz one target | `scripts/fuzz-libfuzzer.sh <html\|css\|ftl> [seconds]` | 60 s default |
+| Fuzz one target | `scripts/fuzz-libfuzzer.sh <html\|css\|ftl\|svg> [seconds]` | 60 s default |
 | Other fuzzers | `scripts/fuzz-{honggfuzz,fuzzcheck,test-fuzz}.sh <target> [seconds]` | each exits non-zero only on a new crashing input |
 | Mutation testing | `scripts/mutants.sh [--full] [--file src/x.rs]` | ~15 min full run (estimate) |
 | Coverage per layer | `scripts/coverage.py [--html] [--layer NAME]` | ~1.5 min warm |
@@ -602,7 +602,7 @@ Shared build caches (`Swatinem/rust-cache` `shared-key`):
 | `dev` | ci.yml `test` | nightly `golden`, `golden-update` |
 | `mutants` | cache.yml `mutants` | the 8 mutants shards |
 | `fuzz` | cache.yml `fuzz` | nightly `fuzz` (4 targets) |
-| `fuzz-honggfuzz`, `fuzz-fuzzcheck`, `fuzz-test-fuzz` | cache.yml `fuzz-drivers` (`scripts/fuzz-setup.sh <driver>`: the cargo subcommands in `~/.cargo/bin`, AFL++ for test-fuzz, every target built) | nightly `fuzz-drivers` (3 targets each) |
+| `fuzz-honggfuzz`, `fuzz-fuzzcheck`, `fuzz-test-fuzz` | cache.yml `fuzz-drivers` (`scripts/fuzz-setup.sh <driver>`: the cargo subcommands in `~/.cargo/bin`, AFL++ for test-fuzz, every target built) | nightly `fuzz-drivers` (4 targets each) |
 
 Consumers restore with `save-if: false`; the producer builds only when the
 exact entry is missing and otherwise just restores it, which also keeps it

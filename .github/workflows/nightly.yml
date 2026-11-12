@@ -327,7 +327,7 @@ jobs:
       fail-fast: false
       matrix:
         driver: [honggfuzz, fuzzcheck, test-fuzz]
-        target: [html, css, ftl]
+        target: [html, css, ftl, svg]
         include: # = cache.yml `fuzz-drivers`
           - driver: honggfuzz
             workspaces: honggfuzz -> ../hfuzz_target
@@ -345,10 +345,6 @@ jobs:
             # seeds the crate's `cargo test` run records.
             corpus: ""
             crashes: test-fuzz/target/afl/output
-    env:
-      # honggfuzz kills an input after 1 s by default; the runner is slower
-      # than the machines its harness was tuned on. = cargo-fuzz's -timeout.
-      HFUZZ_RUN_ARGS: -t 10
     steps:
       - uses: actions/checkout@v7
       - name: Install the honggfuzz build dependencies

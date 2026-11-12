@@ -1,6 +1,6 @@
 #!/bin/sh
 # Installs one fuzz driver's tools (unless already installed) and builds its
-# three targets, so `scripts/fuzz-<driver>.sh` only has to run them.
+# targets, so `scripts/fuzz-<driver>.sh` only has to run them.
 # Usage: scripts/fuzz-setup.sh <honggfuzz|fuzzcheck|test-fuzz>
 #
 # CI runs it twice: cache.yml builds each driver's cache with it, and the
@@ -30,7 +30,7 @@ case "$driver" in
         install cargo-hfuzz honggfuzz 0.5.62
         # = scripts/fuzz-honggfuzz.sh
         export HFUZZ_BUILD_ARGS='--manifest-path honggfuzz/Cargo.toml --config target.x86_64-unknown-linux-gnu.linker="cc"'
-        for target in html css ftl; do
+        for target in html css ftl svg; do
             cargo "+$toolchain" hfuzz build --bin "$target"
         done
         ;;
@@ -38,7 +38,7 @@ case "$driver" in
         install cargo-fuzzcheck cargo-fuzzcheck 0.13.0
         # cargo-fuzzcheck has no build-only mode: a one-second run builds.
         cd fuzzcheck
-        for target in html css ftl; do
+        for target in html css ftl svg; do
             cargo "+$toolchain" fuzzcheck --test "$target" "fuzz_$target" \
                 --stop-after-duration 1
         done
@@ -53,7 +53,7 @@ case "$driver" in
         # The corpus seeds: `#[test_fuzz]` records the arguments of
         # ordinary test runs under target/corpus.
         cargo "+$toolchain" test
-        for target in html css ftl; do
+        for target in html css ftl svg; do
             cargo "+$toolchain" test-fuzz --no-run "tests::fuzz_$target"
         done
         ;;

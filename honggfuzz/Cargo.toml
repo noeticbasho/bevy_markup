@@ -29,6 +29,13 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "svg"
+path = "targets/svg.rs"
+test = false
+doc = false
+bench = false
+
 # Vendored (path) so the bundled C source can be patched for current
 # binutils: bfd.h no longer defines TRUE/FALSE (see linux/bfd.c).
 [patch.crates-io]

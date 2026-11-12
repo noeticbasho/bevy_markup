@@ -535,6 +535,47 @@ pub fn is_known_upstream_debug_panic(file: &str, message: &str) -> bool {
         && message.ends_with(" with overflow")
 }
 
+/// Makes the driver's panic hook skip the known upstream debug-only panics
+/// ([`is_known_upstream_debug_panic`]), so they unwind into `svg::guarded`
+/// instead of aborting the fuzz target. Call it from inside the target's
+/// closure: the drivers install their aborting hook before the first
+/// input, and this wraps whichever hook is current, once.
+pub fn excuse_known_upstream_debug_panics() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let aborting = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let excused = info.location().is_some_and(|location| {
+                is_known_upstream_debug_panic(location.file(), info.payload_as_str().unwrap_or(""))
+            });
+            if !excused {
+                aborting(info);
+            }
+        }));
+    });
+}
+
+/// How long one `svg` input may take in a fuzz target.
+pub const SVG_FUZZ_TIME: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The `svg` fuzz target, shared by every driver: [`svg`] on inputs up to
+/// 64 KiB, timed. The budget allows a few milliseconds of drawing, so a
+/// slow input means the estimate missed a cost (or a parse step is
+/// superlinear) and panics here instead of passing as a mere refusal.
+pub fn svg_target(data: &[u8]) {
+    excuse_known_upstream_debug_panics();
+    if data.len() > 64 * 1024 {
+        return;
+    }
+    let started = std::time::Instant::now();
+    let outcome = svg(data);
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < SVG_FUZZ_TIME,
+        "svg took {elapsed:?} ({outcome:?}): the depth check or the cost estimate missed a cost"
+    );
+}
+
 /// The `svg` loader's size and cost estimate at its default limits, without
 /// drawing: `(width, height, estimate)`. For calibrating the estimate
 /// against resvg's real render time (probe report §7).
