@@ -14,3 +14,13 @@ pub fn observed(file: &Path, _function: &str) -> bool {
         .join("src");
     file.starts_with(library)
 }
+
+/// Fails the test when the run found a failing input. `launch()` only
+/// returns the result: discarded, a run that printed `failures(1)` still
+/// passed and `cargo fuzzcheck` exited 0.
+pub fn finish<T>(result: fuzzcheck::FuzzingResult<T>) {
+    assert!(
+        !result.found_test_failure,
+        "fuzzcheck found a failing input (see fuzz/<test>/artifacts/ or the run's stats)"
+    );
+}

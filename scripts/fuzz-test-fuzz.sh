@@ -13,14 +13,21 @@ case "${1:-}" in
     *) echo "usage: $0 <html|css|ftl> [seconds=60]" >&2; exit 2 ;;
 esac
 duration=${2:-60}
+# CI pins a dated nightly (BEVY_MARKUP_NIGHTLY, see nightly.yml); locally, the
+# current nightly.
+toolchain=${BEVY_MARKUP_NIGHTLY:-nightly}
 
 cd test-fuzz
 export AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
 export AFL_SKIP_CPUFREQ=1
+# A target that was already fuzzed for a while continues that session:
+# without this afl-fuzz refuses to start over an output directory holding
+# more than 25 minutes of results.
+export AFL_AUTORESUME=1
 # Build first (unbounded: a cold build can exceed the run budget); the
 # timeout then bounds only the run. `timeout` exits 124 when the budget
 # elapses — that is a normal, successful end for a fuzz campaign.
-cargo +nightly test-fuzz --no-run "tests::fuzz_$target"
+cargo "+$toolchain" test-fuzz --no-run "tests::fuzz_$target"
 # AFL keeps fuzzing after a crash and records each one in its output's
 # `crashes/` directory, so the exit status says nothing about crashes:
 # count the files before and after (earlier runs' crashes are not this
@@ -31,7 +38,7 @@ crashes() {
 }
 before=$(crashes)
 set +e
-timeout "$duration" cargo +nightly test-fuzz "tests::fuzz_$target"
+timeout "$duration" cargo "+$toolchain" test-fuzz "tests::fuzz_$target"
 status=$?
 set -e
 after=$(crashes)

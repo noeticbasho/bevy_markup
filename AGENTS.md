@@ -534,7 +534,8 @@ tests/
   ci.yml           per push to main / PR: -D warnings check/build/doc, cargo test, fuzzing-feature
                    tests, Fluent oracle references current
   nightly.yml      golden images (Ubuntu lavapipe), browser oracle vs current Chrome, 15 min
-                   cargo-fuzz per target, other fuzz drivers build, criterion + divan
+                   cargo-fuzz per target, 15 min per target of honggfuzz, fuzzcheck and
+                   test-fuzz (`fuzz-drivers`, 9 jobs), criterion + divan
                    benchmarks (`pipeline`/`pipeline-divan`, and `svg`/`svg-divan` with
                    `--features fuzzing`: the SVG stages through `fuzz::svg_*` glue plus
                    inline/`<img>` frame workloads, `benches/shared/svg.rs`; reports as
@@ -553,6 +554,9 @@ scripts/
                      exercise (see Testing)
   golden.sh          golden-image test on Mesa lavapipe (`--update` rewrites references; fetches
                      Arch's vulkan-swrast into target/golden-lavapipe/ if no lavapipe ICD)
+  fuzz-setup.sh      install one driver's cargo subcommands (pinned versions) and build
+                     its targets: `scripts/fuzz-setup.sh <honggfuzz|fuzzcheck|test-fuzz>`
+                     (CI's cache producer and its nightly jobs; optional locally)
   fuzz-<driver>.sh   run one fuzzer over one target:
                      `scripts/fuzz-{libfuzzer,honggfuzz,fuzzcheck,test-fuzz}.sh
                      <html|css|ftl> [seconds=60]` (details in each script's
@@ -1562,6 +1566,12 @@ known gaps:
     `ftl` take their fields as a tuple of byte vectors, not one
     `\n---\n`-delimited buffer: the `Vec<u8>` mutator never produced the
     delimiters, so every `ftl` input returned before the library.
+    A found failure fails the test (`common::finish`; `launch()`'s result
+    was discarded, so a run printing `failures(1)` passed) and
+    `scripts/fuzz-fuzzcheck.sh` passes `--stop-after-first-failure`, which
+    makes fuzzcheck save the input under `fuzzcheck/fuzz/fuzz_<target>/
+    artifacts/` — `cargo fuzzcheck` itself exits 0 either way, so the
+    script counts those files.
   - `test-fuzz` (`test-fuzz/`, AFLplus via `cargo-afl`; nightly):
     `cargo +nightly test-fuzz tests::fuzz_html` (from `test-fuzz/`). Corpus
     seeds are collected by ordinary `cargo test` runs (the `#[test_fuzz]`
@@ -2011,8 +2021,12 @@ Next steps (roughly in order of value):
   PNGs over `tests/golden/*/expected.png`, review and commit. It checks
   `browser.json` against the runner's Chrome
   (ignoring the generator line; a failure means Chrome changed or a vector
-  is stale), fuzzes each cargo-fuzz target for 15 min (`-rss_limit_mb=4096`) and builds the other
-  fuzz drivers. Nightly failures are reports to triage, not merge blockers.
+  is stale), fuzzes each cargo-fuzz target for 15 min (`-rss_limit_mb=4096`) and each
+  target of the other three drivers for 15 min (`fuzz-drivers`, driver ×
+  target; until 2026-11-12 it only compiled them — set up locally, not yet
+  seen green on a runner). Every `scripts/fuzz-<driver>.sh` exits non-zero
+  exactly when its driver saved a new crashing input; the job then uploads
+  `fuzz-artifacts-<driver>-<target>` (a tarball). Nightly failures are reports to triage, not merge blockers.
   Fuzz corpora persist across nights as GitHub caches
   (`fuzz-corpus-<target>-<run>`; restored from the newest, saved after
   every run, also after a crash) and are minimized with `cargo fuzz cmin`

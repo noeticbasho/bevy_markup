@@ -16,7 +16,7 @@ fn fuzz_ftl() {
     // Three fields, not one delimited buffer as in the byte-oriented
     // drivers: fuzzcheck's `Vec<u8>` mutator almost never produces the two
     // `\n---\n` delimiters, so every input returned before the library.
-    let _: fuzzcheck::FuzzingResult<Input> = fuzzcheck::fuzz_test(|input: &Input| {
+    let result: fuzzcheck::FuzzingResult<Input> = fuzzcheck::fuzz_test(|input: &Input| {
         let (ftl, id, args) = input;
         if ftl.len() + id.len() + args.len() > 64 * 1024 {
             return;
@@ -32,4 +32,5 @@ fn fuzz_ftl() {
     .default_sensor_and_pool_with_custom_filter(common::observed)
     .arguments_from_cargo_fuzzcheck()
     .launch();
+    common::finish(result);
 }

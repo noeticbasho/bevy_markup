@@ -13,12 +13,15 @@ case "${1:-}" in
     *) echo "usage: $0 <html|css|ftl> [seconds=60]" >&2; exit 2 ;;
 esac
 duration=${2:-60}
+# CI pins a dated nightly (BEVY_MARKUP_NIGHTLY, see nightly.yml); locally, the
+# current nightly.
+toolchain=${BEVY_MARKUP_NIGHTLY:-nightly}
 
 export HFUZZ_BUILD_ARGS='--manifest-path honggfuzz/Cargo.toml --config target.x86_64-unknown-linux-gnu.linker="cc"'
 # Build first (unbounded: a cold build can exceed the run budget); the
 # timeout then bounds only the run. `timeout` exits 124 when the budget
 # elapses — that is a normal, successful end for a fuzz campaign.
-cargo +nightly hfuzz build --bin "$target"
+cargo "+$toolchain" hfuzz build --bin "$target"
 # honggfuzz keeps fuzzing after a crash and writes each one as a `*.fuzz`
 # file in the target's workspace, so the exit status says nothing about
 # crashes: count the files before and after (earlier runs' crashes are
@@ -28,7 +31,7 @@ crashes() {
 }
 before=$(crashes)
 set +e
-timeout "$duration" cargo +nightly hfuzz run "$target"
+timeout "$duration" cargo "+$toolchain" hfuzz run "$target"
 status=$?
 set -e
 after=$(crashes)

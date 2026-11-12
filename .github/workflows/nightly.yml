@@ -315,28 +315,97 @@ jobs:
           if-no-files-found: ignore
 
   fuzz-drivers:
-    name: Other fuzz drivers build
+    name: Fuzz ${{ matrix.target }} (${{ matrix.driver }}, 15 min)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
+    # The other three drivers over the same harnesses (AGENTS.md, Testing
+    # TODO 5). Until 2026-11-12 this job only compiled them. Each driver's
+    # tools and build come from its `fuzz-<driver>` cache (cache.yml, built
+    # by the same scripts/fuzz-setup.sh); the working corpus carries over
+    # between nights like the cargo-fuzz jobs'.
+    strategy:
+      fail-fast: false
+      matrix:
+        driver: [honggfuzz, fuzzcheck, test-fuzz]
+        target: [html, css, ftl]
+        include: # = cache.yml `fuzz-drivers`
+          - driver: honggfuzz
+            workspaces: honggfuzz -> ../hfuzz_target
+            corpus: hfuzz_workspace/TARGET/input
+            crashes: hfuzz_workspace/TARGET
+          - driver: fuzzcheck
+            workspaces: fuzzcheck
+            corpus: fuzzcheck/fuzz/fuzz_TARGET/corpus
+            crashes: fuzzcheck/fuzz/fuzz_TARGET/artifacts
+          - driver: test-fuzz
+            workspaces: test-fuzz
+            # AFL++ as `cargo afl config --build` leaves it.
+            directories: ~/.local/share/afl.rs
+            # AFL's queue isn't carried over: each night starts from the
+            # seeds the crate's `cargo test` run records.
+            corpus: ""
+            crashes: test-fuzz/target/afl/output
+    env:
+      # honggfuzz kills an input after 1 s by default; the runner is slower
+      # than the machines its harness was tuned on. = cargo-fuzz's -timeout.
+      HFUZZ_RUN_ARGS: -t 10
     steps:
       - uses: actions/checkout@v7
       - name: Install the honggfuzz build dependencies
+        if: matrix.driver == 'honggfuzz'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends binutils-dev libunwind-dev liblzma-dev
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.BEVY_MARKUP_NIGHTLY }}
-      - uses: Swatinem/rust-cache@v2
+      - id: cache
+        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            honggfuzz
-            test-fuzz
-            fuzzcheck
-      - name: honggfuzz
-        run: cargo check --manifest-path honggfuzz/Cargo.toml --all-targets
-      - name: test-fuzz
-        run: cargo check --manifest-path test-fuzz/Cargo.toml --all-targets
-      - name: fuzzcheck
-        working-directory: fuzzcheck
-        run: cargo check --tests
+          shared-key: fuzz-${{ matrix.driver }}
+          workspaces: ${{ matrix.workspaces }}
+          cache-directories: ${{ matrix.directories }}
+          save-if: false
+      - name: Warn on a build-cache miss
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: echo "::warning::no exact 'fuzz-${{ matrix.driver }}' build cache (dependencies or toolchain changed since cache.yml last ran, or this job's env differs from cache.yml's); installing the tools and building from scratch"
+      - name: Install the driver's tools and build its targets (nothing to do on a cache hit)
+        run: scripts/fuzz-setup.sh ${{ matrix.driver }}
+      - id: paths
+        name: Resolve this target's corpus and crash paths
+        run: |
+          corpus='${{ matrix.corpus }}'
+          crashes='${{ matrix.crashes }}'
+          echo "corpus=${corpus//TARGET/${{ matrix.target }}}" >> "$GITHUB_OUTPUT"
+          echo "crashes=${crashes//TARGET/${{ matrix.target }}}" >> "$GITHUB_OUTPUT"
+      - name: Restore the corpus from the last run
+        if: steps.paths.outputs.corpus != ''
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ steps.paths.outputs.corpus }}
+          key: fuzz-corpus-${{ matrix.driver }}-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: fuzz-corpus-${{ matrix.driver }}-${{ matrix.target }}-
+      # Each script exits non-zero when its driver saved a new crashing
+      # input (and only then: a time budget that runs out is success).
+      - name: Fuzz
+        run: scripts/fuzz-${{ matrix.driver }}.sh ${{ matrix.target }} 900
+      - name: Save the corpus for the next run
+        if: always() && steps.paths.outputs.corpus != ''
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ steps.paths.outputs.corpus }}
+          key: fuzz-corpus-${{ matrix.driver }}-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+      # As a tarball: AFL's file names hold `:`, which artifacts refuse.
+      - name: Pack crashing inputs
+        if: failure()
+        run: |
+          if [ -e "${{ steps.paths.outputs.crashes }}" ]; then
+            tar -czf fuzz-crashes.tar.gz "${{ steps.paths.outputs.crashes }}"
+          fi
+      - name: Upload crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-artifacts-${{ matrix.driver }}-${{ matrix.target }}
+          path: fuzz-crashes.tar.gz
+          if-no-files-found: ignore

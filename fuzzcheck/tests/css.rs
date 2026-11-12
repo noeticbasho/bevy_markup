@@ -10,7 +10,7 @@ mod common;
 
 #[test]
 fn fuzz_css() {
-    let _ = fuzzcheck::fuzz_test(|data: &Vec<u8>| {
+    let result = fuzzcheck::fuzz_test(|data: &Vec<u8>| {
         if data.len() > 64 * 1024 {
             return;
         }
@@ -22,4 +22,5 @@ fn fuzz_css() {
     .default_sensor_and_pool_with_custom_filter(common::observed)
     .arguments_from_cargo_fuzzcheck()
     .launch();
+    common::finish(result);
 }

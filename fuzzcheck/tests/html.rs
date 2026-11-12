@@ -16,7 +16,7 @@ fn fuzz_html() {
     // Two fields, not one delimited buffer as in the byte-oriented
     // drivers: fuzzcheck's `Vec<u8>` mutator almost never produces the
     // `\n---\n` delimiter, so the context stayed empty.
-    let _: fuzzcheck::FuzzingResult<Input> = fuzzcheck::fuzz_test(|input: &Input| {
+    let result: fuzzcheck::FuzzingResult<Input> = fuzzcheck::fuzz_test(|input: &Input| {
         let (source, context) = input;
         if source.len() + context.len() > 64 * 1024 {
             return;
@@ -31,4 +31,5 @@ fn fuzz_html() {
     .default_sensor_and_pool_with_custom_filter(common::observed)
     .arguments_from_cargo_fuzzcheck()
     .launch();
+    common::finish(result);
 }

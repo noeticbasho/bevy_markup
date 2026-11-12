@@ -1,7 +1,7 @@
 # Builds the dependency caches the scheduled workflows restore, once per
 # dependency or toolchain change instead of once per job: `mutants` for the
-# mutation shards (mutants.yml) and `fuzz` for the cargo-fuzz jobs
-# (nightly.yml). The CI `test` job produces the third, `dev`, which the
+# mutation shards (mutants.yml), `fuzz` for the cargo-fuzz jobs and
+# `fuzz-<driver>` for the other fuzz drivers' jobs (nightly.yml). The CI `test` job produces the third, `dev`, which the
 # golden job restores. Consumers only restore (`save-if: false`).
 #
 # Runs on every push to main and daily before the schedules. When the exact
@@ -118,3 +118,45 @@ jobs:
         run: |
           host=$(rustc -vV | sed -n 's/^host: //p')
           cargo "+$BEVY_MARKUP_NIGHTLY" fuzz build --target "$host"
+
+  fuzz-drivers:
+    name: ${{ matrix.driver }} build (pinned nightly)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env: # = nightly.yml
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      BEVY_MARKUP_NIGHTLY: nightly-2026-09-09 # = nightly.yml
+    strategy:
+      fail-fast: false
+      matrix:
+        include: # = nightly.yml `fuzz-drivers`
+          - driver: honggfuzz
+            workspaces: honggfuzz -> ../hfuzz_target
+          - driver: fuzzcheck
+            workspaces: fuzzcheck
+          - driver: test-fuzz
+            workspaces: test-fuzz
+            directories: ~/.local/share/afl.rs
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.BEVY_MARKUP_NIGHTLY }}
+      - id: cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: fuzz-${{ matrix.driver }}
+          workspaces: ${{ matrix.workspaces }}
+          cache-directories: ${{ matrix.directories }}
+      - name: Install the honggfuzz build dependencies
+        if: steps.cache.outputs.cache-hit != 'true' && matrix.driver == 'honggfuzz'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends binutils-dev libunwind-dev liblzma-dev
+      # The driver's cargo subcommands (into ~/.cargo/bin, which rust-cache
+      # saves) and every target, built as scripts/fuzz-<driver>.sh runs it.
+      - name: Install the driver's tools and build its targets
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: scripts/fuzz-setup.sh ${{ matrix.driver }}

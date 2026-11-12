@@ -21,7 +21,7 @@ reasons behind each piece; this file is the how-to.
 | Regenerate CSS/layout oracle data | `scripts/browser_oracle.py [tests/vectors/<name>]` | ~1 s/vector |
 | Regenerate Fluent oracle data | `scripts/fluent_oracle.sh [tests/vectors/<name>]` | <1 s |
 | Fuzz one target | `scripts/fuzz-libfuzzer.sh <html\|css\|ftl> [seconds]` | 60 s default |
-| Other fuzzers | `scripts/fuzz-{honggfuzz,fuzzcheck,test-fuzz}.sh <target> [seconds]` | |
+| Other fuzzers | `scripts/fuzz-{honggfuzz,fuzzcheck,test-fuzz}.sh <target> [seconds]` | each exits non-zero only on a new crashing input |
 | Mutation testing | `scripts/mutants.sh [--full] [--file src/x.rs]` | ~15 min full run (estimate) |
 | Coverage per layer | `scripts/coverage.py [--html] [--layer NAME]` | ~1.5 min warm |
 
@@ -582,8 +582,10 @@ reporting upstream or removing a vendored patch.
 - `nightly.yml`: golden images on Ubuntu's lavapipe (the canonical
   renderer; a manual `Update golden references (lavapipe)` job,
   workflow_dispatch only, re-records the references on it), the browser
-  oracle against the runner's Chrome, 15 min of cargo-fuzz per target (RSS limit raised to 4 GB), and builds of
-  the other fuzz drivers. Failures are reports to triage, not blockers. The
+  oracle against the runner's Chrome, 15 min of cargo-fuzz per target (RSS limit raised to 4 GB), and 15 min
+  per target of honggfuzz, fuzzcheck and test-fuzz (`fuzz-drivers`; a job
+  fails when its script reports a new crashing input and uploads
+  `fuzz-artifacts-<driver>-<target>`). Failures are reports to triage, not blockers. The
   fuzz corpora carry over between nights (GitHub cache
   `fuzz-corpus-<target>-*`, minimized with `cargo fuzz cmin` on Sundays).
 - `mutants.yml` (Sundays and Wednesdays, 8 shards): informational. Survivors are in each
@@ -599,7 +601,8 @@ Shared build caches (`Swatinem/rust-cache` `shared-key`):
 |---|---|---|
 | `dev` | ci.yml `test` | nightly `golden`, `golden-update` |
 | `mutants` | cache.yml `mutants` | the 8 mutants shards |
-| `fuzz` | cache.yml `fuzz` | nightly `fuzz` (3 targets) |
+| `fuzz` | cache.yml `fuzz` | nightly `fuzz` (4 targets) |
+| `fuzz-honggfuzz`, `fuzz-fuzzcheck`, `fuzz-test-fuzz` | cache.yml `fuzz-drivers` (`scripts/fuzz-setup.sh <driver>`: the cargo subcommands in `~/.cargo/bin`, AFL++ for test-fuzz, every target built) | nightly `fuzz-drivers` (3 targets each) |
 
 Consumers restore with `save-if: false`; the producer builds only when the
 exact entry is missing and otherwise just restores it, which also keeps it
