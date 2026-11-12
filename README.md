@@ -230,10 +230,13 @@ underneath, and the reviews keep finding inputs they miss
   refused. A loop over your `TemplateContext` data counts once per element
   (the data you send is yours to size), and a loop over context data inside
   another may only run over the outer loop's element (`for card in
-  group.cards`). Rendered output is capped at `template::MAX_RENDERED_BYTES`.
+  group.cards`). `unique` charges its worst-case pairwise comparisons;
+  applying it to context-sized collections is refused because the work is
+  quadratic (deduplicate those in app code). Rendered output is capped at `template::MAX_RENDERED_BYTES`.
 - **Fluent files** are checked once when they load
   (`bevy_markup::ftl_check`): placeables and function calls nested deeper
-  than `MAX_FTL_NESTING`, and a broken `\u` escape in a string literal that
+  than `MAX_FTL_NESTING`, calls with more than `MAX_FTL_ARGUMENTS` (64)
+  arguments, and a broken `\u` escape in a string literal that
   would crash the Fluent parser, fail the bundle's load. No `[patch]` is
   needed in your app.
 - **CSS**: nesting, `var()` substitution, grid tracks and selector forms

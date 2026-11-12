@@ -2096,3 +2096,92 @@ fn a_handler_moved_focus_shows_its_state_the_same_frame() {
         "the handler's focus shows its state the same frame (state {state:?})"
     );
 }
+
+/// bug_0242: hidden controls must be absent from every focus entry path,
+/// not just Tab order; activation must reach the visible control.
+#[test]
+fn review_0009_hidden_controls_never_take_focus() {
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy::ui::auto_directional_navigation::AutoDirectionalNavigation;
+    for hidden in [
+        "<button id='hidden' style='display:none' autofocus data-on-click='hidden'>Hidden</button>",
+        "<div style='display:none'><button id='hidden' autofocus data-on-click='hidden'>Hidden</button></div>",
+        "<div style='visibility:hidden'><button id='hidden' autofocus data-on-click='hidden'>Hidden</button></div>",
+    ] {
+        let page = format!("{hidden}<button id='shown' data-on-click='shown'>Shown</button>");
+        let mut ui = TestUi::new("review9-hidden", &[("page.html", &page)]).spawn(
+            "page.html",
+            TemplateContext::new(),
+            Node::default(),
+        );
+        ui.settle();
+        ui.update(3);
+        let root = ui.root();
+        let shown = element_by_id(ui.world_mut(), root, "shown");
+        let hidden = element_by_id(ui.world_mut(), root, "hidden");
+        assert_eq!(ui.world_mut().resource::<InputFocus>().get(), Some(shown));
+        assert!(
+            ui.world_mut()
+                .get::<AutoDirectionalNavigation>(hidden)
+                .is_none()
+        );
+        ui.world_mut()
+            .run_system_once(move |mut focus: HtmlFocus| {
+                assert_eq!(focus.tab_order(), vec![shown]);
+                focus.activate(ActivationInput::Synthetic);
+            })
+            .unwrap();
+        ui.update(1);
+        assert_eq!(
+            ui.take_signals()
+                .iter()
+                .map(|s| s.name.as_ref())
+                .collect::<Vec<_>>(),
+            ["shown"]
+        );
+    }
+}
+
+#[test]
+fn review_0009_hiding_the_focused_control_repairs_focus() {
+    use bevy::ecs::system::RunSystemOnce;
+    for first_html in [
+        "<button id='first' autofocus data-on-click='first'>First</button>",
+        "<p><a id='first' href='next'>First</a></p>",
+    ] {
+        let page = format!(
+            "<div style='display:{{{{ display }}}}'>{first_html}</div><button id='second' data-on-click='second'>Second</button>"
+        );
+        let mut ui = TestUi::new("review9-hide-focused", &[("page.html", &page)]).spawn(
+            "page.html",
+            TemplateContext::new().with("display", "flex"),
+            Node::default(),
+        );
+        ui.settle();
+        let root = ui.root();
+        let first = element_by_id(ui.world_mut(), root, "first");
+        ui.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(first, FocusCause::Navigated);
+        ui.update(2);
+        assert_eq!(ui.world_mut().resource::<InputFocus>().get(), Some(first));
+        ui.world_mut()
+            .get_mut::<TemplateContext>(root)
+            .unwrap()
+            .insert("display", &"none");
+        ui.settle();
+        let second = element_by_id(ui.world_mut(), root, "second");
+        assert_eq!(ui.world_mut().resource::<InputFocus>().get(), Some(second));
+        ui.world_mut()
+            .run_system_once(|mut focus: HtmlFocus| focus.activate(ActivationInput::Synthetic))
+            .unwrap();
+        ui.update(1);
+        assert_eq!(
+            ui.take_signals()
+                .iter()
+                .map(|s| s.name.as_ref())
+                .collect::<Vec<_>>(),
+            ["second"]
+        );
+    }
+}

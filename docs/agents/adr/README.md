@@ -64,4 +64,6 @@ as `[INFERENCE]`.
 | [0045](./0045-ftl-checked-at-load.md) | Fluent resources are checked at load; the fluent-syntax fork goes | Accepted |
 | [0046](./0046-template-check-nesting-and-depth.md) | The template check: loops over context data nest only over their element; one depth budget | Accepted |
 
+| [0047](./0047-bound-quadratic-template-and-fluent-operations.md) | Bound quadratic template and Fluent operations before execution | Accepted |
+
 Add new records to this index in the same commit that adds the file.

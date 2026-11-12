@@ -11839,3 +11839,75 @@ fn the_plugin_keeps_existing_image_and_font_stores() {
         .insert(reserved.id(), Image::default())
         .expect("a handle from before the plugin still fits the store");
 }
+
+/// Review 0009's refusals must apply through the real asset loaders,
+/// before Tera renders or Fluent builds its resource.
+mod review_0009 {
+    use super::*;
+    use bevy::asset::LoadState;
+
+    #[test]
+    fn hostile_templates_fail_to_load() {
+        let key = "k".repeat(100_000);
+        let sources = [
+            "{% set_global s = 'x' %}{% for i in range(end=50) %}{% set_global s = s ~ s %}{% continue %}{% set_global s = '' %}{% endfor %}{{ s | length }}".to_owned(),
+            format!("{{% set m = {{'{key}': 1}} %}}{{% for k,v in m %}}{{% set s = k %}}{}{{{{ s | length }}}}{{% endfor %}}", "{% set s = s ~ s %}".repeat(8)),
+            "{% set x = range(end=40000) | unique %}{{ x | length }}".to_owned(),
+        ];
+        for (i, source) in sources.iter().enumerate() {
+            let mut ui = TestUi::new(&format!("review9-template-{i}"), &[("page.html", source)]);
+            let handle = ui.load::<HtmlTemplate>("page.html");
+            assert!(ui.wait_until(|ui| {
+                matches!(
+                    ui.world_mut()
+                        .resource::<AssetServer>()
+                        .load_state(handle.id()),
+                    LoadState::Loaded | LoadState::Failed(_)
+                )
+            }));
+            assert!(
+                ui.world_mut()
+                    .resource::<AssetServer>()
+                    .load_state(handle.id())
+                    .is_failed(),
+                "case {i} must fail before rendering"
+            );
+        }
+    }
+
+    #[test]
+    fn wide_fluent_calls_fail_to_load() {
+        let args = (0..20_000)
+            .map(|i| format!("a{i:06}: 0"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let source = format!("m = {{ FUNC({args}) }}");
+        let mut ui = TestUi::new(
+            "review9-ftl",
+            &[
+                (
+                    "bundle.ftl.ron",
+                    "(locale: \"en-US\", resources: [\"m.ftl\"])",
+                ),
+                ("m.ftl", &source),
+            ],
+        );
+        let handle = ui.load::<LocaleBundle>("bundle.ftl.ron");
+        assert!(ui.wait_until(|ui| {
+            matches!(
+                ui.world_mut()
+                    .resource::<AssetServer>()
+                    .load_state(handle.id()),
+                LoadState::Loaded | LoadState::Failed(_)
+            )
+        }));
+        let LoadState::Failed(error) = ui
+            .world_mut()
+            .resource::<AssetServer>()
+            .load_state(handle.id())
+        else {
+            panic!("wide call must fail the bundle load");
+        };
+        assert!(format!("{error:?}").contains("MAX_FTL_ARGUMENTS"));
+    }
+}

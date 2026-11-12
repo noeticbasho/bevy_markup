@@ -305,13 +305,15 @@ fn first_focusable_in_scope(
     navigable: &Query<(Entity, &HtmlElement, &Focusable), With<AutoDirectionalNavigation>>,
     children: &Query<&'static Children>,
     visibility: &Query<&Visibility>,
+    nodes: &Query<&Node>,
     parents: &Query<&ChildOf>,
     roots: &Query<(), With<HtmlUi>>,
 ) -> Option<Entity> {
     let in_scope = |entity: Entity| {
-        visible_in_hierarchy(entity, visibility, parents)
+        eligible(entity, visibility, nodes, parents, roots)
             && html_root(entity, parents, roots).is_some_and(|root| {
-                active_modal(roots_in_scope, visibility, parents).is_none_or(|modal| root == modal)
+                active_modal(roots_in_scope, visibility, nodes, parents)
+                    .is_none_or(|modal| root == modal)
             })
     };
     // Nothing is navigable: the walk below (a stack of every in-scope
@@ -400,9 +402,15 @@ fn remember_focus(
 fn active_modal(
     roots_in_scope: &Query<ScopeRoot, (With<HtmlUi>, Without<HtmlNoFocus>)>,
     visibility: &Query<&Visibility>,
+    nodes: &Query<&Node>,
     parents: &Query<&ChildOf>,
 ) -> Option<Entity> {
-    let visible = |entity| visible_in_hierarchy(entity, visibility, parents);
+    let visible = |entity| {
+        visible_in_hierarchy(entity, visibility, parents)
+            && nodes
+                .get(entity)
+                .is_ok_and(|node| node.display != Display::None)
+    };
     roots_in_scope
         .iter()
         .filter(|&(entity, modal, ..)| modal && visible(entity))
@@ -480,12 +488,13 @@ fn sync_navigation(
     mut commands: Commands,
 ) {
     let visible = |entity| visible_in_hierarchy(entity, &visibility, &parents);
-    let modal = active_modal(&roots_in_scope, &visibility, &parents);
+    let modal = active_modal(&roots_in_scope, &visibility, &nodes, &parents);
     for (entity, focusable, navigable, tab_index) in &elements {
-        let wanted = html_root(entity, &parents, &roots).is_some_and(|root| match modal {
-            Some(modal) => root == modal,
-            None => roots_in_scope.contains(root) && visible(root),
-        });
+        let wanted = eligible(entity, &visibility, &nodes, &parents, &roots)
+            && html_root(entity, &parents, &roots).is_some_and(|root| match modal {
+                Some(modal) => root == modal,
+                None => roots_in_scope.contains(root) && visible(root),
+            });
         // `try_`: the app may despawn the UI in the same frame (bug_0021).
         if wanted && !navigable {
             commands
@@ -496,8 +505,7 @@ fn sync_navigation(
                 .entity(entity)
                 .try_remove::<AutoDirectionalNavigation>();
         }
-        let tab_wanted = (wanted && !displayed_none(entity, &nodes, &parents, &roots))
-            .then(|| focusable.bevy_tab_index());
+        let tab_wanted = wanted.then(|| focusable.bevy_tab_index());
         if tab_wanted != tab_index.copied() {
             match tab_wanted {
                 Some(index) => commands.entity(entity).try_insert(index),
@@ -543,6 +551,19 @@ fn displayed_none(
     false
 }
 
+/// Display and visibility must agree for Tab, directional navigation and
+/// focus repair, including explicitly focused inline link spans.
+fn eligible(
+    entity: Entity,
+    visibility: &Query<&Visibility>,
+    nodes: &Query<&Node>,
+    parents: &Query<&ChildOf>,
+    roots: &Query<(), With<HtmlUi>>,
+) -> bool {
+    visible_in_hierarchy(entity, visibility, parents)
+        && !displayed_none(entity, nodes, parents, roots)
+}
+
 /// Puts focus back on a focusable element in scope when it isn't on one:
 /// the remembered element (same root and `id`), else the `autofocus`
 /// element, else the first one. Focus on another UI node (the app's own UI)
@@ -557,6 +578,7 @@ fn repair_focus(
     markup: Query<(), With<Focusable>>,
     targets: Query<(), With<ElementSignals>>,
     ui_nodes: Query<(), With<Node>>,
+    nodes: Query<&Node>,
     roots_in_scope: Query<ScopeRoot, (With<HtmlUi>, Without<HtmlNoFocus>)>,
     children: Query<&'static Children>,
     visibility: Query<&Visibility>,
@@ -568,9 +590,9 @@ fn repair_focus(
     // bindings but no box to navigate by) keeps the focus — but only in
     // scope: an open modal takes it, like it takes a navigable element's.
     let in_scope = |entity| {
-        visible_in_hierarchy(entity, &visibility, &parents)
+        eligible(entity, &visibility, &nodes, &parents, &roots)
             && html_root(entity, &parents, &roots).is_some_and(|root| {
-                active_modal(&roots_in_scope, &visibility, &parents)
+                active_modal(&roots_in_scope, &visibility, &nodes, &parents)
                     .is_none_or(|modal| root == modal)
             })
     };
@@ -604,6 +626,7 @@ fn repair_focus(
                 &navigable,
                 &children,
                 &visibility,
+                &nodes,
                 &parents,
                 &roots,
             )

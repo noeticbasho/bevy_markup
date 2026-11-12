@@ -135,6 +135,15 @@ Before 1.0, a minor version bump (0.2 → 0.3) may contain breaking changes.
   skipped (each costs the document's depth squared per element).
 
 ### Fixed
+- Template safety checks preserve bounds at `break`/`continue` exits and
+  include map keys in iteration bounds, closing two intermediate-value
+  memory-limit bypasses (bug_0239, bug_0240).
+- The template check charges `unique` for pairwise comparisons and refuses
+  it on context-sized collections; deduplicate those in app code
+  (bug_0241). Fluent calls with more than 64 arguments fail the bundle's
+  load before quadratic duplicate-name checks run (bug_0243, ADR 0047).
+- Hidden controls no longer receive initial, remembered or autofocus, and
+  hiding the focused control repairs focus to a visible one (bug_0242).
 - CSS: an `hsl()` or `hwb()` colour whose hue overflows to infinity
   (`hsl(1e39 50% 50%)`, `calc(infinity)`) panicked in debug builds — in a
   stylesheet, a `style` attribute or a context `var()` value. The

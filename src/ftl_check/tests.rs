@@ -218,3 +218,45 @@ proptest! {
         prop_assert_eq!(port_entries(&source), real_entries(&source), "{:?}", source);
     }
 }
+
+/// review_0009 M05 / bug_0243: wide calls are refused before the
+/// duplicate-name scan (here and in fluent-syntax) grows quadratically.
+#[test]
+fn review_0009_call_arguments_are_bounded() {
+    for named in [false, true] {
+        let call = |n: usize| {
+            let args = (0..n)
+                .map(|i| {
+                    if named {
+                        format!("a{i:06}: 0")
+                    } else {
+                        "0".into()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("m = {{ FUNC({args}) }}")
+        };
+        let accepted = call(MAX_FTL_ARGUMENTS);
+        assert_eq!(check(&accepted), Ok(()));
+        assert_eq!(port_entries(&accepted), real_entries(&accepted));
+        for n in [MAX_FTL_ARGUMENTS + 1, 20_000] {
+            assert_eq!(check(&call(n)), Err(FtlCheckError::TooManyArguments(1)));
+        }
+    }
+    // Nested calls each get their own width budget, as do separate calls.
+    let args = "0,".repeat(MAX_FTL_ARGUMENTS - 1) + "0";
+    let source = format!("m = {{ FUNC(FUNC({args}), FUNC({args})) }}\n");
+    assert_eq!(check(&source), Ok(()));
+    assert_eq!(port_entries(&source), real_entries(&source));
+    assert!(
+        check(&format!(
+            "m = text\nn = {{ -term({}) }}",
+            (0..65)
+                .map(|i| format!("a{i}: 0"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+        .is_err_and(|e| e == FtlCheckError::TooManyArguments(2))
+    );
+}

@@ -16,7 +16,9 @@ windowed build, ADR 0031: `J01`–`J09`),
 [review_0007](../reviews/review_0007.md) (the crate at `f76b320`: SVG,
 `<canvas>`, the selector engine: `K01`–`K18`) and
 [review_0008](../reviews/review_0008.md) (the crate at `54bad82`:
-review_0007's fixes, the template and FTL checks: `L01`–`L16`, open).
+review_0007's fixes, the template and FTL checks: `L01`–`L16`, fixed), and
+[review_0009](../reviews/review_0009.md) (`M01`–`M05`, fixed as
+bug_0239–0243; ADR 0047).
 A finding gets its
 own `bug_NNNN.md` here when its fix lands; review_0007's were filed
 up front, open, as bug_0204–0221 (on request, 2026-11-11), and all
@@ -278,6 +280,24 @@ immediately paid for themselves; bug_0006–0007: the Fluent oracle; bug_0008–
 | [bug_0236](bug_0236.md) | The FTL escape scan refuses bundles whose text holds `\u` before a non-ASCII letter | `src/ftl_check.rs` | low | fixed | review_0008 (L14) |
 | [bug_0237](bug_0237.md) | An inline `<svg>` refused for the raster memory budget on its task is never retried | `src/svg.rs` (`InlineSvgs`) | low | fixed | review_0008 (L16) |
 | [bug_0238](bug_0238.md) | An `hsl()`/`hwb()` hue that overflows to infinity panics the CSS parse in debug builds | `src/style.rs`, `src/cascade.rs` (lightningcss / cssparser-color, U45) | high | fixed | honggfuzz `css`, first nightly CI run |
+| [bug_0239](bug_0239.md) | Loop exits hide exponential template growth | `src/tera_check/analysis.rs` | high | fixed | review_0009 M01 |
+| [bug_0240](bug_0240.md) | Map iteration keys bypass the template value limit | `src/tera_check/analysis.rs` | high | fixed | review_0009 M02 |
+| [bug_0241](bug_0241.md) | Tera unique performs quadratic work charged as linear | `src/tera_check/analysis.rs`; Tera 2.4.0 `filters::unique` | medium (DoS) | fixed | review_0009 M03 |
+| [bug_0242](bug_0242.md) | Hidden controls receive focus and emit activation signals | `src/focus.rs` | medium | fixed | review_0009 M04 |
+| [bug_0243](bug_0243.md) | Wide Fluent calls make the safety check and parser quadratic | `src/ftl_check.rs`; fluent-syntax 0.11.1 | medium (DoS) | fixed | review_0009 M05 |
+
+## Discovery session metadata: bug_0239–0243 (2026-11-12)
+
+- **Method:** review_0009: actual template/FTL check modules imported into
+  a release executable and compared with Tera 2.4.0; real-loader and
+  focus/activation probes in the headless `TestUi`. The fix session added
+  eight regression tests and verified that all failed with fixes removed.
+- **Discovery agent:** GPT-6, via Codex.
+- **Commit at discovery:** `9811ccc5bf16ea4e1ca57bd3052fe21d4fc79975`.
+- **Fix:** the review_0009 fix commit following `7298cc8`.
+- **Machine/toolchain:** Linux 7.2.14-arch1-1, AMD Ryzen 7 9800X3D,
+  rustc 1.99.1 (58cf8f9c3 2026-10-13); Tera 2.4.0,
+  fluent-syntax 0.11.1, nom 8.0.0, Bevy 0.20.0.
 
 ## Discovery session metadata: bug_0238 (2026-11-12)
 

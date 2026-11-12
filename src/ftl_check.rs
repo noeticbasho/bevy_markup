@@ -1,8 +1,8 @@
 //! The load-time safety check of Fluent resources (ADR 0045, replacing
 //! the fluent-syntax fork of bug_0005 and bug_0015).
 //!
-//! FTL is untrusted (ADR 0044), and fluent-syntax 0.11.1 has two defects
-//! reachable from any resource (UPSTREAM U1, U2):
+//! FTL is untrusted (ADR 0044), and fluent-syntax 0.11.1 has three defects
+//! reachable from any resource (UPSTREAM U1, U2, U47):
 //!
 //! - an invalid `\u`/`\U` escape in a string literal, cut off by a
 //!   multi-byte character, panics (the error quotes one *byte* of that
@@ -16,6 +16,9 @@
 //!   position, so entries start and end where fluent-syntax's do) that
 //!   counts the active `{` and `(` levels, and refuses a resource past
 //!   [`MAX_FTL_NESTING`].
+//! - duplicate argument names are checked by a linear scan per argument,
+//!   in this port and upstream. Calls wider than [`MAX_FTL_ARGUMENTS`]
+//!   are refused before either scan can grow quadratically.
 //!
 //! It runs once per resource load (and hot reload), before
 //! `FluentResource::try_new`.
@@ -28,11 +31,16 @@ use std::fmt;
 /// translation nests more than a few.
 pub const MAX_FTL_NESTING: usize = 64;
 
+/// The most arguments in one call. Both this check and fluent-syntax
+/// compare each named argument to all preceding names (bug_0243).
+pub const MAX_FTL_ARGUMENTS: usize = 64;
+
 /// Why a resource was refused (with its 1-based line).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum FtlCheckError {
     TooDeep(usize),
     BadEscape(usize),
+    TooManyArguments(usize),
 }
 
 impl fmt::Display for FtlCheckError {
@@ -46,6 +54,10 @@ impl fmt::Display for FtlCheckError {
             Self::BadEscape(line) => write!(
                 f,
                 "line {line}: an incomplete \\u or \\U escape before a non-ASCII character"
+            ),
+            Self::TooManyArguments(line) => write!(
+                f,
+                "line {line}: a call has more than MAX_FTL_ARGUMENTS ({MAX_FTL_ARGUMENTS}) arguments"
             ),
         }
     }
@@ -66,18 +78,22 @@ pub(crate) fn check(source: &str) -> Result<(), FtlCheckError> {
         Ok(()) => Ok(()),
         Err(Stop::TooDeep(at)) => Err(FtlCheckError::TooDeep(line_of(source, at))),
         Err(Stop::BadEscape(at)) => Err(FtlCheckError::BadEscape(line_of(source, at))),
+        Err(Stop::TooManyArguments(at)) => {
+            Err(FtlCheckError::TooManyArguments(line_of(source, at)))
+        }
         Err(Stop::Error) => unreachable!("syntax errors become Junk"),
     }
 }
 
 /// How a parse step stopped: a syntax error (the entry becomes Junk, as in
 /// fluent-syntax), or a refusal that stops the whole check: the nesting
-/// limit, or an escape fluent-syntax would panic on (UPSTREAM U1).
+/// limit, call width, or an escape fluent-syntax would panic on (UPSTREAM U1).
 #[derive(Debug)]
 pub(crate) enum Stop {
     Error,
     TooDeep(usize),
     BadEscape(usize),
+    TooManyArguments(usize),
 }
 
 type Step<T> = std::result::Result<T, Stop>;
@@ -156,7 +172,7 @@ impl<'a> Parser<'a> {
     // ---- runtime.rs, core.rs -------------------------------------------
 
     /// `parse_runtime`; `Err` = a refusal ([`Stop::TooDeep`],
-    /// [`Stop::BadEscape`]) and its offset.
+    /// [`Stop::BadEscape`], [`Stop::TooManyArguments`]) and its offset.
     pub(crate) fn parse(&mut self) -> Step<()> {
         self.skip_blank_block();
         while self.ptr < self.length {
@@ -525,10 +541,15 @@ impl<'a> Parser<'a> {
         }
         self.enter()?;
         let mut names: Vec<&[u8]> = Vec::new();
+        let mut count = 0;
         self.skip_blank();
         while self.ptr < self.length {
             if self.is_current_byte(b')') {
                 break;
+            }
+            count += 1;
+            if count > MAX_FTL_ARGUMENTS {
+                return Err(Stop::TooManyArguments(self.ptr));
             }
             let expression = self.get_inline_expression(false)?;
             if let Inline::Message {

@@ -422,6 +422,9 @@ pub(super) struct Analyzer<'s> {
     /// [`Av::origin`]).
     app_loops: Vec<u32>,
     next_loop: u32,
+    /// Environments at exits from the innermost loop. Later statements
+    /// cannot erase a carried value's bound at `break`/`continue`.
+    loop_exits: Vec<Option<Env>>,
 }
 
 fn entry_expr(entry: &Entry) -> &Expr {
@@ -479,6 +482,7 @@ impl<'s> Analyzer<'s> {
             depth: 0,
             app_loops: Vec::new(),
             next_loop: 0,
+            loop_exits: Vec::new(),
         }
     }
 
@@ -675,7 +679,18 @@ impl<'s> Analyzer<'s> {
                     body,
                     else_body,
                 } => self.for_loop(key.as_deref(), value, target, body, else_body, env)?,
-                Node::Break | Node::Continue => Lin::default(),
+                Node::Break | Node::Continue => {
+                    self.work_on(env.size())?;
+                    if let Some(exit) = self.loop_exits.last_mut() {
+                        match exit {
+                            Some(exit) => exit.join(env),
+                            None => *exit = Some(env.clone()),
+                        }
+                    }
+                    // Keep walking to conservatively bound output/work,
+                    // but retain this exit's environment (bug_0239).
+                    Lin::default()
+                }
                 Node::If(condition, body, otherwise) => {
                     self.expr(condition, env)?;
                     self.work_on(env.size())?;
@@ -905,7 +920,7 @@ impl<'s> Analyzer<'s> {
         // The worst iteration: carried values at their bounds.
         let before = self.steps;
         env.loops.push(Self::loop_scope(key, value, element, count));
-        let out = self.nodes(body, env);
+        let out = self.loop_nodes(body, env);
         env.loops.pop();
         let out = out?;
         for (name, av) in finals {
@@ -918,6 +933,19 @@ impl<'s> Analyzer<'s> {
             self.charge(per_iteration.saturating_mul(count.c))?;
         }
         self.mul(count, &out)
+    }
+
+    /// Join the fallthrough and all early exits of one loop iteration,
+    /// including exits inside branches/captures/includes. Nested loops
+    /// have their own collector.
+    fn loop_nodes(&mut self, body: &'s [Node], env: &mut Env) -> Result<Lin, CheckError> {
+        self.loop_exits.push(None);
+        let out = self.nodes(body, env);
+        if let Some(exit) = self.loop_exits.pop().flatten() {
+            self.work_on(env.size().saturating_add(exit.size()))?;
+            env.join(&exit);
+        }
+        out
     }
 
     /// The bounds of the `carried` variables after the loop, or a refusal
@@ -964,7 +992,7 @@ impl<'s> Analyzer<'s> {
             .push(Self::loop_scope(key, value, element, count));
         let was = std::mem::replace(&mut self.symbolic, true);
         let steps = self.steps;
-        let result = self.nodes(body, &mut symbolic);
+        let result = self.loop_nodes(body, &mut symbolic);
         self.symbolic = was;
         self.steps = steps;
         result?;
@@ -1201,7 +1229,9 @@ impl<'s> Analyzer<'s> {
                         .add(&Lin::new(ITEM_BYTES + key.len() as u64));
                     out.items = out.items.add(&Lin::new(1));
                     out.num = out.num.max(&value.num);
-                    out.elem = out.elem.max(&value.bytes);
+                    // `for k,v in map` uses this bound for both the key
+                    // and the value (bug_0240).
+                    out.elem = out.elem.max(&value.bytes).max(&Lin::new(key.len() as u64));
                     named.insert(key.as_str(), value);
                 }
                 Entry::Spread(value) => {
@@ -1369,7 +1399,18 @@ impl<'s> Analyzer<'s> {
                 let sep = bytes_of("sep", 0).scale(ESCAPE);
                 Av::string(x.bytes.scale(ESCAPE).add(&self.mul(&x.items, &sep)?), false)
             }
-            "reverse" | "sort" | "unique" => Av { safe: false, ..x },
+            "unique" => {
+                // Tera 2.4 uses Vec::contains per item: distinct items
+                // require n(n-1)/2 comparisons, each scanning an element.
+                // Context-sized inputs would require A² work (bug_0241).
+                if x.items.k > 0 {
+                    return Err(CheckError::AppSquared);
+                }
+                let comparisons = x.items.c.saturating_mul(x.items.c.saturating_sub(1)) / 2;
+                self.charge(comparisons.saturating_mul(1 + x.elem.c / 16))?;
+                Av { safe: false, ..x }
+            }
+            "reverse" | "sort" => Av { safe: false, ..x },
             "first" | "last" | "nth" => x.element(),
             // A missing key gives the default (bug_0225).
             "get" => match arg("default") {

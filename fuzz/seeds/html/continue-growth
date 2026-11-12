@@ -1,0 +1,1 @@
+{% set_global s = 'x' %}{% for i in range(end=50) %}{% set_global s = s ~ s %}{% continue %}{% set_global s = '' %}{% endfor %}{{ s | length }}

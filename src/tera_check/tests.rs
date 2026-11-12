@@ -458,3 +458,64 @@ mod properties {
         }
     }
 }
+
+/// review_0009 M01 / bug_0239: a reset after an early exit cannot hide
+/// the value carried to the next iteration, including conditional exits.
+#[test]
+fn review_0009_loop_exits_preserve_carried_growth() {
+    for exit in [
+        "{% continue %}",
+        "{% if stop %}{% continue %}{% endif %}",
+        "{% if stop %}{% break %}{% endif %}",
+    ] {
+        let source = format!(
+            "{{% set_global s = 'x' %}}{{% for i in range(end=50) %}}{{% set_global s = s ~ s %}}{exit}{{% set_global s = '' %}}{{% endfor %}}{{{{ s | length }}}}"
+        );
+        assert_eq!(refused(&source), CheckError::Superlinear("s".into()));
+    }
+    // Exits still allow bounded counters, and an inner loop's exit does
+    // not become the outer loop's exit.
+    for source in [
+        "{% set_global n = 0 %}{% for i in range(end=20) %}{% set_global n = n + 1 %}{% continue %}{% endfor %}{{ n }}",
+        "{% set_global s = 'x' %}{% for i in range(end=20) %}{% for j in range(end=2) %}{% continue %}{% endfor %}{% set_global s = s ~ 'x' %}{% endfor %}{{ s }}",
+    ] {
+        assert!(check_one(source).is_ok(), "{source}");
+    }
+}
+
+/// review_0009 M02 / bug_0240: map keys are values in map iteration too.
+#[test]
+fn review_0009_map_keys_bound_iteration_values() {
+    let key = "k".repeat(100_000);
+    for map in [format!("{{'{key}': 1}}"), format!("{{...{{'{key}': 1}}}}")] {
+        let source = format!(
+            "{{% set m = {map} %}}{{% for k,v in m %}}{{% set s = k %}}{}{{{{ s | length }}}}{{% endfor %}}",
+            "{% set s = s ~ s %}".repeat(8)
+        );
+        assert_eq!(refused(&source), CheckError::ValueTooLarge);
+    }
+    // A small-key variant remains accepted and its real output fits.
+    let source = "{% for k,v in {'abcdef': 1} %}{{ k }}{% endfor %}";
+    let report = check_one(source).unwrap();
+    let mut tera = new_tera();
+    tera.add_raw_template("t.html", source).unwrap();
+    let rendered = tera.render("t.html", &tera::Context::new()).unwrap();
+    assert!(rendered.len() as u64 <= report.output.c);
+}
+
+/// review_0009 M03 / bug_0241: distinct items make `unique` quadratic.
+#[test]
+fn review_0009_unique_charges_comparisons() {
+    assert_eq!(
+        refused("{% set x = range(end=40000) | unique %}{{ x | length }}"),
+        CheckError::TooManySteps
+    );
+    assert_eq!(refused("{{ items | unique }}"), CheckError::AppSquared);
+    assert_eq!(
+        refused("{% for i in range(end=1000) %}{% set x = range(end=1000) | unique %}{% endfor %}"),
+        CheckError::TooManySteps
+    );
+    let report = check_one("{{ range(end=100) | unique | length }}").unwrap();
+    assert!(report.steps >= 100 * 99 / 2);
+    assert!(check_one("{{ [1,2,1] | unique }}").is_ok());
+}

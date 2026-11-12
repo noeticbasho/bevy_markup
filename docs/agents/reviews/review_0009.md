@@ -269,3 +269,16 @@ do not establish resource safety. Control-flow exits, map keys, and
 built-in operation costs need explicit adversarial coverage. All findings
 remain open in this report; no fixes or separate bug reports were filed
 during this review.
+
+
+## Fix disposition — 2026-11-12
+
+All five findings are fixed in the review_0009 fix commit following
+`7298cc8`, at the user's request. M01–M05 are filed respectively as
+[bug_0239](../bugs/bug_0239.md), [bug_0240](../bugs/bug_0240.md),
+[bug_0241](../bugs/bug_0241.md), [bug_0242](../bugs/bug_0242.md), and
+[bug_0243](../bugs/bug_0243.md). ADR 0047 records the quadratic-work
+refusals. Eight regression tests cover the checks, real asset loaders
+and focus/activation; all failed with their fixes removed and pass with
+the fixes. This disposition supersedes the original open status above;
+the original discovery observations are retained.

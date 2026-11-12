@@ -59,6 +59,8 @@ the issue may already be fixed or reported.
 | U43 | usvg 0.49 text layout (`text` feature) | `process_chunk` reshapes the whole chunk once per span and merges each span's glyphs into the first run with `glyphs.iter().position(…)` and `Vec::remove`/`insert`: spans × characters ([bug_0232](bug_0232.md)) | 4 000 one-character `<tspan>`s convert for 2.0 s (`svg-text`) | `svg_bounds` charges a `<text>` by its spans × characters | unreported |
 | U44 | fuzzcheck | The fuzzer unwraps `String::from_utf8` of every serialized input it keeps (for an assertion message) | a `ByteSerializer` target panics on its first non-UTF-8 input | vendored patch | unreported |
 | U45 | lightningcss 1.0.0-alpha.72 / cssparser-color 0.5.0 | An infinite `hsl()`/`hwb()` hue normalizes to NaN, and `hsl_to_rgb` `debug_assert!`s its hue range | panic at parse time in debug builds, from any CSS text ([bug_0238](bug_0238.md)) | `cascade::guarded_parse` (catch_unwind around the three lightningcss parses); the fuzz targets let it unwind (`fuzz::is_known_upstream_debug_panic`, pinned to cssparser-color 0.5.0) | unreported |
+| U46 | Tera 2.4.0 | `unique` compares every pair of distinct items ([bug_0241](bug_0241.md)) | unmodeled quadratic render work | charge comparisons, refuse context-sized `unique` (ADR 0047) | unreported |
+| U47 | fluent-syntax 0.11.1 | Duplicate named-argument scan is quadratic ([bug_0243](bug_0243.md)) | flat FTL call stalls resource loading | `MAX_FTL_ARGUMENTS` = 64 in the pre-check (ADR 0047) | unreported |
 
 Both are fixed in the fork [nchashch/fluent-rs](https://github.com/nchashch/fluent-rs):
 branch `fix/fuzzing-bugs` (on upstream `main`, 0.12; for the PR) and branch
@@ -1033,3 +1035,39 @@ CI clippy command and workspace tests pass on both.
 - **On a bump:** `fuzz::…::known_upstream_debug_panics_still_panic_as_excused`
   fails when the panic is gone or moved; drop the excuse (and consider
   dropping the guard) then.
+
+## U46 — Tera: `unique` checks all previously accepted values per item
+
+- **Project/version:** Tera 2.4.0, `src/filters.rs::unique`.
+- **Status:** unreported; observed in the installed version, latest
+  upstream release/default branch not checked in this fix session.
+- **Reproduction:** `{% set x = range(end=40000) | unique %}{{ x | length }}`
+  renders for about 2 seconds in release on the review machine, with
+  4× time per doubling. `Vec::contains` makes n(n−1)/2 comparisons for
+  distinct inputs. See [bug_0241](bug_0241.md).
+- **Local workaround:** `tera_check::Analyzer::filter` charges the pair
+  comparisons plus element scan cost and refuses context-sized inputs
+  (`AppSquared`). Small constant inputs are accepted (ADR 0047).
+- **PR sketch:** implement stable uniqueness with equality-compatible
+  hashing, or provide an enforceable comparison/work budget. Tera's own
+  comment says a simple ordered set does not preserve map semantics.
+- **On a bump:** inspect the new algorithm and its equality semantics
+  before reducing the cost charge or relaxing the refusal.
+
+## U47 — fluent-syntax: wide calls have quadratic duplicate-name scans
+
+- **Project/version:** fluent-syntax 0.11.1,
+  `src/parser/expression.rs::get_call_arguments`.
+- **Status:** unreported; observed in the installed version, latest
+  upstream release/default branch not checked in this fix session.
+- **Reproduction:** `m = { FUNC(a000000: 0, a000001: 0, ...) }` with 20,000
+  distinct names. Every name is compared with all earlier names through
+  `argument_names.contains`. See [bug_0243](bug_0243.md); the port of
+  this scan in `ftl_check` reproduced 4× time per doubling in release.
+- **Local workaround:** the shared load-time checker refuses the 65th
+  argument of each call, before this upstream parser runs. The same
+  limit protects the port's scan, the fuzz harness and Markdown paths.
+- **PR sketch:** use a hash set for duplicate names while retaining the
+  ordered output vector and the current duplicate-name error position.
+- **On a bump:** compare the port with upstream again and reconsider
+  `MAX_FTL_ARGUMENTS` after both scans have bounded cost.

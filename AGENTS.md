@@ -101,7 +101,8 @@ src/
   fuzz.rs          (`fuzzing` feature, `#[doc(hidden)]`) the fuzz harness: the internal glue
                    called directly per input (html, css, ftl, svg targets)
   ftl_check.rs     (ADR 0045) the load-time FTL safety check: a port of fluent-syntax 0.11.1's
-                   `parse_runtime` counting nesting (`MAX_FTL_NESTING` 64, UPSTREAM U2) and
+                   `parse_runtime` counting nesting (`MAX_FTL_NESTING` 64, UPSTREAM U2),
+                   call width (`MAX_FTL_ARGUMENTS` 64, UPSTREAM U47), and
                    refusing, in its string-literal path, an escape cut off by a non-ASCII byte
                    (`Stop::BadEscape`, UPSTREAM U1; text isn't scanned, bug_0236);
                    `ftl_check/tests.rs` (the port vs fluent-syntax's entries, the escape
@@ -120,7 +121,10 @@ src/
                    `range` counts `RANGE_MAX`; building or scanning a value costs its bytes
                    ÷ 16 (bug_0227); `set_global` in a loop runs once with symbols and must
                    come out as constant + one copy per carried variable (linear growth;
-                   `carried` reaches component bodies, bug_0224); includes/`extends`+
+                   `carried` reaches component bodies, bug_0224; early-exit environments
+                   are joined at the loop boundary, bug_0239); map elements include
+                   key lengths (bug_0240); `unique` charges pairwise comparisons and
+                   refuses context-sized input (bug_0241, ADR 0047); includes/`extends`+
                    `super()`/components inline, recursion refused; `MAX_NESTING` 64,
                    `MAX_DEPTH` 96 (every level the analysis recurses through, ~14 KB each in
                    debug, bug_0223) and `MAX_ANALYSIS_WORK` 2²² bound the check itself).
@@ -740,7 +744,7 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
   (uncached). `opacity` multiplies down the tree in the computed `Style`
   (the `<html>` element reuses the root style, or its opacity would square)
   and fades text/span colors at spec time and box colors in `collect_node`.
-- fluent-syntax is upstream 0.11.1 (what `fluent` 0.16 requires). Two of
+- fluent-syntax is upstream 0.11.1 (what `fluent` 0.16 requires). Three of
   its bugs are reachable from any FTL asset, and `src/ftl_check.rs` (ADR
   0045) refuses the triggering resources at load, before
   `FluentResource::try_new` (the bundle loader, the fuzz harness, the
@@ -755,6 +759,9 @@ examples/assets/   the examples' content (AssetPlugin file_path; no fonts: syste
     (same pointer moves and errors, so Junk recovery restarts where
     fluent-syntax's does) counts the active `{` and `(` levels,
     `MAX_FTL_NESTING` = 64 (a 2 MB debug thread fits 192 select levels).
+  - bug_0243: duplicate named-argument checks were quadratic; each call
+    now allows at most `MAX_FTL_ARGUMENTS` = 64 arguments, bounding both
+    the port and fluent-syntax's scan (UPSTREAM U47, ADR 0047).
   `ftl_check::tests` compares the port's entries with fluent-syntax's on
   generated FTL and runs the real parser and resolver at the limit on 2 MB.
   The fork (`nchashch/fluent-rs` `fix/fuzzing-bugs-0.11`, proposed upstream
