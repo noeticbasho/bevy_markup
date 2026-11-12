@@ -164,6 +164,10 @@ CI clippy command and workspace tests pass on both.
   nothing.
 - **Local fix:** `fuzzcheck/vendor/fuzzcheck/src/code_coverage_sensor/mod.rs`:
   also keep `file.starts_with(current_dir)`.
+  That still observes only the harness crate (`fuzzcheck/`, ~50 counters):
+  the library is a path dependency above it. The harnesses pass their own
+  filter instead (`fuzzcheck/tests/common/mod.rs` `observed`, the
+  repository's `src/`; 2026-11-12).
 
 ## U6 — fuzzcheck: derive crate doesn't compile on current Rust
 

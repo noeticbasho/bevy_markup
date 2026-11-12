@@ -344,7 +344,7 @@ Input formats (bytes are decoded lossily, capped at 64 KiB):
 |---|---|---|
 | cargo-fuzz (libFuzzer + ASan) | `scripts/fuzz-libfuzzer.sh <target> [s]` | the main one; also nightly in CI. Passes `--target` (a prebuilt cargo-fuzz defaults to musl, which ASan rejects) |
 | honggfuzz | `scripts/fuzz-honggfuzz.sh <target> [s]` | vendored, patched crate; needs the linker override the script sets |
-| fuzzcheck | `scripts/fuzz-fuzzcheck.sh <target> [s]` | vendored, patched for LLVM 21+ coverage records |
+| fuzzcheck | `scripts/fuzz-fuzzcheck.sh <target> [s]` | vendored, patched for LLVM 21+ coverage records; the sensor observes the library's `src/` (`fuzzcheck/tests/common/mod.rs`) — a run's `cov: hit/total` near 50 means it is blind again |
 | test-fuzz (AFLplus) | `scripts/fuzz-test-fuzz.sh <target> [s]` | corpus seeds come from plain `cargo test` runs |
 
 All need a nightly toolchain. Crashes and working corpora live in gitignored

@@ -1554,6 +1554,14 @@ known gaps:
     counter-file filter relaxed (cargo passes absolute source paths).
     `fuzzcheck/.cargo/config.toml` overrides the repo's clang+mold linker,
     which cannot resolve `__start___llvm_prf_*` section symbols.
+    The harnesses build their sensor with `tests/common/mod.rs`
+    `observed` (bevy_markup's `src/`): `default_options()` observes only
+    files below the current directory — the harness crate's ~50 counters —
+    so until 2026-11-12 fuzzcheck mutated blind (check the `cov: hit/total`
+    of a run: ~1300 counters for `html`/`css`, ~460 for `ftl`). `html` and
+    `ftl` take their fields as a tuple of byte vectors, not one
+    `\n---\n`-delimited buffer: the `Vec<u8>` mutator never produced the
+    delimiters, so every `ftl` input returned before the library.
   - `test-fuzz` (`test-fuzz/`, AFLplus via `cargo-afl`; nightly):
     `cargo +nightly test-fuzz tests::fuzz_html` (from `test-fuzz/`). Corpus
     seeds are collected by ordinary `cargo test` runs (the `#[test_fuzz]`

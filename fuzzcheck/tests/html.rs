@@ -3,21 +3,32 @@
 //! fuzzcheck --test <name> fuzz_<name> --stop-after-duration 60` from this
 //! directory.
 use bevy_markup as _bevy_markup;
+use fuzzcheck::DefaultMutator;
+use fuzzcheck::SerdeSerializer;
+
+mod common;
+
+/// The template source and the context JSON.
+type Input = (Vec<u8>, Vec<u8>);
 
 #[test]
 fn fuzz_html() {
-    let _ = fuzzcheck::fuzz_test(|data: &Vec<u8>| {
-        if data.len() > 64 * 1024 {
+    // Two fields, not one delimited buffer as in the byte-oriented
+    // drivers: fuzzcheck's `Vec<u8>` mutator almost never produces the
+    // `\n---\n` delimiter, so the context stayed empty.
+    let _: fuzzcheck::FuzzingResult<Input> = fuzzcheck::fuzz_test(|input: &Input| {
+        let (source, context) = input;
+        if source.len() + context.len() > 64 * 1024 {
             return;
         }
-        let text = String::from_utf8_lossy(data);
-        let (source, context_json) = match text.split_once("\n---\n") {
-            Some((source, context)) => (source, context),
-            // No delimiter: render with an empty context.
-            None => (text.as_ref(), "{}"),
-        };
-        let _ = bevy_markup::fuzz::render_html(source, context_json);
+        let context = String::from_utf8_lossy(context);
+        // An empty second field: render with an empty context.
+        let context = if context.is_empty() { "{}" } else { &*context };
+        let _ = bevy_markup::fuzz::render_html(&String::from_utf8_lossy(source), context);
     })
-    .default_options()
+    .mutator(Input::default_mutator())
+    .serializer(SerdeSerializer::default())
+    .default_sensor_and_pool_with_custom_filter(common::observed)
+    .arguments_from_cargo_fuzzcheck()
     .launch();
 }
