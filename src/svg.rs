@@ -2210,6 +2210,11 @@ impl CostWalk {
 mod tests {
     use super::*;
 
+    /// How long a test waits for draws on the task pool. A wait, not a
+    /// speed bound: generous, because debug-build 4096² draws take seconds
+    /// each on a loaded CI runner (the 5 s these waits had ran out there).
+    const WAIT_FOR_DRAWS: std::time::Duration = std::time::Duration::from_secs(120);
+
     fn svg(width: u32, height: u32, body: &str) -> String {
         format!(
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}">{body}</svg>"#
@@ -2365,7 +2370,10 @@ mod tests {
         );
         // Drawn (on the task pool), then unshown for INLINE_KEEP_FRAMES:
         // the entries go, their bytes too.
-        for _ in 0..5000 {
+        // A wait, not a speed bound: four 64 MiB debug-build draws took
+        // more than the 5 s this allowed on a loaded CI runner.
+        let deadline = std::time::Instant::now() + WAIT_FOR_DRAWS;
+        while std::time::Instant::now() < deadline {
             app.update();
             let inline = app.world().resource::<InlineSvgs>();
             if inline.bytes.load(std::sync::atomic::Ordering::SeqCst) == 0 {
@@ -2517,7 +2525,8 @@ mod tests {
         }
         // Accepted for now: its size is known only once its task parsed it.
         assert!(inline.image(large.clone(), images).is_some());
-        for _ in 0..5000 {
+        let deadline = std::time::Instant::now() + WAIT_FOR_DRAWS;
+        while std::time::Instant::now() < deadline {
             let finished = inline
                 .inner
                 .lock()
@@ -2544,7 +2553,8 @@ mod tests {
             "not retried yet"
         );
         // The four go unshown: their bytes free, and the large text draws.
-        for _ in 0..5000 {
+        let deadline = std::time::Instant::now() + WAIT_FOR_DRAWS;
+        while std::time::Instant::now() < deadline {
             app.update();
             let inline = app.world().resource::<InlineSvgs>();
             if inline.bytes.load(std::sync::atomic::Ordering::SeqCst) == 0 {
@@ -3852,21 +3862,45 @@ mod tests {
     /// work, refused before the model's own pass runs.
     #[test]
     fn style_rules_count_as_work() {
-        let rules: String = (0..3000).map(|i| format!("q{i}{{r:1}}")).collect();
-        let source = svg(
-            64,
-            64,
-            &format!("<style>{rules}</style>{}", "<g/>".repeat(12_000)),
-        );
-        let start = std::time::Instant::now();
-        let result = parse(source.as_bytes());
+        // 10⁸ rule × element pairs; few rules, because parsing a sheet is
+        // itself quadratic in its length (U42, charged separately).
+        let rules: String = (0..1000).map(|i| format!("q{i}{{r:1}}")).collect();
+        let elements = "<g/>".repeat(100_000);
+        let source = svg(64, 64, &format!("<style>{rules}</style>{elements}"));
+        let best = |run: &dyn Fn()| {
+            (0..3)
+                .map(|_| {
+                    let start = std::time::Instant::now();
+                    run();
+                    start.elapsed()
+                })
+                .min()
+                .unwrap()
+        };
+        let refused = best(&|| {
+            let result = parse(source.as_bytes());
+            assert!(
+                matches!(result, Err(SvgError::TooLarge { .. })),
+                "{:?}",
+                result.err()
+            );
+        });
+        // The refusal comes before any matching: it costs what reading
+        // the document and the sheet costs, measured here, not the pairs
+        // (one pass over them alone takes tens of times longer). Relative,
+        // not wall time: a 2 s bound failed on a loaded CI runner
+        // (AGENTS.md, Gotchas).
+        let reading = best(&|| {
+            let document = roxmltree::Document::parse(&source).unwrap();
+            std::hint::black_box(document.descendants().count());
+            let mut sheet = simplecss::StyleSheet::new();
+            sheet.parse_more(&rules);
+            std::hint::black_box(sheet.rules.len());
+        });
         assert!(
-            matches!(result, Err(SvgError::TooLarge { .. })),
-            "{:?}",
-            result.err()
+            refused <= reading * 8,
+            "refusing took {refused:?}, reading the document {reading:?}"
         );
-        // The refusal comes before any matching (3.6 × 10⁷ pairs).
-        assert!(start.elapsed() < std::time::Duration::from_secs(2));
     }
 
     /// Generated hostile documents (ADR 0040/0042's guards, bug_0192–0198):
