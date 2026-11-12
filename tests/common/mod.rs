@@ -485,6 +485,27 @@ impl TestUi {
         self.root.expect("spawned")
     }
 
+    /// Updates until `done` holds — for work on Bevy's task pools (asset
+    /// loads, SVG draws) — and returns whether it came to hold. A wait, not
+    /// a speed bound: the pools are shared by every test in the binary, and
+    /// on a CI runner a small draw queues behind another test's 36 MB ones
+    /// for many seconds (iteration-capped waits of about a second ran out
+    /// there), so it gives up only after two minutes.
+    #[allow(dead_code)] // not every test binary exercises every helper
+    pub fn wait_until(&mut self, mut done: impl FnMut(&mut Self) -> bool) -> bool {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        loop {
+            if done(self) {
+                return true;
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            self.app.update();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+
     /// Runs `frames` app updates without waiting for anything (for checks
     /// that something does *not* happen).
     #[allow(dead_code)] // not every test binary exercises every helper

@@ -10549,21 +10549,16 @@ fn svg_images_load_through_img_and_border_image() {
     .spawn("page.html", TemplateContext::new(), Node::default());
     ui.settle();
     // The redraw runs on a task pool: wait for it before the dump.
-    for _ in 0..500 {
+    ui.wait_until(|ui| {
         let world = ui.world_mut();
         let mut spans = world.query::<&bevy::ui::widget::InlineImage>();
-        let drawn = spans.iter(world).any(|image| {
+        spans.iter(world).any(|image| {
             world
                 .resource::<Assets<Image>>()
                 .get(&image.image)
                 .is_some_and(|image| image.size() == UVec2::new(16, 4))
-        });
-        if drawn {
-            break;
-        }
-        ui.update(1);
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
+        })
+    });
     ui.assert_dump(
         r#"
 html-ui
@@ -10612,13 +10607,7 @@ fn hostile_svg_fails_its_load_and_the_page_builds() {
     let world = ui.world_mut();
     let server = world.resource::<AssetServer>().clone();
     let handle: Handle<Image> = server.load("bomb.svg");
-    for _ in 0..200 {
-        if server.load_state(&handle).is_failed() {
-            break;
-        }
-        ui.update(1);
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    ui.wait_until(|_| server.load_state(&handle).is_failed());
     let world = ui.world_mut();
     let server = world.resource::<AssetServer>().clone();
     let state = server.load_state(&handle);
@@ -10650,16 +10639,14 @@ fn an_svg_that_panics_the_renderer_fails_its_load() {
     ui.settle();
     let handle: Handle<Image> = ui.load("noisy.svg");
     let mut state = None;
-    for _ in 0..500 {
+    ui.wait_until(|ui| {
         let server = ui.world_mut().resource::<AssetServer>().clone();
         let now = server.load_state(&handle);
         if now.is_failed() || now.is_loaded() {
             state = Some(now);
-            break;
         }
-        ui.update(1);
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
+        state.is_some()
+    });
     let state = state.expect("the load finished");
     // Without overflow checks the arithmetic wraps and the image loads.
     assert!(state.is_failed() || !cfg!(debug_assertions), "{state:?}");
@@ -10735,13 +10722,14 @@ mod svg_display_size {
 
     /// Updates until the one image shows `size` (draws run on a task pool).
     fn shows(ui: &mut TestUi, size: UVec2) -> (UVec2, Vec2) {
-        for _ in 0..500 {
-            ui.update(1);
+        let mut found = None;
+        ui.wait_until(|ui| {
             let last = ui.world_mut().resource::<Shown>().last.clone();
-            if last.first().is_some_and(|(shown, _)| *shown == size) {
-                return last[0];
-            }
-            std::thread::sleep(std::time::Duration::from_millis(2));
+            found = last.first().copied().filter(|(shown, _)| *shown == size);
+            found.is_some()
+        });
+        if let Some(found) = found {
+            return found;
         }
         panic!(
             "never showed {size}: {:?}",
@@ -10852,16 +10840,12 @@ mod svg_display_size {
         // Until seven are drawn and nothing changes for a while (the draws
         // run on a task pool).
         let (mut stable, mut last) = (0, usize::MAX);
-        for _ in 0..3000 {
-            ui.update(1);
-            let now = drawn(&mut ui);
+        ui.wait_until(|ui| {
+            let now = drawn(ui);
             stable = if now == last { stable + 1 } else { 0 };
             last = now;
-            if now >= 7 && stable > 100 {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(2));
-        }
+            now >= 7 && stable > 100
+        });
         let shown = ui.world_mut().resource::<Shown>().last.clone();
         assert_eq!(drawn(&mut ui), 7, "{shown:?}");
         assert!(
@@ -11026,13 +11010,7 @@ html-ui
             r#"<p><svg width="128" height="128"><filter id="f"><feGaussianBlur stdDeviation="4"/></filter><rect width="128" height="128" fill="currentColor" filter="url(#f)"/></svg></p>"#,
             "p { color: #ff0000 }",
         );
-        for _ in 0..500 {
-            if !images(&mut ui).is_empty() {
-                break;
-            }
-            ui.update(1);
-            std::thread::sleep(std::time::Duration::from_millis(2));
-        }
+        ui.wait_until(|ui| !images(ui).is_empty());
         assert_eq!(images(&mut ui).len(), 1);
         ui.app_mut()
             .init_resource::<Blank>()
@@ -11140,16 +11118,11 @@ html-ui
         .spawn("page.html", TemplateContext::new(), Node::default());
         ui.world_mut().insert_resource(UiScale(2.0));
         ui.settle();
-        for _ in 0..500 {
-            if images(&mut ui)
+        ui.wait_until(|ui| {
+            images(ui)
                 .first()
                 .is_some_and(|(size, _)| *size == UVec2::new(40, 20))
-            {
-                break;
-            }
-            ui.update(1);
-            std::thread::sleep(std::time::Duration::from_millis(2));
-        }
+        });
         assert_eq!(
             images(&mut ui).first().map(|(size, _)| *size),
             Some(UVec2::new(40, 20))
@@ -11535,10 +11508,7 @@ mod svg_text {
         world
             .resource_mut::<FontFamilies>()
             .insert("Late", FontFaces::new(late));
-        for _ in 0..300 {
-            ui.update(1);
-            std::thread::sleep(std::time::Duration::from_millis(2));
-        }
+        ui.wait_until(|ui| ui.world_mut().resource::<Modified>().0.contains(&file.id()));
         let world = ui.world_mut();
         assert!(
             world.resource::<Modified>().0.contains(&file.id()),
@@ -11619,16 +11589,14 @@ mod svg_css_images {
     }
 
     fn until(ui: &mut TestUi, size: UVec2) -> bevy::ui::widget::NodeImageMode {
-        for _ in 0..500 {
-            if let Some((shown, mode)) = shown(ui)
-                && shown == size
-            {
-                return mode;
-            }
-            ui.update(1);
-            std::thread::sleep(std::time::Duration::from_millis(2));
-        }
-        panic!("never showed {size}: {:?}", shown(ui));
+        let mut found = None;
+        ui.wait_until(|ui| {
+            found = shown(ui)
+                .filter(|(shown, _)| *shown == size)
+                .map(|(_, mode)| mode);
+            found.is_some()
+        });
+        found.unwrap_or_else(|| panic!("never showed {size}: {:?}", shown(ui)))
     }
 
     const FRAMED: &str = "html { color: #ffffff } .box { border-image: url(frame.svg) 25% stretch; border-width: 4px; width: 100px; height: 50px }";
@@ -11720,16 +11688,12 @@ mod svg_css_images {
             Some((size, node.image_mode.clone()))
         };
         let mut mode = None;
-        for _ in 0..500 {
-            if let Some((size, shown_mode)) = shown(&mut ui)
-                && size == UVec2::new(80, 40)
-            {
-                mode = Some(shown_mode);
-                break;
-            }
-            ui.update(1);
-            std::thread::sleep(std::time::Duration::from_millis(2));
-        }
+        ui.wait_until(|ui| {
+            mode = shown(ui)
+                .filter(|(size, _)| *size == UVec2::new(80, 40))
+                .map(|(_, mode)| mode);
+            mode.is_some()
+        });
         let Some(bevy::ui::widget::NodeImageMode::Sliced(slicer)) = mode else {
             panic!("never drawn at 80x40: {:?}", shown(&mut ui));
         };
